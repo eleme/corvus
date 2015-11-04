@@ -1,17 +1,18 @@
 CFLAGS=-Wall
-LDFLAGS=-ldeps -L../deps
 
-OBJ = hiredis.o \
-	  event.o \
-	  mbuf.o \
-	  socket.o \
-	  proxy.o \
-	  client.o \
-	  corvus.o \
-	  logging.o
+OBJ = event.o   \
+	  mbuf.o    \
+	  socket.o  \
+	  proxy.o   \
+	  client.o  \
+	  logging.o \
+	  command.o \
+	  parser.o  \
+	  hash.o    \
+	  corvus.o
 
 SRC = $(OBJ:%.o=%.c)
 
-corvus: $(OBJ) ../deps/libdeps.a
+corvus: $(OBJ)
 
 %.o: $(SRC)

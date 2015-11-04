@@ -7,11 +7,11 @@
 #include <stdbool.h>
 
 #ifndef STAILQ_LAST
-#define STAILQ_LAST(head, type, field) \
-    (STAILQ_EMPTY((head)) ? \
-     NULL : \
-     ((struct type *)(void *) \
-      ((char *)((head)->stqh_last) - (size_t)(&((struct type *)0)->field))))
+#define STAILQ_LAST(head, type, field)                       \
+    (STAILQ_EMPTY((head))                                    \
+     ?  NULL                                                 \
+     : ((struct type *)(void *) ((char *)((head)->stqh_last) \
+             - (size_t)(&((struct type *)0)->field))))
 #endif
 
 struct context;
@@ -23,6 +23,7 @@ struct mbuf {
     uint8_t            *last;   /* write marker */
     uint8_t            *start;  /* start of buffer (const) */
     uint8_t            *end;    /* end of buffer (const) */
+    int                refcount;
 };
 
 typedef void (*mbuf_copy_t)(struct mbuf *, void *);
@@ -58,5 +59,8 @@ struct mbuf *mbuf_split(struct context *, struct mbuf *, uint8_t*, mbuf_copy_t, 
 void mbuf_queue_insert(struct mhdr *, struct mbuf *);
 struct mbuf *mbuf_queue_top(struct context *, struct mhdr *);
 void mbuf_queue_init(struct mhdr *);
+void mbuf_inc_ref(struct mbuf *buf);
+void mbuf_dec_ref(struct mbuf *buf);
+void mbuf_dec_ref_by(struct mbuf *buf, int count);
 
 #endif

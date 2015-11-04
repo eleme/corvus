@@ -51,6 +51,7 @@ int event_register(struct event_loop *loop, struct connection *c)
     if (status < 0) {
         perror("event_register: epoll_ctl");
     }
+    c->registered = 1;
     return status;
 }
 

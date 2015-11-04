@@ -2,6 +2,7 @@
 #include <string.h>
 #include "mbuf.h"
 #include "corvus.h"
+#include "logging.h"
 
 static struct mbuf *_mbuf_get(struct context *ctx)
 {
@@ -67,6 +68,7 @@ struct mbuf *mbuf_get(struct context *ctx)
 
     mbuf->pos = mbuf->start;
     mbuf->last = mbuf->start;
+    mbuf->refcount = 0;
 
     return mbuf;
 }
@@ -155,4 +157,21 @@ struct mbuf *mbuf_queue_top(struct context *ctx, struct mhdr *mhdr)
         return buf;
     }
     return STAILQ_LAST(mhdr, mbuf, next);
+}
+
+void mbuf_inc_ref(struct mbuf *buf)
+{
+    buf->refcount++;
+}
+
+void mbuf_dec_ref(struct mbuf *buf)
+{
+    buf->refcount--;
+    LOG(DEBUG, "%d dec ref", buf->refcount);
+}
+
+void mbuf_dec_ref_by(struct mbuf *buf, int count)
+{
+    buf->refcount -= count;
+    LOG(DEBUG, "%d dec ref", buf->refcount);
 }

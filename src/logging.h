@@ -6,6 +6,8 @@
 
 #define MAX_LOG_LEN 1024
 
+#define LOG(...) logger(__FILE__, __LINE__, __VA_ARGS__)
+
 enum {
     DEBUG,
     INFO,
@@ -16,7 +18,7 @@ enum {
 struct context;
 
 void log_init(struct context *ctx);
-void logger(int level, const char *fmt, ...);
+void logger(const char *file, int line, int level, const char *fmt, ...);
 void log_destroy();
 
 #endif /* end of include guard: __LOGGING_H */

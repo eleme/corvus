@@ -1,12 +1,6 @@
-DEPS=./deps
-
 default: build
 
-%.o: $(DEPS)/read.c $(DEPS)/sds.c
-$(DEPS)/libdeps.a: $(DEPS)/read.o $(DEPS)/sds.o
-	$(AR) $(ARFLAGS) $@ $^
-
-build: $(DEPS)/libdeps.a
+build:
 	cd src && $(MAKE)
 	@mv src/corvus .
 
