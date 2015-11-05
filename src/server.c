@@ -23,13 +23,12 @@ static int on_write(struct connection *server, struct cmd_tqh *queue)
         return -1;
     }
 
-    LOG(DEBUG, "server write to redis");
     status = socket_write(server->fd, iov.data, iov.len);
     free(iov.data);
     if (status != CORVUS_AGAIN) {
-        STAILQ_REMOVE_HEAD(queue, next);
+        STAILQ_REMOVE_HEAD(queue, ready_next);
         if (status != CORVUS_ERR) {
-            STAILQ_INSERT_TAIL(&server->waiting_queue, cmd, next);
+            STAILQ_INSERT_TAIL(&server->waiting_queue, cmd, waiting_next);
         }
     }
     return 0;
@@ -48,7 +47,7 @@ static void do_moved(struct command *cmd, struct redirect_info *info)
     if (server == NULL) {
         /* cmd_mark_fail(cmd); */
     }
-    STAILQ_INSERT_TAIL(&server->retry_queue, cmd, next);
+    STAILQ_INSERT_TAIL(&server->retry_queue, cmd, retry_next);
 
     switch (server->registered) {
         case 1: event_reregister(cmd->ctx->loop, server, E_WRITABLE | E_READABLE); break;
@@ -67,7 +66,7 @@ static int read_one_reply(struct connection *server)
     if (status == CORVUS_EOF) return CORVUS_EOF;
     if (status == CORVUS_AGAIN) return CORVUS_AGAIN;
 
-    STAILQ_REMOVE_HEAD(&server->waiting_queue, next);
+    STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
     if (status == CORVUS_ERR) {
         return CORVUS_ERR;
     }
@@ -112,8 +111,8 @@ static void ready(struct connection *self, struct event_loop *loop, uint32_t mas
         if (self->status == CONNECTED) {
             if (!STAILQ_EMPTY(&self->retry_queue)) {
                 if (on_write(self, &self->retry_queue) == -1) {}
-            } else if (!STAILQ_EMPTY(&self->cmd_queue)) {
-                if (on_write(self, &self->cmd_queue) == -1) {}
+            } else if (!STAILQ_EMPTY(&self->ready_queue)) {
+                if (on_write(self, &self->ready_queue) == -1) {}
             }
         } else {
             LOG(ERROR, "server not connected");

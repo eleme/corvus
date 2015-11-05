@@ -160,11 +160,15 @@ struct cmd_item {
     int type;
 };
 
+static const char *cmd_err = "-ERR protocol error\r\n";
+
 void cmd_init(struct context *ctx, struct command *cmd)
 {
     cmd->parse_done = 0;
     cmd->cmd_done = 0;
     cmd->cmd_done_count = 0;
+    cmd->cmd_fail = 0;
+    cmd->cmd_fail_count = 0;
     cmd->ctx = ctx;
     mbuf_queue_init(&cmd->buf_queue);
     mbuf_queue_init(&cmd->rep_queue);
@@ -172,12 +176,13 @@ void cmd_init(struct context *ctx, struct command *cmd)
     cmd->reader = NULL;
     cmd->cmd_count = 0;
     cmd->cmd_max_size = 0;
-    cmd->sub_cmds = NULL;
     cmd->parent = NULL;
     cmd->req_data = NULL;
     cmd->rep_data = NULL;
     cmd->client = NULL;
     cmd->slot = -1;
+
+    STAILQ_INIT(&cmd->sub_cmds);
 }
 
 static struct command *cmd_create(struct context *ctx)
@@ -198,13 +203,14 @@ static struct mbuf *cmd_get_buf(struct command *cmd)
     return buf;
 }
 
-static int cmd_get_type(struct pos_array *pos)
+static int cmd_get_type(struct command *cmd, struct pos_array *pos)
 {
     uint32_t hash = lookup3_hash(pos);
     int idx = hash % CMD_DIVIDER;
 
     struct cmd_info *item = &command_map[idx];
     if (item->value == -1 || item->hash != hash) return -1;
+    cmd->cmd_type = idx;
     return item->type;
 }
 
@@ -220,6 +226,16 @@ static int cmd_get_slot(struct command *cmd)
     return slot;
 }
 
+static int cmd_forward_mget(struct command *cmd)
+{
+    struct redis_data *data = cmd->req_data;
+    if (data->elements < 2) {
+        LOG(ERROR, "protocol error");
+        return -1;
+    }
+    return 0;
+}
+
 static int cmd_forward_basic(struct command *cmd)
 {
     int slot;
@@ -233,13 +249,25 @@ static int cmd_forward_basic(struct command *cmd)
     server = conn_get_server(ctx, slot);
     if (server == NULL) return -1;
 
-    STAILQ_INSERT_TAIL(&server->cmd_queue, cmd, next);
+    STAILQ_INSERT_TAIL(&server->ready_queue, cmd, ready_next);
     switch (server->registered) {
         case 1: event_reregister(ctx->loop, server, E_WRITABLE | E_READABLE); break;
         case 0: event_register(ctx->loop, server); break;
     }
     LOG(DEBUG, "register server event");
 
+    return 0;
+}
+
+static int cmd_forward_multi_key(struct command *cmd)
+{
+    switch (cmd->cmd_type) {
+        case CMD_MGET:
+            cmd_forward_mget(cmd);
+            break;
+        default:
+            return -1;
+    }
     return 0;
 }
 
@@ -250,6 +278,7 @@ int cmd_forward(struct command *cmd)
             if (cmd_forward_basic(cmd) == -1) return -1;
             break;
         case CMD_MULTI_KEY:
+            if (cmd_forward_multi_key(cmd) == -1) return -1;
             break;
         case CMD_PROXY:
             break;
@@ -274,7 +303,7 @@ static int cmd_parse_token(struct command *cmd)
     p = &f1->pos->items[0];
     LOG(DEBUG, "process command %.*s", p->len, p->str);
 
-    cmd->request_type = cmd_get_type(f1->pos);
+    cmd->request_type = cmd_get_type(cmd, f1->pos);
     if (cmd->request_type < 0) {
         LOG(WARN, "wrong command type, command %.*s", p->len, p->str);
         return -1;
@@ -337,11 +366,13 @@ struct redirect_info *cmd_parse_redirect(struct command *cmd)
 
 void cmd_mark_done(struct command *cmd)
 {
+    int done;
     struct command *parent = cmd->parent;
     cmd->cmd_done = 1;
     while (parent != NULL) {
         parent->cmd_done_count++;
-        if (parent->cmd_count == parent->cmd_done_count) {
+        done = parent->cmd_done_count + parent->cmd_fail_count;
+        if (parent->cmd_count == done) {
             parent->cmd_done = 1;
             parent = parent->parent;
         } else {
@@ -352,6 +383,7 @@ void cmd_mark_done(struct command *cmd)
 
 void cmd_gen_iovec(struct command *cmd, struct iov_data *iov, int type)
 {
+    int n;
     struct mbuf *b;
     struct buf_ptr *start, *end;
 
@@ -368,7 +400,12 @@ void cmd_gen_iovec(struct command *cmd, struct iov_data *iov, int type)
             return;
     }
 
-    int n = get_buf_count(start, end);
+    if (cmd->cmd_fail) {
+        n = 1;
+    } else {
+        n = get_buf_count(start, end);
+    }
+
     if (n <= 0) return;
     LOG(DEBUG, "buf count %d", n);
 
@@ -380,6 +417,14 @@ void cmd_gen_iovec(struct command *cmd, struct iov_data *iov, int type)
     }
 
     struct iovec *d = iov->data;
+
+    if (cmd->cmd_fail) {
+        d[iov->len].iov_base = (void*)cmd_err;
+        d[iov->len].iov_len = strlen(cmd_err);
+        iov->len++;
+        return;
+    }
+
     for (b = start->buf; b != end->buf && b != NULL;
             b = b->next.stqe_next, iov->len++)
     {
@@ -408,10 +453,10 @@ void cmd_gen_iovec(struct command *cmd, struct iov_data *iov, int type)
 /* cmd should be done */
 void cmd_make_iovec(struct command *cmd, struct iov_data *iov)
 {
-    int i;
     LOG(DEBUG, "cmd count %d", cmd->cmd_count);
-    for (i = 0; i < cmd->cmd_count; i++) {
-        cmd_gen_iovec(&cmd->sub_cmds[i], iov, CMD_REP);
+    struct command *c;
+    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
+        cmd_gen_iovec(c, iov, CMD_REP);
     }
 }
 
@@ -437,7 +482,7 @@ struct command *cmd_get_lastest(struct context *ctx, struct cmd_tqh *q)
     int new_cmd = 0;
 
     if (!STAILQ_EMPTY(q)) {
-        cmd = STAILQ_LAST(q, command, next);
+        cmd = STAILQ_LAST(q, command, cmd_next);
         if (cmd->parse_done) {
             new_cmd = 1;
         }
@@ -447,7 +492,7 @@ struct command *cmd_get_lastest(struct context *ctx, struct cmd_tqh *q)
 
     if (new_cmd) {
         cmd = cmd_create(ctx);
-        STAILQ_INSERT_TAIL(q, cmd, next);
+        STAILQ_INSERT_TAIL(q, cmd, cmd_next);
     }
     return cmd;
 }
@@ -462,29 +507,28 @@ int cmd_parse_req(struct command *cmd, struct mbuf *buf)
         if (parse(r) == -1) return CORVUS_ERR;
 
         if (reader_ready(r)) {
-            if (cmd->sub_cmds == NULL) {
-                cmd->sub_cmds = malloc(sizeof(struct command) * ARRAY_CHUNK_SIZE);
-                cmd->cmd_max_size = ARRAY_CHUNK_SIZE;
-            }
-
-            if (cmd->cmd_count >= cmd->cmd_max_size) {
-                cmd->sub_cmds = realloc(cmd->sub_cmds,
-                        (cmd->cmd_max_size + ARRAY_CHUNK_SIZE) * sizeof(struct command));
-                cmd->cmd_max_size += ARRAY_CHUNK_SIZE;
-            }
-
-            ncmd = &cmd->sub_cmds[cmd->cmd_count++];
-            cmd_init(cmd->ctx, ncmd);
+            ncmd = cmd_create(cmd->ctx);
             ncmd->parent = cmd;
             ncmd->client = cmd->client;
             ncmd->req_data = r->data;
             CMD_COPY_RANGE(&ncmd->req_buf[0], &ncmd->req_buf[1], r);
 
+            STAILQ_INSERT_TAIL(&cmd->sub_cmds, ncmd, sub_cmd_next);
+            cmd->cmd_count++;
+
             r->data = NULL;
             r->type = PARSE_BEGIN;
 
-            if (cmd_parse_token(ncmd) == -1) return CORVUS_ERR;
-            if (cmd_forward(ncmd) == -1) return CORVUS_ERR;
+            if (cmd_parse_token(ncmd) == -1) {
+                cmd->cmd_fail_count++;
+                ncmd->cmd_fail = 1;
+                continue;
+            }
+            if (cmd_forward(ncmd) == -1) {
+                cmd->cmd_fail_count++;
+                ncmd->cmd_fail = 1;
+                continue;
+            }
         }
     }
     return CORVUS_OK;
@@ -531,7 +575,7 @@ int cmd_read_request(struct command *cmd, int fd)
             if (n == 0) return CORVUS_OK;
             if (n == CORVUS_ERR) return CORVUS_ERR;
             if (n == CORVUS_AGAIN) return CORVUS_AGAIN;
-            if (cmd_parse_req(cmd, buf) == -1) {
+            if (cmd_parse_req(cmd, buf) == CORVUS_ERR) {
                 return CORVUS_ERR;
             }
         } while (!reader_ready(cmd->reader));

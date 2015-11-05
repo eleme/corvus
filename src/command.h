@@ -22,22 +22,29 @@ enum {
 STAILQ_HEAD(cmd_tqh, command);
 
 struct command {
-    STAILQ_ENTRY(command) next;
+    STAILQ_ENTRY(command) cmd_next;
+    STAILQ_ENTRY(command) ready_next;
+    STAILQ_ENTRY(command) waiting_next;
+    STAILQ_ENTRY(command) retry_next;
+    STAILQ_ENTRY(command) sub_cmd_next;
     struct mhdr buf_queue;
     struct mhdr rep_queue;
     struct context *ctx;
     struct reader *reader;
     int parse_done;
     int cmd_done;
+    int cmd_fail;
     int cmd_done_count;
+    int cmd_fail_count;
 
     int slot;
+    int cmd_type;
     int request_type;
     int response_type;
 
     int cmd_count;
     int cmd_max_size;
-    struct command *sub_cmds;
+    struct cmd_tqh sub_cmds;
     struct command *parent;
     struct redis_data *req_data;
     struct redis_data *rep_data;

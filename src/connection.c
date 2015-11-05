@@ -22,9 +22,10 @@ void conn_init(struct connection *conn, struct context *ctx)
     conn->ready = NULL;
     conn->registered = 0;
     memset(&conn->addr, 0, sizeof(conn->addr));
-    cmd_queue_init(&conn->cmd_queue);
-    cmd_queue_init(&conn->waiting_queue);
-    cmd_queue_init(&conn->retry_queue);
+    STAILQ_INIT(&conn->cmd_queue);
+    STAILQ_INIT(&conn->ready_queue);
+    STAILQ_INIT(&conn->waiting_queue);
+    STAILQ_INIT(&conn->retry_queue);
     STAILQ_INIT(&conn->data);
 }
 

@@ -8,24 +8,23 @@
 #include "logging.h"
 #include "event.h"
 #include "command.h"
-#include <assert.h>
 
-static int on_read(struct connection *client)
+static int on_write(struct connection *client)
 {
     int status;
     struct command *cmd = STAILQ_FIRST(&client->cmd_queue);
-    if (!cmd->cmd_done) return 0;
+    if (cmd->cmd_count != cmd->cmd_fail_count + cmd->cmd_done_count) return 0;
 
     struct iov_data iov = {.data = NULL, .max_size = 0, .len = 0};
     cmd_make_iovec(cmd, &iov);
     if (iov.len <= 0) {
         LOG(WARN, "no data to write");
-        STAILQ_REMOVE_HEAD(&client->cmd_queue, next);
+        STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
         return 0;
     }
     status = socket_write(client->fd, iov.data, iov.len);
     if (status == CORVUS_AGAIN) return 0;
-    STAILQ_REMOVE_HEAD(&client->cmd_queue, next);
+    STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
     free(iov.data);
     /* cmd_free(cmd); */
 
@@ -48,7 +47,7 @@ static void ready(struct connection *self, struct event_loop *loop, uint32_t mas
     if (mask & E_WRITABLE) {
         LOG(DEBUG, "client writable");
         if (!STAILQ_EMPTY(&self->cmd_queue)) {
-            on_read(self);
+            on_write(self);
         }
     }
 }

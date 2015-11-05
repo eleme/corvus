@@ -25,6 +25,7 @@ struct connection {
     int registered;
 
     struct cmd_tqh cmd_queue;
+    struct cmd_tqh ready_queue;
     struct cmd_tqh waiting_queue;
     struct cmd_tqh retry_queue;
 
