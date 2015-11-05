@@ -13,15 +13,13 @@
 
 #define CMD_DIVIDER 960
 
-#define CMD_COPY_RANGE(cmd, field, reader)          \
-do {                                                \
-    int ptr_bytes = sizeof(struct buf_ptr);         \
-    cmd->field = reader->data;                      \
-    memcpy(&cmd->start, &reader->start, ptr_bytes); \
-    memcpy(&cmd->end, &reader->end, ptr_bytes);     \
-    reader->data = NULL;                            \
-    memset(&reader->start, 0, ptr_bytes);           \
-    memset(&reader->end, 0, ptr_bytes);             \
+#define CMD_COPY_RANGE(start_buf, end_buf, reader) \
+do {                                               \
+    int bytes = sizeof(struct buf_ptr);            \
+    memcpy(start_buf, &reader->start, bytes);      \
+    memcpy(end_buf, &reader->end, bytes);          \
+    memset(&reader->start, 0, bytes);              \
+    memset(&reader->end, 0, bytes);                \
 } while (0)
 
 #define CMD_DEFINE(cmd, type) CMD_##cmd,
@@ -216,11 +214,6 @@ static int cmd_get_slot(struct command *cmd)
     struct redis_data *data = cmd->req_data;
     struct redis_data *cmd_key = data->element[1];
     struct pos_array *pos = cmd_key->pos;
-
-    if (pos->str_len <= 0) {
-        LOG(WARN, "command key empty");
-        return -1;
-    }
 
     slot = slot_get(pos);
     cmd->slot = slot;
@@ -484,14 +477,11 @@ int cmd_parse_req(struct command *cmd, struct mbuf *buf)
             cmd_init(cmd->ctx, ncmd);
             ncmd->parent = cmd;
             ncmd->client = cmd->client;
-
-            int ptr_bytes = sizeof(struct buf_ptr);
             ncmd->req_data = r->data;
-            memcpy(&ncmd->req_buf[0], &r->start, ptr_bytes);
-            memcpy(&ncmd->req_buf[1], &r->end, ptr_bytes);
+            CMD_COPY_RANGE(&ncmd->req_buf[0], &ncmd->req_buf[1], r);
+
             r->data = NULL;
-            memset(&r->start, 0, ptr_bytes);
-            memset(&r->end, 0, ptr_bytes);
+            r->type = PARSE_BEGIN;
 
             if (cmd_parse_token(ncmd) == -1) return CORVUS_ERR;
             if (cmd_forward(ncmd) == -1) return CORVUS_ERR;
@@ -512,14 +502,11 @@ int cmd_parse_rep(struct command *cmd, struct mbuf *buf)
         }
 
         if (reader_ready(r)) {
-            int ptr_bytes = sizeof(struct buf_ptr);
             cmd->rep_data = r->data;
-            memcpy(&cmd->rep_buf[0], &r->start, ptr_bytes);
-            memcpy(&cmd->rep_buf[1], &r->end, ptr_bytes);
+            CMD_COPY_RANGE(&cmd->rep_buf[0], &cmd->rep_buf[1], r);
+
             r->data = NULL;
             r->type = PARSE_BEGIN;
-            memset(&r->start, 0, ptr_bytes);
-            memset(&r->end, 0, ptr_bytes);
             break;
         }
     }

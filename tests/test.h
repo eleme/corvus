@@ -90,6 +90,7 @@ struct {
     unsigned int assertions;
 
     struct case_info current_case;
+    int run_event_flow;
 
     /* info to print about the most recent failure */
     const char *fail_file;
@@ -111,7 +112,14 @@ static int filter(const char *name, const char *filter)
 {
     size_t offset = 0;
     size_t filter_len = strlen(filter);
-    if (filter_len <= 0) return 1;
+    if (filter_len <= 0) {
+        if (!manager.run_event_flow &&
+                strncmp(name, "test_event_flow", 15) == 0)
+        {
+            return 0;
+        }
+        return 1;
+    }
 
     while (name[offset] != '\0') {
         if (name[offset] == filter[0]) {

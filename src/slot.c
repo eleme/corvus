@@ -180,8 +180,8 @@ uint16_t slot_get(struct pos_array *pos)
     uint32_t s, len, orig_len;
     uint8_t *str, *orig_str;
     uint16_t hash;
-    int h, found = 0, found_s = 0;
-    struct pos *changed_pos = NULL, *p, *items = pos->items;
+    int h, found = 0, found_s = 0, pos_len = pos->pos_len;
+    struct pos *changed_pos = NULL, *p, *start, *end, *items = pos->items;
 
     for (h = 0; h < pos->pos_len; h++) {
         p = &pos->items[h];
@@ -199,8 +199,10 @@ uint16_t slot_get(struct pos_array *pos)
                 if (s == len - 1) {
                     if (h + 1 >= pos->pos_len) goto end;
                     if ((p+1)->len <= 0 || (p+1)->str[0] == '}') goto end;
+                    start = p + 1;
                     found_s = 1;
                 } else {
+                    start = p;
                     changed_pos = p;
                     orig_len = p->len;
                     orig_str = p->str;
@@ -215,14 +217,19 @@ uint16_t slot_get(struct pos_array *pos)
     }
 end:
     if (found) {
-        pos->items = p;
-    } else if (changed_pos != NULL) {
+        end = &pos->items[pos_len - 1];
+        pos->items = start;
+        pos->pos_len = end - start + 1;
+        hash = crc16(pos) & 0x3FFF;
+        pos->items = items;
+        pos->pos_len = pos_len;
+        return hash;
+    }
+    if (changed_pos != NULL) {
         changed_pos->len = orig_len;
         changed_pos->str = orig_str;
     }
-     hash = crc16(pos) & 0x3FFF;
-     pos->items = items;
-     return hash;
+    return crc16(pos) & 0x3FFF;
 }
 
 struct node_info *slot_get_node_info(uint16_t slot)

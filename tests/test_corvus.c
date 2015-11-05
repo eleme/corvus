@@ -43,5 +43,5 @@ TEST(test_event_flow) {
 }
 
 TEST_CASE(test_corvus) {
-    /* RUN_TEST(test_event_flow); */
+    RUN_TEST(test_event_flow);
 }
