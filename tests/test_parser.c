@@ -30,19 +30,19 @@ TEST(test_nested_array) {
     ASSERT(d->elements == 3);
 
     struct redis_data *f1 = d->element[0];
-    ASSERT(f1->type == DATA_TYPE_STRING);
+    ASSERT(f1->type == REP_STRING);
     ASSERT(f1->pos->pos_len == 1);
     ASSERT(f1->pos->items[0].len == 3);
     ASSERT(strncmp("SET", (const char *)f1->pos->items[0].str, 3) == 0);
 
     struct redis_data *f2 = d->element[1];
-    ASSERT(f2->type == DATA_TYPE_ARRAY);
+    ASSERT(f2->type == REP_ARRAY);
     ASSERT(f2->elements == 1);
     ASSERT(f2->element[0]->pos->items[0].len == 5);
     ASSERT(strncmp("hello", (const char *)f2->element[0]->pos->items[0].str, 5) == 0);
 
     struct redis_data *f3 = d->element[2];
-    ASSERT(f3->type == DATA_TYPE_STRING);
+    ASSERT(f3->type == REP_STRING);
     ASSERT(f3->pos->items[0].len == 3);
     ASSERT(strncmp("123", (const char *)f3->pos->items[0].str, 3) == 0);
 
@@ -130,7 +130,7 @@ TEST(test_process_integer) {
     ASSERT(parse(r) != -1);
     ASSERT(r->ready == 1);
     ASSERT(r->data != NULL);
-    ASSERT(r->data->type == DATA_TYPE_INTEGER);
+    ASSERT(r->data->type == REP_INTEGER);
     ASSERT(r->data->integer == 40235);
 
     ASSERT(parse(r) != -1);
@@ -148,8 +148,8 @@ TEST(test_empty_array) {
     char data[] = "*0\r\n$5\r\nhello\r\n";
     size_t len = strlen(data);
 
-    buf.pos = data;
-    buf.last = data + len;
+    buf.pos = (uint8_t*)data;
+    buf.last = (uint8_t*)data + len;
     buf.end = buf.last;
 
     struct reader *r = reader_init(&ctx);
@@ -157,7 +157,7 @@ TEST(test_empty_array) {
 
     ASSERT(parse(r) != -1);
     ASSERT(r->ready == 1);
-    ASSERT(r->data->type == DATA_TYPE_ARRAY);
+    ASSERT(r->data->type == REP_ARRAY);
     ASSERT(r->data->elements == 0);
     ASSERT(r->data->element == NULL);
 
@@ -178,8 +178,8 @@ TEST(test_parse_simple_string) {
     size_t len1 = strlen(data1);
     size_t len2 = strlen(data2);
 
-    buf.pos = data1;
-    buf.last = data1 + len1;
+    buf.pos = (uint8_t*)data1;
+    buf.last = (uint8_t*)data1 + len1;
     buf.end = buf.last;
 
     struct reader *r = reader_init(&ctx);
@@ -189,8 +189,8 @@ TEST(test_parse_simple_string) {
 
     struct mbuf buf2;
 
-    buf2.pos = data2;
-    buf2.last = data2 + len2;
+    buf2.pos = (uint8_t*)data2;
+    buf2.last = (uint8_t*)data2 + len2;
     buf2.end = buf2.last;
 
     r->buf = &buf2;

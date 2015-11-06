@@ -23,7 +23,7 @@ TEST(test_parse_redirect) {
 
     struct pos_array pos = {.pos_len = 2, .items = items};
 
-    struct redis_data data = {.type = DATA_TYPE_ERROR, .pos = &pos};
+    struct redis_data data = {.type = REP_ERROR, .pos = &pos};
     struct command cmd = {.rep_data = &data};
 
     cmd_parse_redirect(&cmd);

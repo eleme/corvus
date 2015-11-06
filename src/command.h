@@ -69,6 +69,7 @@ struct redirect_info {
 
 struct iov_data {
     struct iovec *data;
+    void *ptr;
     int len;
     size_t max_size;
 };

@@ -27,7 +27,7 @@ do {                                               \
 
 #define CMD_DO(HANDLER)              \
     /* keys command */               \
-    HANDLER(DEL, BASIC)              \
+    HANDLER(DEL, COMPLEX)          \
     HANDLER(DUMP, BASIC)             \
     HANDLER(EXISTS, BASIC)           \
     HANDLER(EXPIRE, BASIC)           \
@@ -52,8 +52,8 @@ do {                                               \
     HANDLER(INCR, BASIC)             \
     HANDLER(INCRBY, BASIC)           \
     HANDLER(INCRBYFLOAT, BASIC)      \
-    HANDLER(MGET, MULTI_KEY)         \
-    HANDLER(MSET, MULTI_KEY)         \
+    HANDLER(MGET, COMPLEX)         \
+    HANDLER(MSET, COMPLEX)         \
     HANDLER(PSETEX, BASIC)           \
     HANDLER(RESTORE, BASIC)          \
     HANDLER(SET, BASIC)              \
@@ -150,7 +150,7 @@ enum {
 enum {
     CMD_UNIMPL,
     CMD_BASIC,
-    CMD_MULTI_KEY,
+    CMD_COMPLEX,
     CMD_PROXY,
 };
 
@@ -164,7 +164,10 @@ static const char *cmd_err = "-ERR protocol error\r\n";
 static const char *rep_err = "-ERR server error\r\n";
 static const char *rep_get = "*2\r\n$3\r\nGET\r\n";
 static const char *rep_set = "*3\r\n$3\r\nSET\r\n";
+static const char *rep_del = "*2\r\n$3\r\nDEL\r\n";
 static const char *rep_ok = "+OK\r\n";
+static const char *rep_one = ":1\r\n";
+static const char *rep_zero = ":0\r\n";
 
 void cmd_init(struct context *ctx, struct command *cmd)
 {
@@ -282,7 +285,7 @@ static void cmd_apply_range(struct command *cmd)
     cmd->req_buf[1].pos = last->last;
 }
 
-static int cmd_forward_mget(struct command *cmd)
+static int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len)
 {
     struct redis_data *key;
     struct redis_data *data = cmd->req_data;
@@ -303,7 +306,7 @@ static int cmd_forward_mget(struct command *cmd)
         ncmd->parent = cmd;
         ncmd->client = cmd->client;
 
-        mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, (uint8_t*)rep_get, strlen(rep_get));
+        mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, prefix, len);
         add_fragment(ncmd, key->pos);
         cmd_apply_range(ncmd);
 
@@ -342,7 +345,7 @@ static int cmd_forward_mset(struct command *cmd)
         ncmd->parent = cmd;
         ncmd->client = cmd->client;
 
-        mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, (uint8_t*)rep_set, strlen(rep_set));
+        mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, (uint8_t*)rep_set, 13);
         add_fragment(ncmd, key->pos);
         add_fragment(ncmd, value->pos);
         cmd_apply_range(ncmd);
@@ -359,14 +362,19 @@ static int cmd_forward_mset(struct command *cmd)
     return 0;
 }
 
-static int cmd_forward_multi_key(struct command *cmd)
+static int cmd_forward_complex(struct command *cmd)
 {
     switch (cmd->cmd_type) {
         case CMD_MGET:
-            if (cmd_forward_mget(cmd) == -1) return -1;
+            if (cmd_forward_multikey(cmd, (uint8_t*)rep_get, 13) == -1)
+                return -1;
             break;
         case CMD_MSET:
-            cmd_forward_mset(cmd);
+            if (cmd_forward_mset(cmd) == -1) return -1;
+            break;
+        case CMD_DEL:
+            if (cmd_forward_multikey(cmd, (uint8_t*)rep_del, 13) == -1)
+                return -1;
             break;
         default:
             return -1;
@@ -380,8 +388,8 @@ int cmd_forward(struct command *cmd)
         case CMD_BASIC:
             if (cmd_forward_basic(cmd) == -1) return -1;
             break;
-        case CMD_MULTI_KEY:
-            if (cmd_forward_multi_key(cmd) == -1) return -1;
+        case CMD_COMPLEX:
+            if (cmd_forward_complex(cmd) == -1) return -1;
             break;
         case CMD_PROXY:
             break;
@@ -393,16 +401,16 @@ int cmd_forward(struct command *cmd)
 
 static int cmd_parse_token(struct command *cmd)
 {
-    assert(cmd->req_data != NULL);
+    if (cmd->req_data == NULL) return -1;
 
     struct pos *p;
     struct redis_data *data = cmd->req_data;
 
-    assert(data->type == DATA_TYPE_ARRAY);
-    assert(data->elements > 0);
+    if (data->type != REP_ARRAY) return -1;
+    if (data->elements <= 0) return -1;
 
     struct redis_data *f1 = data->element[0];
-    assert(f1->type == DATA_TYPE_STRING);
+    if (f1->type != REP_STRING) return -1;
     p = &f1->pos->items[0];
     LOG(DEBUG, "process command %.*s", p->len, p->str);
 
@@ -558,6 +566,7 @@ void cmd_gen_mget_iovec(struct command *cmd, struct iov_data *iov)
     snprintf(b, sizeof(b), fmt, keys);
 
     iov_add(iov, (void*)b, n);
+    iov->ptr = b;
 
     struct command *c;
     STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
@@ -572,6 +581,11 @@ void cmd_gen_mset_iovec(struct command *cmd, struct iov_data *iov)
     int fail = 0;
     STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
         rep = c->rep_data;
+        if (cmd->cmd_fail || rep->type == REP_ERROR) {
+            fail = 1;
+            break;
+        }
+
         if (rep->pos == NULL) {
             fail = 1;
             break;
@@ -583,9 +597,35 @@ void cmd_gen_mset_iovec(struct command *cmd, struct iov_data *iov)
     }
     if (fail) {
         iov_add(iov, (void*)rep_err, strlen(rep_err));
-    } else {
-        iov_add(iov, (void*)rep_ok, strlen(rep_ok));
+        return;
     }
+    iov_add(iov, (void*)rep_ok, strlen(rep_ok));
+}
+
+void cmd_gen_del_iovec(struct command *cmd, struct iov_data *iov)
+{
+    struct command *c;
+    int one = 0, fail = 0;
+    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
+        if (c->cmd_fail || c->rep_data->type == REP_ERROR) {
+            fail = 1;
+            break;
+        }
+        if (c->rep_data->integer == 1) {
+            one = 1;
+            break;
+        }
+    }
+
+    if (fail) {
+        iov_add(iov, (void*)rep_err, strlen(rep_err));
+        return;
+    }
+    if (one) {
+        iov_add(iov, (void*)rep_one, 4);
+        return;
+    }
+    iov_add(iov, (void*)rep_zero, 4);
 }
 
 /* cmd should be done */
@@ -604,6 +644,9 @@ void cmd_make_iovec(struct command *cmd, struct iov_data *iov)
                 break;
             case CMD_MSET:
                 cmd_gen_mset_iovec(c, iov);
+                break;
+            case CMD_DEL:
+                cmd_gen_del_iovec(c, iov);
                 break;
             default:
                 cmd_create_iovec(&c->rep_buf[0], &c->rep_buf[1], iov);

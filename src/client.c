@@ -16,7 +16,9 @@ static int on_write(struct connection *client)
     LOG(DEBUG, "client %d %d", cmd->cmd_count, cmd->cmd_done_count);
     if (cmd->cmd_count != cmd->cmd_fail_count + cmd->cmd_done_count) return 0;
 
-    struct iov_data iov = {.data = NULL, .max_size = 0, .len = 0};
+    struct iov_data iov;
+    memset(&iov, 0, sizeof(struct iov_data));
+
     cmd_make_iovec(cmd, &iov);
     if (iov.len <= 0) {
         LOG(WARN, "no data to write");
@@ -24,9 +26,10 @@ static int on_write(struct connection *client)
         return 0;
     }
     status = socket_write(client->fd, iov.data, iov.len);
+    if (iov.ptr != NULL) free(iov.ptr);
+    free(iov.data);
     if (status == CORVUS_AGAIN) return 0;
     STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
-    free(iov.data);
     /* cmd_free(cmd); */
 
     if (status == CORVUS_ERR) return -1;

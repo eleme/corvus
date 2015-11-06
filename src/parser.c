@@ -44,11 +44,11 @@ static int stack_pop(struct reader *r)
     cur = &r->rstack[r->sidx--];
     top = &r->rstack[r->sidx];
     switch (top->type) {
-        case DATA_TYPE_UNKNOWN:
+        case REP_UNKNOWN:
             r->data = cur->data;
             cur->data = NULL;
             return 0;
-        case DATA_TYPE_ARRAY:
+        case REP_ARRAY:
             top->data->element[top->idx++] = cur->data;
             cur->data = NULL;
             top->elements--;
@@ -67,7 +67,7 @@ static int stack_push(struct reader *r)
     task->prev_buf = NULL;
     task->elements = -1;
     task->idx = 0;
-    task->type = DATA_TYPE_UNKNOWN;
+    task->type = REP_UNKNOWN;
     return 0;
 }
 
@@ -96,7 +96,7 @@ static struct pos_array *pos_array_get(struct reader_task *task, int type)
 {
     struct redis_data *data;
     switch (task->type) {
-        case DATA_TYPE_UNKNOWN:
+        case REP_UNKNOWN:
             if (task->data == NULL) {
                 task->data = data = redis_data_create(type);
                 data->pos = pos_array_create();
@@ -104,7 +104,7 @@ static struct pos_array *pos_array_get(struct reader_task *task, int type)
                 data = task->data;
             }
             return data->pos;
-        case DATA_TYPE_ARRAY:
+        case REP_ARRAY:
             if (task->cur_data != NULL) {
                 data = task->cur_data;
             } else {
@@ -122,18 +122,18 @@ static struct redis_data *integer_data_get(struct reader_task *task)
 {
     struct redis_data *data;
     switch (task->type) {
-        case DATA_TYPE_UNKNOWN:
+        case REP_UNKNOWN:
             if (task->data == NULL) {
-                task->data = data = redis_data_create(DATA_TYPE_INTEGER);
+                task->data = data = redis_data_create(REP_INTEGER);
             } else {
                 data = task->data;
             }
             return data;
-        case DATA_TYPE_ARRAY:
+        case REP_ARRAY:
             if (task->cur_data != NULL) {
                 data = task->cur_data;
             } else {
-                task->cur_data = data = redis_data_create(DATA_TYPE_INTEGER);
+                task->cur_data = data = redis_data_create(REP_INTEGER);
                 assert(task->idx < task->data->elements);
                 task->data->element[task->idx++] = data;
             }
@@ -200,9 +200,9 @@ static int process_array(struct reader *r)
     char c;
 
     struct reader_task *task = &r->rstack[r->sidx];
-    task->type = DATA_TYPE_ARRAY;
+    task->type = REP_ARRAY;
 
-    if (task->data == NULL) task->data = redis_data_create(DATA_TYPE_ARRAY);
+    if (task->data == NULL) task->data = redis_data_create(REP_ARRAY);
 
     for (; r->buf->pos < r->buf->last; r->buf->pos++) {
         p = r->buf->pos;
@@ -250,7 +250,7 @@ static int process_string(struct reader *r)
     size_t remain;
 
     struct reader_task *task = &r->rstack[r->sidx];
-    struct pos_array *arr = pos_array_get(task, DATA_TYPE_STRING);
+    struct pos_array *arr = pos_array_get(task, REP_STRING);
     if (arr == NULL) return -1;
 
     for (; r->buf->pos < r->buf->last; r->buf->pos++) {
@@ -428,11 +428,11 @@ int parse(struct reader *r)
                 if (process_integer(r) == -1) return -1;
                 break;
             case PARSE_SIMPLE_STRING:
-                if (process_simple_string(r, DATA_TYPE_SIMPLE_STRING) == -1)
+                if (process_simple_string(r, REP_SIMPLE_STRING) == -1)
                     return -1;
                 break;
             case PARSE_ERROR:
-                if (process_simple_string(r, DATA_TYPE_ERROR) == -1)
+                if (process_simple_string(r, REP_ERROR) == -1)
                     return -1;
                 break;
             case PARSE_END:

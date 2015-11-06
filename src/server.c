@@ -16,7 +16,8 @@ static int on_write(struct connection *server, struct cmd_tqh *queue)
 
     cmd = STAILQ_FIRST(queue);
 
-    struct iov_data iov = {.data = NULL, .max_size = 0, .len = 0};
+    struct iov_data iov;
+    memset(&iov, 0, sizeof(struct iov_data));
     cmd_create_iovec(&cmd->req_buf[0], &cmd->req_buf[1], &iov);
     if (iov.len <= 0) {
         LOG(WARN, "no data to write");
@@ -72,7 +73,7 @@ static int read_one_reply(struct connection *server)
     }
 
     switch (cmd->rep_data->type) {
-        case DATA_TYPE_ERROR:
+        case REP_ERROR:
             LOG(DEBUG, "error");
             struct redirect_info *info = cmd_parse_redirect(cmd);
             LOG(DEBUG, "redirect -> %s", info->addr);

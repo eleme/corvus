@@ -32,12 +32,12 @@ enum {
 };
 
 enum {
-    DATA_TYPE_UNKNOWN,
-    DATA_TYPE_ARRAY,
-    DATA_TYPE_STRING,
-    DATA_TYPE_INTEGER,
-    DATA_TYPE_SIMPLE_STRING,
-    DATA_TYPE_ERROR,
+    REP_UNKNOWN,
+    REP_ARRAY,
+    REP_STRING,
+    REP_INTEGER,
+    REP_SIMPLE_STRING,
+    REP_ERROR,
 };
 
 struct redis_data {
