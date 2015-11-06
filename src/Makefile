@@ -1,4 +1,5 @@
-CFLAGS=-Wall
+DEPS=../deps
+CFLAGS=-Wall -I$(DEPS)
 
 OBJ = event.o   \
 	  mbuf.o    \
