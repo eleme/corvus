@@ -72,14 +72,15 @@ static int read_one_reply(struct connection *server)
         return CORVUS_ERR;
     }
 
+    struct redirect_info info = {.addr = NULL, .type = CMD_ERR, .slot = -1};
     switch (cmd->rep_data->type) {
         case REP_ERROR:
             LOG(DEBUG, "error");
-            struct redirect_info *info = cmd_parse_redirect(cmd);
-            LOG(DEBUG, "redirect -> %s", info->addr);
-            switch (info->type) {
+            cmd_parse_redirect(cmd, &info);
+            LOG(DEBUG, "redirect -> %s", info.addr);
+            switch (info.type) {
                 case CMD_ERR_MOVED:
-                    do_moved(cmd, info);
+                    do_moved(cmd, &info);
                     break;
             }
             break;
@@ -89,6 +90,7 @@ static int read_one_reply(struct connection *server)
             event_reregister(server->ctx->loop, cmd->client, E_WRITABLE | E_READABLE);
             break;
     }
+    if (info.addr != NULL) free(info.addr);
     return CORVUS_OK;
 }
 

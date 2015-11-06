@@ -21,12 +21,16 @@ TEST(test_parse_redirect) {
     items[1].len = len2;
     items[1].str = (uint8_t*)data2;
 
-    struct pos_array pos = {.pos_len = 2, .items = items};
+    struct pos_array pos = {.str_len = len1 + len2, .pos_len = 2, .items = items};
 
     struct redis_data data = {.type = REP_ERROR, .pos = &pos};
     struct command cmd = {.rep_data = &data};
 
-    cmd_parse_redirect(&cmd);
+    struct redirect_info info = {.addr = NULL, .type = CMD_ERR, .slot = -1};
+    cmd_parse_redirect(&cmd, &info);
+    ASSERT(strncmp(info.addr, "127.0.0.1:8001", 14) == 0);
+    ASSERT(info.slot == 866);
+    ASSERT(info.type == CMD_ERR_MOVED);
     PASS(NULL);
 }
 

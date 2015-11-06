@@ -2,6 +2,7 @@
 #include <string.h>
 #include <assert.h>
 #include <errno.h>
+#include <ctype.h>
 #include "command.h"
 #include "socket.h"
 #include "corvus.h"
@@ -10,8 +11,6 @@
 #include "slot.h"
 #include "event.h"
 #include "server.h"
-
-#define CMD_DIVIDER 960
 
 #define CMD_COPY_RANGE(start_buf, end_buf, reader) \
 do {                                               \
@@ -27,7 +26,7 @@ do {                                               \
 
 #define CMD_DO(HANDLER)              \
     /* keys command */               \
-    HANDLER(DEL, COMPLEX)          \
+    HANDLER(DEL, COMPLEX)            \
     HANDLER(DUMP, BASIC)             \
     HANDLER(EXISTS, BASIC)           \
     HANDLER(EXPIRE, BASIC)           \
@@ -52,8 +51,8 @@ do {                                               \
     HANDLER(INCR, BASIC)             \
     HANDLER(INCRBY, BASIC)           \
     HANDLER(INCRBYFLOAT, BASIC)      \
-    HANDLER(MGET, COMPLEX)         \
-    HANDLER(MSET, COMPLEX)         \
+    HANDLER(MGET, COMPLEX)           \
+    HANDLER(MSET, COMPLEX)           \
     HANDLER(PSETEX, BASIC)           \
     HANDLER(RESTORE, BASIC)          \
     HANDLER(SET, BASIC)              \
@@ -169,6 +168,9 @@ static const char *rep_ok = "+OK\r\n";
 static const char *rep_one = ":1\r\n";
 static const char *rep_zero = ":0\r\n";
 
+static struct cmd_item cmds[] = {CMD_DO(CMD_BUILD_MAP)};
+static hash_t *command_map;
+
 void cmd_init(struct context *ctx, struct command *cmd)
 {
     cmd->parse_done = 0;
@@ -192,6 +194,18 @@ void cmd_init(struct context *ctx, struct command *cmd)
     STAILQ_INIT(&cmd->sub_cmds);
 }
 
+static void cmd_get_map_key(struct pos_array *pos, char *key)
+{
+    int i, j, h;
+    struct pos *p;
+    for (i = 0, h = 0; i < pos->pos_len; i++) {
+        p = &pos->items[i];
+        for (j = 0; j < (int)p->len; j++, h++) {
+            key[h] = toupper(p->str[j]);
+        }
+    }
+}
+
 static struct command *cmd_create(struct context *ctx)
 {
     struct command *cmd = malloc(sizeof(struct command));
@@ -212,11 +226,12 @@ static struct mbuf *cmd_get_buf(struct command *cmd)
 
 static int cmd_get_type(struct command *cmd, struct pos_array *pos)
 {
-    uint32_t hash = lookup3_hash(pos);
-    int idx = hash % CMD_DIVIDER;
+    char key[pos->str_len + 1];
+    cmd_get_map_key(pos, key);
+    key[pos->str_len] = '\0';
 
-    struct cmd_info *item = &command_map[idx];
-    if (item->value == -1 || item->hash != hash) return -1;
+    struct cmd_item *item = hash_get(command_map, key);
+    if (item == NULL) return -1;
     cmd->cmd_type = item->value;
     return item->type;
 }
@@ -443,45 +458,27 @@ static void iov_add(struct iov_data *iov, void *buf, size_t len)
     iov->len++;
 }
 
-struct redirect_info *cmd_parse_redirect(struct command *cmd)
+void cmd_parse_redirect(struct command *cmd, struct redirect_info *info)
 {
-    int i;
-    struct pos_array *pos = cmd->rep_data->pos;
-    struct pos *p;
-    int remain, len = 0, max_len = 1024;
-    char *err = calloc(max_len, sizeof(char));
     LOG(DEBUG, "parse redirect");
-
-    for (i = 0; i < pos->pos_len; i++) {
-        p = &pos->items[i];
-        remain = max_len - len;
-        if (remain < (int)p->len) {
-            max_len += p->len - remain;
-            err = realloc(err, sizeof(char) * max_len);
-        }
-        memcpy(err + len, p->str, p->len);
-        len += p->len;
-    }
+    struct pos_array *pos = cmd->rep_data->pos;
+    char *err = pos_to_str(pos);
 
     char name[6];
-    LOG(DEBUG, "%.*s", len, err);
+    LOG(DEBUG, "%.*s", pos->str_len, err);
 
-    struct redirect_info *info = NULL;
     if (strncmp(err, "MOVED", 5) == 0) {
-        info = malloc(sizeof(struct redirect_info));
         /* MOVED 16383 127.0.0.1:8001 */
-        info->addr = malloc(sizeof(char) * (len - 11));
+        info->addr = malloc(sizeof(char) * (pos->str_len - 11));
         info->type = CMD_ERR_MOVED;
         sscanf(err, "%s%d%s", name, (int*)&info->slot, info->addr);
     } else if (strncmp(err, "ASK", 3) == 0) {
-        info = malloc(sizeof(struct redirect_info));
         /* ASK 16383 127.0.0.1:8001 */
-        info->addr = malloc(sizeof(char) * (len - 9));
+        info->addr = malloc(sizeof(char) * (pos->str_len - 9));
         info->type = CMD_ERR_ASK;
         sscanf(err, "%s%d%s", name, (int*)&info->slot, info->addr);
     }
     free(err);
-    return info;
 }
 
 void cmd_mark_done(struct command *cmd)
@@ -810,35 +807,11 @@ int cmd_read_reply(struct command *cmd, struct connection *server)
 
 void init_command_map()
 {
-    uint32_t hash, idx;
-    int len;
-    struct pos pos;
-    struct pos_array arr;
-    struct cmd_item cmds[] = {
-        CMD_DO(CMD_BUILD_MAP)
-    };
+    command_map = hash_new();
 
     size_t i, cmds_len = sizeof(cmds) / sizeof(struct cmd_item);
 
-    for (i = 0; i < CMD_MAP_LEN; i++) {
-        command_map[i].value = -1;
-        command_map[i].hash = 0;
-        command_map[i].type = CMD_UNIMPL;
-    }
-
     for (i = 0; i < cmds_len; i++) {
-        len = strlen(cmds[i].cmd);
-        pos.str = (uint8_t*)cmds[i].cmd;
-        pos.len = len;
-
-        arr.pos_len = 1;
-        arr.str_len = len;
-        arr.items = &pos;
-
-        hash = lookup3_hash(&arr);
-        idx = hash % CMD_DIVIDER;
-        command_map[idx].value = cmds[i].value;
-        command_map[idx].type = cmds[i].type;
-        command_map[idx].hash = hash;
+        hash_set(command_map, cmds[i].cmd, &cmds[i]);
     }
 }

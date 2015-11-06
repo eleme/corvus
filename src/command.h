@@ -55,12 +55,6 @@ struct command {
     struct connection *client;
 };
 
-struct cmd_info {
-    uint32_t hash;
-    int value;
-    int type;
-};
-
 struct redirect_info {
     uint16_t slot;
     char *addr;
@@ -74,7 +68,6 @@ struct iov_data {
     size_t max_size;
 };
 
-struct cmd_info command_map[CMD_MAP_LEN];
 
 void cmd_queue_init(struct cmd_tqh *cmd_queue);
 struct command *cmd_get_lastest(struct context *ctx, struct cmd_tqh *q);
@@ -84,7 +77,7 @@ int cmd_read_request(struct command *cmd, int fd);
 void init_command_map();
 struct mbuf *cmd_get_reply_buf(struct command *cmd);
 void cmd_mark_done(struct command *cmd);
-struct redirect_info *cmd_parse_redirect(struct command *cmd);
+void cmd_parse_redirect(struct command *cmd, struct redirect_info *info);
 void cmd_create_iovec(struct buf_ptr *start, struct buf_ptr *end, struct iov_data *iov);
 void cmd_make_iovec(struct command *cmd, struct iov_data *iov);
 void cmd_mark_fail(struct command *cmd);
