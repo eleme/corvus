@@ -282,14 +282,29 @@ TEST(test_parse_minus_integer) {
 
     char data[] = ":-1\r\n";
 
-    buf.pos = data;
-    buf.last = data + strlen(data);
+    buf.pos = (uint8_t*)data;
+    buf.last = (uint8_t*)data + strlen(data);
     buf.end = buf.last;
 
     struct reader *r = reader_init(&ctx);
     r->buf = &buf;
 
     ASSERT(parse(r) != -1);
+    PASS(NULL);
+}
+
+TEST(test_pos_array_compare) {
+    struct pos p[2] = {
+        {.str = (uint8_t*)"hello", .len = 5},
+        {.str = (uint8_t*)"worldl", .len = 6}
+    };
+    struct pos_array arr = {
+        .str_len = 11,
+        .pos_len = 2,
+        .items = p
+    };
+
+    ASSERT(pos_array_compare(&arr, "helloworldl", 11) == 0);
     PASS(NULL);
 }
 
@@ -303,4 +318,5 @@ TEST_CASE(test_parser) {
     RUN_TEST(test_parse_null_string);
     RUN_TEST(test_parse_null_array);
     RUN_TEST(test_parse_minus_integer);
+    RUN_TEST(test_pos_array_compare);
 }

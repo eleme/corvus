@@ -485,3 +485,18 @@ char *pos_to_str(struct pos_array *pos)
     str[length] = '\0';
     return str;
 }
+
+int pos_array_compare(struct pos_array *arr, char *data, int len)
+{
+    int i, size = 0;
+    struct pos *p;
+    if (arr->str_len != len) return 1;
+    for (i = 0; i < arr->pos_len; i++) {
+        p = &arr->items[i];
+        if (strncmp((char*)p->str, data + size, p->len) != 0) {
+            return 1;
+        }
+        size += p->len;
+    }
+    return 0;
+}

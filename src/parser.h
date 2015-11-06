@@ -104,5 +104,6 @@ int parse(struct reader *r);
 struct pos *pos_get(struct pos_array *arr, int idx);
 size_t pos_str_len(struct pos *pos);
 char *pos_to_str(struct pos_array *pos);
+int pos_array_compare(struct pos_array *arr, char *data, int len);
 
 #endif /* end of include guard: __PARSER_H */
