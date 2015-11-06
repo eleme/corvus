@@ -243,7 +243,7 @@ struct node_info *slot_get_node_info(uint16_t slot)
 void slot_init_map(struct node_conf *conf)
 {
     int port, count = 0;
-    size_t i;
+    int i;
     struct connection server;
     char *hostname, *addr;
     for (i = 0; i < conf->len; i++) {

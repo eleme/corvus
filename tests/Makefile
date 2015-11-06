@@ -3,7 +3,6 @@ CFLAGS=-g -std=c99 -D_POSIX_C_SOURCE=200112L -I../src -I../deps -pthread
 corvus_test: test.c \
 	test.h \
 	test_parser.c \
-	test_corvus.c \
 	test_hash.c \
 	test_slot.c \
 	test_cmd.c \

@@ -1,18 +1,28 @@
-CFLAGS=-Wall
+BUILD=../build
+CFLAGS=-Wall -g -std=c99 -D_POSIX_C_SOURCE=200112L -I../deps
+LDFLAGS=-pthread
 
-OBJ = event.o   \
-	  mbuf.o    \
-	  socket.o  \
-	  proxy.o   \
-	  client.o  \
-	  logging.o \
-	  command.o \
-	  parser.o  \
-	  hash.o    \
-	  corvus.o
+SRC = client.c               \
+	  command.c              \
+	  connection.c           \
+	  corvus.c               \
+	  event.c                \
+	  hash.c                 \
+	  logging.c              \
+	  mbuf.c                 \
+	  parser.c               \
+	  proxy.c                \
+	  server.c               \
+	  slot.c                 \
+	  socket.c               \
 
-SRC = $(OBJ:%.o=%.c)
+OBJ = $(SRC:%.c=$(BUILD)/%.o)
 
-corvus: $(OBJ)
+corvus: $(OBJ) $(BUILD)/hashmap.o
+	$(CC) $(LDFLAGS) -o $@ $^
 
-%.o: $(SRC)
+$(BUILD)/hashmap.o: ../deps/hashmap/hash.c
+	$(CC) $(CFLAGS) -c $^ -o $@
+
+$(OBJ): $(BUILD)/%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@

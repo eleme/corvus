@@ -560,7 +560,7 @@ void cmd_gen_mget_iovec(struct command *cmd, struct iov_data *iov)
     int keys = cmd->req_data->elements - 1;
     int n = snprintf(NULL, 0, fmt, keys);
     char *b = malloc(sizeof(char) * (n + 1));
-    snprintf(b, sizeof(b), fmt, keys);
+    snprintf(b, n + 1, fmt, keys);
 
     iov_add(iov, (void*)b, n);
     iov->ptr = b;
@@ -751,7 +751,7 @@ int cmd_parse_rep(struct command *cmd, struct mbuf *buf)
 
 int cmd_read_request(struct command *cmd, int fd)
 {
-    int n, size;
+    int n;
     struct mbuf *buf;
 
     if (cmd->reader == NULL) cmd->reader = reader_init(cmd->ctx);
@@ -759,7 +759,6 @@ int cmd_read_request(struct command *cmd, int fd)
     while (1) {
         do {
             buf = cmd_get_buf(cmd);
-            size = mbuf_write_size(buf);
 
             LOG(DEBUG, "reading");
             n = socket_read(fd, buf);
@@ -778,14 +777,13 @@ int cmd_read_request(struct command *cmd, int fd)
 
 int cmd_read_reply(struct command *cmd, struct connection *server)
 {
-    int n, wsize, rsize;
+    int n, rsize;
     struct mbuf *buf;
 
     if (cmd->reader == NULL) cmd->reader = reader_init(cmd->ctx);
 
     do {
         buf = conn_get_buf(server);
-        wsize = mbuf_write_size(buf);
         rsize = mbuf_read_size(buf);
 
         if (rsize > 0) {

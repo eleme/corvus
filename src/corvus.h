@@ -19,7 +19,7 @@
 
 struct node_conf {
     char **nodes;
-    size_t len;
+    int len;
 };
 
 struct context {
@@ -39,8 +39,6 @@ struct context {
     /* event */
     struct event_loop *loop;
 };
-
-void context_init(struct context *ctx, bool syslog, int log_level);
 
 struct node_conf initial_nodes;
 

@@ -1,7 +1,6 @@
 #ifndef __TEST_H
 #define __TEST_H
 
-#define _GNU_SOURCE
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -10,64 +9,64 @@
 
 #define TEST_CASE(NAME) void NAME(void)
 #define TEST(name) static enum test_result name(void)
-#define RUN_CASE(test_case)                                            \
-    do {                                                               \
-        if (!filter(#test_case, manager.case_filter)) {                \
-            break;                                                     \
-        }                                                              \
-        memset(&manager.current_case, 0, sizeof(struct case_info));    \
-                                                                       \
-        PRINT("\n\033[1m%s\033[m: ", #test_case);                 \
-        test_case();                                                   \
-        post_case();                                                   \
-        manager.passed += manager.current_case.passed;                 \
-        manager.failed += manager.current_case.failed;                 \
-        manager.skipped += manager.current_case.skipped;               \
-        manager.tests_run += manager.current_case.tests_run;           \
+#define RUN_CASE(test_case)                                             \
+    do {                                                                \
+        if (!filter(#test_case, manager.case_filter)) {                 \
+            break;                                                      \
+        }                                                               \
+        memset(&manager.current_case, 0, sizeof(struct case_info));     \
+                                                                        \
+        PRINT("\n\033[1m%s\033[m: ", #test_case);                       \
+        test_case();                                                    \
+        post_case();                                                    \
+        manager.passed += manager.current_case.passed;                  \
+        manager.failed += manager.current_case.failed;                  \
+        manager.skipped += manager.current_case.skipped;                \
+        manager.tests_run += manager.current_case.tests_run;            \
     } while (0)
 
-#define RUN_TEST(test_func)                                            \
-    do {                                                               \
-        if (filter(#test_func, manager.test_func_filter)) {            \
-            enum test_result res = test_func();                        \
-            post_test(#test_func, res);                                \
-        }                                                              \
+#define RUN_TEST(test_func)                                             \
+    do {                                                                \
+        if (filter(#test_func, manager.test_func_filter)) {             \
+            enum test_result res = test_func();                         \
+            post_test(#test_func, res);                                 \
+        }                                                               \
     } while (0)
 
-#define ASSERT_MSG(cond, msg)                                          \
-    do {                                                               \
-        manager.assertions++;                                          \
-        if (!(cond)) FAIL(msg);                                        \
+#define ASSERT_MSG(cond, msg)                                           \
+    do {                                                                \
+        manager.assertions++;                                           \
+        if (!(cond)) FAIL(msg);                                         \
     } while (0)
 
 #define ASSERT(cond) ASSERT_MSG(cond, #cond)
 
-#define PASS(_msg)                                                     \
-    do {                                                               \
-        manager.msg = _msg;                                            \
-        return TEST_PASS;                                              \
+#define PASS(_msg)                                                      \
+    do {                                                                \
+        manager.msg = _msg;                                             \
+        return TEST_PASS;                                               \
     } while (0)
 
-#define SKIP(_msg)                                                     \
-    do {                                                               \
-        manager.msg = _msg;                                            \
-        return TEST_SKIP;                                              \
+#define SKIP(_msg)                                                      \
+    do {                                                                \
+        manager.msg = _msg;                                             \
+        return TEST_SKIP;                                               \
     } while (0)
 
-#define FAIL(_msg)                                                     \
-    do {                                                               \
-        manager.fail_file = __FILE__;                                  \
-        manager.fail_line = __LINE__;                                  \
-        manager.msg = _msg;                                            \
-        return TEST_FAIL;                                              \
+#define FAIL(_msg)                                                      \
+    do {                                                                \
+        manager.fail_file = __FILE__;                                   \
+        manager.fail_line = __LINE__;                                   \
+        manager.msg = _msg;                                             \
+        return TEST_FAIL;                                               \
     } while (0)
 
-#define PRINT(...) \
-    do {\
-        if (manager.test_func_filter[0] == 0) {\
-            printf(__VA_ARGS__);\
-        }\
-    } while (0)\
+#define PRINT(...)                                                      \
+    do {                                                                \
+        if (manager.test_func_filter[0] == 0) {                         \
+            printf(__VA_ARGS__);                                        \
+        }                                                               \
+    } while (0)
 
 /* Info for the current running suite. */
 struct case_info {
@@ -90,7 +89,6 @@ struct {
     unsigned int assertions;
 
     struct case_info current_case;
-    int run_event_flow;
 
     /* info to print about the most recent failure */
     const char *fail_file;
@@ -112,14 +110,7 @@ static int filter(const char *name, const char *filter)
 {
     size_t offset = 0;
     size_t filter_len = strlen(filter);
-    if (filter_len <= 0) {
-        if (!manager.run_event_flow &&
-                strncmp(name, "test_event_flow", 15) == 0)
-        {
-            return 0;
-        }
-        return 1;
-    }
+    if (filter_len <= 0) return 1;
 
     while (name[offset] != '\0') {
         if (name[offset] == filter[0]) {

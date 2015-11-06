@@ -12,7 +12,6 @@ static int setup_cli(int argc, const char *argv[])
 {
     int i = 0;
     manager.test_func_filter[0] = manager.case_filter[0] = 0;
-    manager.run_event_flow = 0;
 
     for (i = 1; i < argc; i++) {
         if (0 == strcmp("-t", argv[i])) {
@@ -25,9 +24,6 @@ static int setup_cli(int argc, const char *argv[])
             i++;
         } else if (0 == strcmp("-h", argv[i])) {
             return -1;
-        } else if (0 == strcmp("-r", argv[i])) {
-            manager.run_event_flow = 1;
-            strcpy(manager.test_func_filter, "test_event_flow");
         } else {
             fprintf(stdout,
                 "Unknown argument '%s'\n", argv[i]);
@@ -49,7 +45,6 @@ extern TEST_CASE(test_slot);
 extern TEST_CASE(test_hash);
 extern TEST_CASE(test_parser);
 extern TEST_CASE(test_cmd);
-extern TEST_CASE(test_corvus);
 
 int main(int argc, const char *argv[])
 {
@@ -62,7 +57,6 @@ int main(int argc, const char *argv[])
     RUN_CASE(test_hash);
     RUN_CASE(test_parser);
     RUN_CASE(test_cmd);
-    RUN_CASE(test_corvus);
 
     report();
     return manager.failed == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
