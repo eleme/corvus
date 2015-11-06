@@ -5,6 +5,9 @@ build:
 	cd src && $(MAKE)
 	@mv src/corvus .
 
+init:
+	@git submodule update --init --recursive
+
 clean:
 	@rm -rf build
 	@find . -name '*.[oa]' -delete
@@ -13,4 +16,4 @@ clean:
 test:
 	cd tests && $(MAKE) test
 
-.PHONY: clean
+.PHONY: clean init test
