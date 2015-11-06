@@ -284,10 +284,12 @@ int socket_parse_addr(const char *addr, char **dest)
     return port;
 }
 
-void socket_get_key(struct sockaddr *addr, char *dest)
+char *socket_get_key(struct sockaddr *addr)
 {
     struct sockaddr_in *a = (struct sockaddr_in*)addr;
     uint16_t port = a->sin_port;
     int address = a->sin_addr.s_addr;
+    char *dest = calloc(17, sizeof(char));
     sprintf(dest, "%d:%d", address, port);
+    return dest;
 }

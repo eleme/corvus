@@ -159,6 +159,33 @@ struct mbuf *mbuf_queue_top(struct context *ctx, struct mhdr *mhdr)
     return STAILQ_LAST(mhdr, mbuf, next);
 }
 
+struct mbuf *mbuf_queue_get(struct context *ctx, struct mhdr *q)
+{
+    struct mbuf *buf = mbuf_queue_top(ctx, q);
+    if (mbuf_full(buf)) {
+        buf = mbuf_get(ctx);
+        mbuf_queue_insert(q, buf);
+    }
+    return buf;
+}
+
+void mbuf_queue_copy(struct context *ctx, struct mhdr *q, uint8_t *data, int n)
+{
+    struct mbuf *buf = mbuf_queue_get(ctx, q);
+    int remain = n, wlen, size, len = 0;
+    while (remain > 0) {
+        wlen = mbuf_write_size(buf);
+        size = remain < wlen ? remain : wlen;
+        memcpy(buf->last, data + len, size);
+        buf->last += size;
+        len += size;
+        remain -= size;
+        if (wlen - size <= 0) {
+            buf = mbuf_queue_get(ctx, q);
+        }
+    }
+}
+
 void mbuf_inc_ref(struct mbuf *buf)
 {
     buf->refcount++;

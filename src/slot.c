@@ -13,7 +13,6 @@
 #include "socket.h"
 #include "logging.h"
 
-#define REDIS_CLUSTER_SLOTS 16384
 #define SERVER_LIST_LEN 1024
 #define THREAD_STACK_SIZE (1024*1024*4)
 
@@ -45,7 +44,9 @@ static pthread_t slot_update_thread;
 static pthread_mutex_t job_queue_mutex;
 static pthread_cond_t signal_cond;
 static struct job_queue job_queue;
+
 static hash_t *node_map;
+static struct node_list node_list;
 
 static struct node_info *node_info_create(struct sockaddr *addr)
 {
@@ -61,7 +62,7 @@ static struct node_info *node_info_find(struct redis_data *data)
 {
     struct sockaddr addr;
     struct node_info *node;
-    char *key = calloc(17, sizeof(char));
+    char *key;
 
     if (data->elements != 2) return NULL;
 
@@ -74,9 +75,11 @@ static struct node_info *node_info_find(struct redis_data *data)
 
     if (status == -1) return NULL;
 
-    socket_get_key(&addr, key);
+    key = socket_get_key(&addr);
     node = hash_get(node_map, key);
-    if (node == NULL) {
+    if (node != NULL) {
+        free(key);
+    } else {
         node = node_info_create(&addr);
         hash_set(node_map, key, (void*)node);
     }
@@ -124,7 +127,7 @@ static int parse_slots_data(struct redis_data *data)
 
         if (node->slaves == NULL && d->elements - 3 > 0) {
             node->slaves = malloc(sizeof(struct sockaddr) * (d->elements - 3));
-            for (h = d->elements - 3; h < d->elements; h++) {
+            for (h = 3; h < d->elements; h++) {
                 if (node_info_add_slave(node, d->element[h]) == -1) return -1;
             }
         }
@@ -140,9 +143,9 @@ static void slot_map_clear()
     hash_each(node_map, {
         free((void *)key);
         node = (struct node_info *)val;
-        if (node->slaves != NULL) free(node->slaves);
-        free(node);
+        LIST_INSERT_HEAD(&node_list, node, next);
     });
+
     hash_clear(node_map);
 }
 
@@ -270,21 +273,28 @@ void slot_map_update()
     LOG(DEBUG, "update slot map");
     int count = 0;
     struct node_info *node;
+    struct sockaddr addr;
     struct connection server;
     conn_init(&server, &slot_map_ctx);
 
-    hash_each(node_map, {
-        node = (struct node_info *)val;
+    LIST_FOREACH(node, &node_list, next) {
         server.fd = socket_create_stream();
         if (server.fd == -1) continue;
-        memcpy(&server.addr, &node->master, sizeof(server.addr));
+        memcpy(&server.addr, &node->master, sizeof(addr));
         count = do_update_slot_map(&server, true);
         if (count < REDIS_CLUSTER_SLOTS) {
             conn_free(&server);
             continue;
         }
         break;
-    });
+    }
+
+    while(!LIST_EMPTY(&node_list)) {
+        node = LIST_FIRST(&node_list);
+        LIST_REMOVE(node, next);
+        if (node->slaves != NULL) free(node->slaves);
+        free(node);
+    }
 
     LOG(INFO, "slot map updated: corverd %d slots", count);
     conn_free(&server);
@@ -362,6 +372,7 @@ int slot_init_updater(bool syslog, int log_level)
     memset(slot_map, 0, sizeof(struct node_info*) * REDIS_CLUSTER_SLOTS);
     STAILQ_INIT(&job_queue);
     node_map = hash_new();
+    LIST_INIT(&node_list);
 
     pthread_mutex_init(&job_queue_mutex, NULL);
     pthread_cond_init(&signal_cond, NULL);

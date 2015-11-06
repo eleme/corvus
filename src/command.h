@@ -84,7 +84,8 @@ void init_command_map();
 struct mbuf *cmd_get_reply_buf(struct command *cmd);
 void cmd_mark_done(struct command *cmd);
 struct redirect_info *cmd_parse_redirect(struct command *cmd);
-void cmd_gen_iovec(struct command *cmd, struct iov_data *iov, int type);
+void cmd_create_iovec(struct buf_ptr *start, struct buf_ptr *end, struct iov_data *iov);
 void cmd_make_iovec(struct command *cmd, struct iov_data *iov);
+void cmd_mark_fail(struct command *cmd);
 
 #endif /* end of include guard: __COMMAND_H */

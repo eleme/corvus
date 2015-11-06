@@ -7,6 +7,8 @@
 #include <sys/types.h>
 #include "parser.h"
 
+#define REDIS_CLUSTER_SLOTS 16384
+
 struct context;
 
 enum {

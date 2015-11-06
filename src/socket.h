@@ -17,6 +17,6 @@ int socket_get_addr(char *host, int port, struct sockaddr *addr);
 int socket_addr_cmp(struct sockaddr *addr1, struct sockaddr *addr2);
 int socket_set_nonblocking(int fd);
 int socket_parse_addr(const char *addr, char **dest);
-void socket_get_key(struct sockaddr *addr, char *dest);
+char *socket_get_key(struct sockaddr *addr);
 
 #endif /* end of include guard: __SOCKET_H */

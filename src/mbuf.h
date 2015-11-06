@@ -62,5 +62,7 @@ void mbuf_queue_init(struct mhdr *);
 void mbuf_inc_ref(struct mbuf *buf);
 void mbuf_dec_ref(struct mbuf *buf);
 void mbuf_dec_ref_by(struct mbuf *buf, int count);
+void mbuf_queue_copy(struct context *ctx, struct mhdr *q, uint8_t *data, int n);
+struct mbuf *mbuf_queue_get(struct context *ctx, struct mhdr *q);
 
 #endif

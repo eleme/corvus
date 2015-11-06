@@ -87,11 +87,12 @@ struct connection *conn_get_server_from_pool(struct context *ctx, struct sockadd
 {
     int fd;
     struct connection *server;
-    char key[17];
-    socket_get_key(addr, key);
+    char *key;
 
+    key = socket_get_key(addr);
     server = hash_get(ctx->server_table, key);
     if (server != NULL) {
+        free(key);
         return server;
     }
 
@@ -112,7 +113,7 @@ struct connection *conn_get_raw_server(struct context *ctx)
 {
     size_t i;
     int fd, port;
-    char *hostname, *addr, key[17] = {0};
+    char *hostname, *addr, *key;
     struct connection *server = NULL;
     struct sockaddr sockaddr;
 
@@ -122,20 +123,26 @@ struct connection *conn_get_raw_server(struct context *ctx)
         if (port == -1) continue;
 
         socket_get_addr(hostname, port, &sockaddr);
-        socket_get_key(&sockaddr, key);
+        key = socket_get_key(&sockaddr);
         server = hash_get(ctx->server_table, key);
         if (server != NULL) {
+            free(key);
             free(hostname);
             break;
         }
 
         fd = conn_create_fd();
-        if (fd == -1) continue;
+        if (fd == -1) {
+            free(key);
+            free(hostname);
+            continue;
+        }
         server = server_create(ctx, fd);
         server->hostname = hostname;
         server->port = port;
         memcpy(&server->addr, &sockaddr, sizeof(sockaddr));
         if (conn_connect(server, true) == -1) {
+            free(key);
             conn_free(server);
             continue;
         };

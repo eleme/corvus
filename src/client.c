@@ -13,6 +13,7 @@ static int on_write(struct connection *client)
 {
     int status;
     struct command *cmd = STAILQ_FIRST(&client->cmd_queue);
+    LOG(DEBUG, "client %d %d", cmd->cmd_count, cmd->cmd_done_count);
     if (cmd->cmd_count != cmd->cmd_fail_count + cmd->cmd_done_count) return 0;
 
     struct iov_data iov = {.data = NULL, .max_size = 0, .len = 0};
