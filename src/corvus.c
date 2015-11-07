@@ -26,6 +26,15 @@ static void context_init(struct context *ctx, bool syslog, int log_level)
     log_init(ctx);
 }
 
+void config_init()
+{
+    config.bind = 12345;
+    memset(&config.node, 0, sizeof(struct node_conf));
+    config.thread = 4;
+    config.loglevel = INFO;
+    config.syslog = 0;
+}
+
 int config_add(char *name, char *value)
 {
     int name_len = strlen(name),
@@ -133,14 +142,20 @@ void main_loop()
 int main(int argc, const char *argv[])
 {
     if (argc != 2) {
-        fprintf(stderr, "Usage: corvus example.conf\n");
+        fprintf(stderr, "Usage: corvus corvus.conf\n");
         return EXIT_FAILURE;
     }
 
+    config_init();
     if (read_conf(argv[1]) == -1) {
-        fprintf(stderr, "Error: invalid config\n");
+        fprintf(stderr, "Error: invalid config.\n");
         return EXIT_FAILURE;
     }
+    if (config.node.len <= 0) {
+        fprintf(stderr, "Error: invalid config, `node` should be set.\n");
+        return EXIT_FAILURE;
+    }
+
     init_command_map();
     slot_init_updater(config.syslog, config.loglevel);
     slot_create_job(SLOT_UPDATE_INIT, &config.node);
