@@ -88,14 +88,9 @@ int read_conf(const char *filename)
     char *line = NULL;
     while ((r = getline(&line, &len, fp)) != -1) {
         char name[r], value[r];
-        if (r > 0 && line[0] == '#') {
-            free(line);
-            line = NULL;
-            continue;
-        }
         for (i = 0; i < r && (line[i] == ' ' || line[i] == '\r'
                     || line[i] == '\t' || line[i] == '\n'); i++);
-        if (i == r) {
+        if (i == r || line[i] == '#') {
             free(line);
             line = NULL;
             continue;
