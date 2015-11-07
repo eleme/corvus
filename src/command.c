@@ -159,7 +159,6 @@ struct cmd_item {
     int type;
 };
 
-static const char *cmd_err = "-ERR protocol error\r\n";
 static const char *rep_err = "-ERR server error\r\n";
 static const char *rep_get = "*2\r\n$3\r\nGET\r\n";
 static const char *rep_set = "*3\r\n$3\r\nSET\r\n";
@@ -501,16 +500,23 @@ void cmd_mark_done(struct command *cmd)
 void cmd_mark_fail(struct command *cmd)
 {
     int fail;
-    struct command *parent = cmd->parent;
+    struct command *parent = cmd->parent, *root = NULL;
     cmd->cmd_fail = 1;
     while (parent != NULL) {
         parent->cmd_done_count++;
         fail = parent->cmd_fail_count + parent->cmd_done_count;
         if (parent->cmd_count == fail) {
+            root = parent;
             parent = parent->parent;
             continue;
         }
         break;
+    }
+    if (parent == NULL && root != NULL
+            && root->cmd_count ==
+            root->cmd_fail_count + root->cmd_done_count)
+    {
+        event_reregister(root->ctx->loop, root->client, E_WRITABLE | E_READABLE);
     }
 }
 
@@ -632,7 +638,7 @@ void cmd_make_iovec(struct command *cmd, struct iov_data *iov)
     struct command *c;
     STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
         if (c->cmd_fail) {
-            iov_add(iov, (void*)cmd_err, strlen(cmd_err));
+            iov_add(iov, (void*)rep_err, strlen(rep_err));
             continue;
         }
         switch (c->cmd_type) {

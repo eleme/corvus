@@ -43,5 +43,6 @@ int conn_create_fd();
 struct connection *conn_get_server_from_pool(struct context *ctx, struct sockaddr *addr);
 struct connection *conn_get_server(struct context *ctx, uint16_t slot);
 struct mbuf *conn_get_buf(struct connection *conn);
+void conn_close(struct connection *conn);
 
 #endif /* end of include guard: __CONNECTION_H */

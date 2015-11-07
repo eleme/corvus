@@ -9,6 +9,23 @@
 #include "slot.h"
 #include "command.h"
 
+static void server_eof(struct connection *server)
+{
+    LOG(WARN, "server eof");
+
+    struct command *c;
+    conn_close(server);
+    STAILQ_FOREACH(c, &server->ready_queue, ready_next) {
+        cmd_mark_fail(c);
+        STAILQ_REMOVE_HEAD(&server->ready_queue, ready_next);
+    }
+
+    STAILQ_FOREACH(c, &server->waiting_queue, waiting_next) {
+        cmd_mark_fail(c);
+        STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
+    }
+}
+
 static int on_write(struct connection *server, struct cmd_tqh *queue)
 {
     int status;
@@ -59,15 +76,20 @@ static void do_moved(struct command *cmd, struct redirect_info *info)
 
 static int read_one_reply(struct connection *server)
 {
-    if (STAILQ_EMPTY(&server->waiting_queue)) return CORVUS_ERR;
+    if (STAILQ_EMPTY(&server->waiting_queue)) return CORVUS_AGAIN;
 
     struct command *cmd = STAILQ_FIRST(&server->waiting_queue);
 
     int status = cmd_read_reply(cmd, server);
-    if (status == CORVUS_EOF) return CORVUS_EOF;
     if (status == CORVUS_AGAIN) return CORVUS_AGAIN;
 
     STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
+
+    if (status == CORVUS_EOF) {
+        cmd_mark_fail(cmd);
+        return CORVUS_EOF;
+    }
+
     if (status == CORVUS_ERR) {
         return CORVUS_ERR;
     }
@@ -107,6 +129,9 @@ static void ready(struct connection *self, struct event_loop *loop, uint32_t mas
 {
     if (mask & E_ERROR) {
         LOG(DEBUG, "error");
+        event_deregister(self->ctx->loop, self);
+        server_eof(self);
+        slot_create_job(SLOT_UPDATE, NULL);
     }
     if (mask & E_WRITABLE) {
         LOG(DEBUG, "server writable");
@@ -125,7 +150,15 @@ static void ready(struct connection *self, struct event_loop *loop, uint32_t mas
         LOG(DEBUG, "server readable");
 
         if (!STAILQ_EMPTY(&self->waiting_queue)) {
-            if (on_read(self) == -1) {}
+            switch (on_read(self)) {
+                case CORVUS_ERR:
+                case CORVUS_EOF:
+                    event_deregister(self->ctx->loop, self);
+                    server_eof(self);
+                    slot_create_job(SLOT_UPDATE, NULL);
+                    break;
+            }
+
         }
     }
 }

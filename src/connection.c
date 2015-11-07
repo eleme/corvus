@@ -93,6 +93,16 @@ struct connection *conn_get_server_from_pool(struct context *ctx, struct sockadd
     server = hash_get(ctx->server_table, key);
     if (server != NULL) {
         free(key);
+        if (server->status == DISCONNECTED) {
+            close(server->fd);
+            server->fd = conn_create_fd();
+            if (conn_connect(server, true) == -1) {
+                close(server->fd);
+                LOG(ERROR, "can't connect");
+                return NULL;
+            }
+            server->registered = 0;
+        }
         return server;
     }
 
@@ -103,6 +113,7 @@ struct connection *conn_get_server_from_pool(struct context *ctx, struct sockadd
     hash_set(ctx->server_table, key, (void*)server);
 
     if (conn_connect(server, true) == -1) {
+        close(server->fd);
         LOG(ERROR, "can't connect");
         return NULL;
     }
@@ -179,4 +190,10 @@ struct mbuf *conn_get_buf(struct connection *conn)
         mbuf_queue_insert(&conn->data, buf);
     }
     return buf;
+}
+
+void conn_close(struct connection *conn)
+{
+    close(conn->fd);
+    conn->status = DISCONNECTED;
 }
