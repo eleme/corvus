@@ -35,11 +35,11 @@ struct context {
 
     /* connection pool */
     hash_t *server_table;
+    struct node_conf *node_conf;
 
     /* event */
     struct event_loop *loop;
 };
 
-struct node_conf initial_nodes;
 
 #endif /* end of include guard: __MAIN_H */

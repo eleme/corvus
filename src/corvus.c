@@ -116,6 +116,7 @@ void main_loop()
 
     context_init(&ctx, config.syslog, config.loglevel);
     ctx.loop = loop;
+    ctx.node_conf = &config.node;
 
     struct connection *proxy = proxy_create(&ctx, "0.0.0.0", config.bind);
     if (proxy == NULL) {

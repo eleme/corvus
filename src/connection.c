@@ -111,14 +111,14 @@ struct connection *conn_get_server_from_pool(struct context *ctx, struct sockadd
 
 struct connection *conn_get_raw_server(struct context *ctx)
 {
-    size_t i;
+    int i;
     int fd, port;
     char *hostname, *addr, *key;
     struct connection *server = NULL;
     struct sockaddr sockaddr;
 
-    for (i = 0; i < initial_nodes.len; i++) {
-        addr = initial_nodes.nodes[i];
+    for (i = 0; i < ctx->node_conf->len; i++) {
+        addr = ctx->node_conf->nodes[i];
         port = socket_parse_addr(addr, &hostname);
         if (port == -1) continue;
 
@@ -149,7 +149,7 @@ struct connection *conn_get_raw_server(struct context *ctx)
         hash_set(ctx->server_table, key, (void*)server);
         break;
     }
-    if (i >= initial_nodes.len) {
+    if (i >= ctx->node_conf->len) {
         LOG(ERROR, "cannot connect to redis server.");
         return NULL;
     }
