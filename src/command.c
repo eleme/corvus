@@ -136,7 +136,7 @@ do {                                               \
     HANDLER(EVAL, BASIC)             \
     HANDLER(EVALSHA, BASIC)          \
     /* misc */                       \
-    HANDLER(PING, UNIMPL)            \
+    HANDLER(PING, PROXY)            \
     HANDLER(INFO, UNIMPL)            \
     HANDLER(QUIT, UNIMPL)            \
     HANDLER(AUTH, UNIMPL)            \
@@ -465,6 +465,28 @@ struct command *cmd_create(struct context *ctx)
     return cmd;
 }
 
+void cmd_ping(struct command *cmd)
+{
+    char *rep = "+PONG\r\n";
+    struct iovec iov;
+    LOG(DEBUG, "cmd_ping");
+    iov.iov_base = rep;
+    iov.iov_len = strlen(rep);
+    socket_write(cmd->client->fd, &iov, 1);
+}
+
+int cmd_proxy(struct command *cmd)
+{
+    switch (cmd->cmd_type) {
+    case CMD_PING:
+        cmd_ping(cmd);
+        break;
+    default:
+        return -1;
+    }
+    return 0;
+}
+
 int cmd_forward(struct command *cmd)
 {
     switch (cmd->request_type) {
@@ -475,6 +497,7 @@ int cmd_forward(struct command *cmd)
             if (cmd_forward_complex(cmd) == -1) return -1;
             break;
         case CMD_PROXY:
+            if (cmd_proxy(cmd) == -1) return -1;
             break;
         case CMD_UNIMPL:
             break;
