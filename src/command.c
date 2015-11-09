@@ -829,7 +829,7 @@ int cmd_read_request(struct command *cmd, int fd)
             buf = cmd_get_buf(cmd);
 
             n = socket_read(fd, buf);
-            if (n == 0) return CORVUS_OK;
+            if (n == 0) return CORVUS_EOF;
             if (n == CORVUS_ERR) return CORVUS_ERR;
             if (n == CORVUS_AGAIN) return CORVUS_AGAIN;
             if (cmd_parse_req(cmd, buf) == CORVUS_ERR) {

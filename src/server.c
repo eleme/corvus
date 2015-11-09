@@ -9,6 +9,15 @@
 #include "slot.h"
 #include "command.h"
 
+static inline void remove_queue_head(struct connection *server, int retry)
+{
+    if (retry) {
+        STAILQ_REMOVE_HEAD(&server->retry_queue, retry_next);
+    } else {
+        STAILQ_REMOVE_HEAD(&server->ready_queue, ready_next);
+    }
+}
+
 static void server_eof(struct connection *server)
 {
     LOG(WARN, "server eof");
@@ -29,32 +38,35 @@ static void server_eof(struct connection *server)
         cmd_mark_fail(c);
         STAILQ_REMOVE_HEAD(&server->retry_queue, retry_next);
     }
+    slot_create_job(SLOT_UPDATE, NULL);
 }
 
-static int on_write(struct connection *server, struct cmd_tqh *queue)
+static int on_write(struct connection *server, int retry)
 {
     int status;
     struct command *cmd;
 
-    cmd = STAILQ_FIRST(queue);
+    cmd = retry ? STAILQ_FIRST(&server->retry_queue) : STAILQ_FIRST(&server->ready_queue);
 
     struct iov_data iov;
     memset(&iov, 0, sizeof(struct iov_data));
     cmd_create_iovec(NULL, &cmd->req_buf[0], &cmd->req_buf[1], &iov);
     if (iov.len <= 0) {
         LOG(WARN, "no data to write");
-        return -1;
+        remove_queue_head(server, retry);
+        return CORVUS_ERR;
     }
 
     status = socket_write(server->fd, iov.data, iov.len);
     free(iov.data);
-    if (status != CORVUS_AGAIN) {
-        STAILQ_REMOVE_HEAD(queue, ready_next);
-        if (status != CORVUS_ERR) {
-            STAILQ_INSERT_TAIL(&server->waiting_queue, cmd, waiting_next);
-        }
-    }
-    return 0;
+    if (status == CORVUS_AGAIN) return CORVUS_OK;
+
+    remove_queue_head(server, retry);
+
+    if (status == CORVUS_ERR) return CORVUS_ERR;
+
+    STAILQ_INSERT_TAIL(&server->waiting_queue, cmd, waiting_next);
+    return CORVUS_OK;
 }
 
 static void do_moved(struct command *cmd, struct redirect_info *info)
@@ -131,23 +143,36 @@ static int on_read(struct connection *server)
 
 static void server_ready(struct connection *self, struct event_loop *loop, uint32_t mask)
 {
+    int retry = -1;
+
     if (mask & E_ERROR) {
         LOG(DEBUG, "error");
-        event_deregister(self->ctx->loop, self);
+        event_deregister(loop, self);
         server_eof(self);
-        slot_create_job(SLOT_UPDATE, NULL);
     }
     if (mask & E_WRITABLE) {
         LOG(DEBUG, "server writable");
         if (self->status == CONNECTING) self->status = CONNECTED;
         if (self->status == CONNECTED) {
             if (!STAILQ_EMPTY(&self->retry_queue)) {
-                if (on_write(self, &self->retry_queue) == -1) {}
+                retry = 1;
             } else if (!STAILQ_EMPTY(&self->ready_queue)) {
-                if (on_write(self, &self->ready_queue) == -1) {}
+                retry = 0;
             }
+
+            if (retry != -1) {
+                switch (on_write(self, retry)) {
+                    case CORVUS_ERR:
+                        event_deregister(loop, self);
+                        server_eof(self);
+                        break;
+                }
+            }
+
         } else {
             LOG(ERROR, "server not connected");
+            event_deregister(loop, self);
+            server_eof(self);
         }
     }
     if (mask & E_READABLE) {
@@ -157,12 +182,10 @@ static void server_ready(struct connection *self, struct event_loop *loop, uint3
             switch (on_read(self)) {
                 case CORVUS_ERR:
                 case CORVUS_EOF:
-                    event_deregister(self->ctx->loop, self);
+                    event_deregister(loop, self);
                     server_eof(self);
-                    slot_create_job(SLOT_UPDATE, NULL);
                     break;
             }
-
         }
     }
 }
