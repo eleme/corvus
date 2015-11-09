@@ -166,6 +166,7 @@ static const char *rep_del = "*2\r\n$3\r\nDEL\r\n";
 static const char *rep_ok = "+OK\r\n";
 static const char *rep_one = ":1\r\n";
 static const char *rep_zero = ":0\r\n";
+static const char *rep_ping = "+PONG\r\n";
 
 static struct cmd_item cmds[] = {CMD_DO(CMD_BUILD_MAP)};
 static hash_t *command_map;
@@ -352,6 +353,17 @@ static void cmd_apply_range(struct command *cmd)
     cmd->req_buf[1].pos = last->last;
 }
 
+static void cmd_apply_rep_range(struct command *cmd)
+{
+    struct mbuf *first, *last;
+    first = STAILQ_FIRST(&cmd->rep_queue);
+    last = STAILQ_LAST(&cmd->rep_queue, mbuf, next);
+    cmd->rep_buf[0].buf = first;
+    cmd->rep_buf[0].pos = first->pos;
+    cmd->rep_buf[1].buf = last;
+    cmd->rep_buf[1].pos = last->last;
+}
+
 static int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len)
 {
     struct redis_data *key;
@@ -465,21 +477,18 @@ struct command *cmd_create(struct context *ctx)
     return cmd;
 }
 
-void cmd_ping(struct command *cmd)
+void cmd_proxy_ping(struct command *cmd)
 {
-    char *rep = "+PONG\r\n";
-    struct iovec iov;
-    LOG(DEBUG, "cmd_ping");
-    iov.iov_base = rep;
-    iov.iov_len = strlen(rep);
-    socket_write(cmd->client->fd, &iov, 1);
+    mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t *)rep_ping, 7);
+    cmd_apply_rep_range(cmd);
+    cmd_mark_done(cmd);
 }
 
 int cmd_proxy(struct command *cmd)
 {
     switch (cmd->cmd_type) {
     case CMD_PING:
-        cmd_ping(cmd);
+        cmd_proxy_ping(cmd);
         break;
     default:
         return -1;
@@ -575,17 +584,25 @@ void cmd_parse_redirect(struct command *cmd, struct redirect_info *info)
 void cmd_mark_done(struct command *cmd)
 {
     int done;
-    struct command *parent = cmd->parent;
+    struct command *parent = cmd->parent, *root = NULL;
+
     cmd->cmd_done = 1;
     while (parent != NULL) {
         parent->cmd_done_count++;
         done = parent->cmd_done_count + parent->cmd_fail_count;
         if (parent->cmd_count == done) {
+            root = parent;
             parent->cmd_done = 1;
             parent = parent->parent;
         } else {
             break;
         }
+    }
+    if (parent == NULL && root != NULL
+            && root->cmd_count ==
+            root->cmd_fail_count + root->cmd_done_count)
+    {
+        event_reregister(root->ctx->loop, root->client, E_WRITABLE | E_READABLE);
     }
 }
 
@@ -748,6 +765,9 @@ void cmd_make_iovec(struct command *cmd, struct iov_data *iov)
                 break;
             case CMD_DEL:
                 cmd_gen_del_iovec(c, iov);
+                break;
+            case CMD_PING:
+                cmd_create_iovec(NULL, &c->rep_buf[0], &c->rep_buf[1], iov);
                 break;
             default:
                 cmd_create_iovec(c, &c->rep_buf[0], &c->rep_buf[1], iov);
