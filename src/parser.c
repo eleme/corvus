@@ -245,9 +245,8 @@ static int process_string(struct reader *r)
 {
     char c;
     uint8_t *p;
-    int more;
+    int remain;
     long long v;
-    size_t remain;
 
     struct reader_task *task = &r->rstack[r->sidx];
     struct pos_array *arr = pos_array_get(task, REP_STRING);
@@ -280,17 +279,17 @@ static int process_string(struct reader *r)
                 }
                 break;
             case PARSE_STRING_ENTITY:
-                remain = r->buf->end - p;
-                more = r->string_size - remain;
+                remain = r->buf->last - p;
 
-                if (more <= 0) {
+                if (r->string_size < remain) {
                     r->string_type = PARSE_STRING_END;
                     r->buf->pos += r->string_size;
+                    pos_array_push(arr, r->string_size, p);
                 } else {
-                    r->string_size = more;
-                    r->buf->pos += remain;
+                    r->string_size -= remain;
+                    r->buf->pos += remain - 1;
+                    pos_array_push(arr, remain, p);
                 }
-                pos_array_push(arr, more <= 0 ? r->string_size : remain, p);
                 break;
             case PARSE_STRING_END:
                 task->cur_data = NULL;
@@ -445,7 +444,42 @@ int parse(struct reader *r)
     return 0;
 }
 
-struct reader *reader_init()
+void pos_array_free(struct pos_array *arr)
+{
+    if (arr == NULL) return;
+    if (arr->items != NULL) free(arr->items);
+    arr->items = NULL;
+    arr->pos_len = 0;
+    arr->str_len = 0;
+    arr->max_pos_size = 0;
+    free(arr);
+}
+
+void redis_data_free(struct redis_data *data)
+{
+    if (data == NULL) return;
+
+    size_t i;
+    switch (data->type) {
+        case REP_STRING:
+        case REP_SIMPLE_STRING:
+        case REP_ERROR:
+            pos_array_free(data->pos);
+            data->pos = NULL;
+            break;
+        case REP_ARRAY:
+            if (data->element == NULL) break;
+            for (i = 0; i < data->elements; i++) {
+                redis_data_free(data->element[i]);
+            }
+            free(data->element);
+            data->element = NULL;
+            data->elements = 0;
+    }
+    free(data);
+}
+
+struct reader *reader_create()
 {
     struct reader *r = malloc(sizeof(struct reader));
     r->type = PARSE_BEGIN;
@@ -458,6 +492,22 @@ struct reader *reader_init()
     r->sign = 1;
     r->ready = 0;
     return r;
+}
+
+void reader_free(struct reader *r)
+{
+    if (r == NULL) return;
+    if (r->data != NULL) {
+        redis_data_free(r->data);
+        r->data = NULL;
+    }
+    int i;
+    for (i = 0; i <= r->sidx; i++) {
+        if (r->rstack[i].data == NULL) continue;
+        redis_data_free(r->rstack[i].data);
+    }
+    r->sidx = -1;
+    free(r);
 }
 
 void reader_feed(struct reader *r, struct mbuf *buf)

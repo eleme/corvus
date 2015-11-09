@@ -181,11 +181,8 @@ struct connection *conn_get_server(struct context *ctx, uint16_t slot)
 struct mbuf *conn_get_buf(struct connection *conn)
 {
     struct mbuf *buf;
-    STAILQ_FOREACH(buf, &conn->data, next) {
-        LOG(DEBUG, "refcount %d", buf->refcount);
-    }
     buf = mbuf_queue_top(conn->ctx, &conn->data);
-    if (mbuf_full(buf)) {
+    if (buf->pos >= buf->end) {
         buf = mbuf_get(conn->ctx);
         mbuf_queue_insert(&conn->data, buf);
     }

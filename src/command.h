@@ -40,12 +40,11 @@ struct command {
     int slot;
     int cmd_type;
     int request_type;
-    int response_type;
 
     int cmd_count;
-    int cmd_max_size;
     struct cmd_tqh sub_cmds;
     struct command *parent;
+
     struct redis_data *req_data;
     struct redis_data *rep_data;
 
@@ -53,6 +52,7 @@ struct command {
     struct buf_ptr rep_buf[2];
 
     struct connection *client;
+    struct connection *server;
 };
 
 struct redirect_info {
@@ -75,11 +75,13 @@ int cmd_read(struct command *cmd, int fd, int type);
 int cmd_read_reply(struct command *cmd, struct connection *server);
 int cmd_read_request(struct command *cmd, int fd);
 void init_command_map();
-struct mbuf *cmd_get_reply_buf(struct command *cmd);
 void cmd_mark_done(struct command *cmd);
 void cmd_parse_redirect(struct command *cmd, struct redirect_info *info);
-void cmd_create_iovec(struct buf_ptr *start, struct buf_ptr *end, struct iov_data *iov);
 void cmd_make_iovec(struct command *cmd, struct iov_data *iov);
 void cmd_mark_fail(struct command *cmd);
+void cmd_free(struct command *cmd);
+struct command *cmd_create(struct context *ctx);
+void cmd_create_iovec(struct command *cmd, struct buf_ptr *start,
+        struct buf_ptr *end, struct iov_data *iov);
 
 #endif /* end of include guard: __COMMAND_H */

@@ -24,6 +24,11 @@ static void server_eof(struct connection *server)
         cmd_mark_fail(c);
         STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
     }
+
+    STAILQ_FOREACH(c, &server->retry_queue, retry_next) {
+        cmd_mark_fail(c);
+        STAILQ_REMOVE_HEAD(&server->retry_queue, retry_next);
+    }
 }
 
 static int on_write(struct connection *server, struct cmd_tqh *queue)
@@ -35,7 +40,7 @@ static int on_write(struct connection *server, struct cmd_tqh *queue)
 
     struct iov_data iov;
     memset(&iov, 0, sizeof(struct iov_data));
-    cmd_create_iovec(&cmd->req_buf[0], &cmd->req_buf[1], &iov);
+    cmd_create_iovec(NULL, &cmd->req_buf[0], &cmd->req_buf[1], &iov);
     if (iov.len <= 0) {
         LOG(WARN, "no data to write");
         return -1;
@@ -97,7 +102,6 @@ static int read_one_reply(struct connection *server)
     struct redirect_info info = {.addr = NULL, .type = CMD_ERR, .slot = -1};
     switch (cmd->rep_data->type) {
         case REP_ERROR:
-            LOG(DEBUG, "error");
             cmd_parse_redirect(cmd, &info);
             LOG(DEBUG, "redirect -> %s", info.addr);
             switch (info.type) {

@@ -167,13 +167,15 @@ static int do_update_slot_map(struct connection *server, int use_addr)
         return -1;
     }
 
-    struct command *cmd = cmd_get_lastest(NULL, &server->cmd_queue);
+    struct command *cmd = cmd_create(&slot_map_ctx);
+    cmd->server = server;
     if(cmd_read_reply(cmd, server) != CORVUS_OK) {
         LOG(ERROR, "update_slot_map: cmd read error");
         return -1;
     }
 
     int count = parse_slots_data(cmd->rep_data);
+    cmd_free(cmd);
     return count;
 }
 
@@ -368,6 +370,8 @@ int slot_init_updater(bool syslog, int log_level)
     slot_map_ctx.log_level = log_level;
     mbuf_init(&slot_map_ctx);
     log_init(&slot_map_ctx);
+    STAILQ_INIT(&slot_map_ctx.free_cmdq);
+    slot_map_ctx.nfree_cmdq = 0;
 
     memset(slot_map, 0, sizeof(struct node_info*) * REDIS_CLUSTER_SLOTS);
     STAILQ_INIT(&job_queue);

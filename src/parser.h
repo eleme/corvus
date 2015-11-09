@@ -97,7 +97,8 @@ struct pos_array {
     struct pos *items;
 };
 
-struct reader *reader_init();
+struct reader *reader_create();
+void reader_free(struct reader *r);
 void reader_feed(struct reader *r, struct mbuf *buf);
 int reader_ready(struct reader *r);
 int parse(struct reader *r);
@@ -105,5 +106,6 @@ struct pos *pos_get(struct pos_array *arr, int idx);
 size_t pos_str_len(struct pos *pos);
 char *pos_to_str(struct pos_array *pos);
 int pos_array_compare(struct pos_array *arr, char *data, int len);
+void redis_data_free(struct redis_data *data);
 
 #endif /* end of include guard: __PARSER_H */

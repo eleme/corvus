@@ -29,6 +29,9 @@ struct context {
     size_t mbuf_chunk_size;
     size_t mbuf_offset;
 
+    uint32_t nfree_cmdq;
+    struct cmd_tqh free_cmdq;
+
     /* logging */
     bool syslog;
     int log_level;

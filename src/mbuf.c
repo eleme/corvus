@@ -13,6 +13,7 @@ static struct mbuf *_mbuf_get(struct context *ctx)
         mbuf = STAILQ_FIRST(&ctx->free_mbufq);
         STAILQ_REMOVE_HEAD(&ctx->free_mbufq, next);
         ctx->nfree_mbufq--;
+        STAILQ_NEXT(mbuf, next) = NULL;
     } else {
         buf = (uint8_t*)malloc(ctx->mbuf_chunk_size);
         if (buf == NULL) {
@@ -75,14 +76,9 @@ struct mbuf *mbuf_get(struct context *ctx)
 
 void mbuf_recycle(struct context *ctx, struct mbuf *mbuf)
 {
+    STAILQ_NEXT(mbuf, next) = NULL;
     STAILQ_INSERT_HEAD(&ctx->free_mbufq, mbuf, next);
     ctx->nfree_mbufq++;
-}
-
-void mbuf_rewind(struct mbuf *mbuf)
-{
-    mbuf->pos = mbuf->start;
-    mbuf->last = mbuf->start;
 }
 
 uint32_t mbuf_read_size(struct mbuf *mbuf)
@@ -98,45 +94,6 @@ uint32_t mbuf_write_size(struct mbuf *mbuf)
 size_t mbuf_size(struct context *ctx)
 {
     return ctx->mbuf_offset;
-}
-
-void mbuf_copy(struct mbuf *mbuf, uint8_t *pos, size_t n)
-{
-    if (n == 0) {
-        return;
-    }
-
-    memcpy(mbuf->last, pos, n);
-    mbuf->last += n;
-}
-
-/*
- * Put partial data to the next mbuf.
- */
-struct mbuf * mbuf_split(struct context *ctx, struct mbuf *mbuf, uint8_t *pos,
-        mbuf_copy_t cb, void *cbarg)
-{
-    struct mbuf *nbuf;
-    size_t size;
-
-    nbuf = mbuf_get(ctx);
-    if (nbuf == NULL) {
-        return NULL;
-    }
-
-    if (cb != NULL) {
-        /* precopy nbuf */
-        cb(nbuf, cbarg);
-    }
-
-    /* copy data from mbuf to nbuf */
-    size = (size_t)(mbuf->last - pos);
-    mbuf_copy(nbuf, pos, size);
-
-    /* adjust mbuf */
-    mbuf->last = pos;
-
-    return nbuf;
 }
 
 void mbuf_queue_init(struct mhdr *mhdr)

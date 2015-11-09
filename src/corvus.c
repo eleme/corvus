@@ -24,6 +24,9 @@ static void context_init(struct context *ctx, bool syslog, int log_level)
     ctx->server_table = hash_new();
     mbuf_init(ctx);
     log_init(ctx);
+
+    STAILQ_INIT(&ctx->free_cmdq);
+    ctx->nfree_cmdq = 0;
 }
 
 void config_init()

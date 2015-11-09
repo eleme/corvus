@@ -26,8 +26,6 @@ struct mbuf {
     int                refcount;
 };
 
-typedef void (*mbuf_copy_t)(struct mbuf *, void *);
-
 STAILQ_HEAD(mhdr, mbuf);
 
 #define MBUF_MAGIC      0xdeadbeef
@@ -50,12 +48,9 @@ void mbuf_init(struct context *);
 void mbuf_deinit(struct context *);
 struct mbuf *mbuf_get(struct context *);
 void mbuf_recycle(struct context *, struct mbuf *);
-void mbuf_rewind(struct mbuf *);
 uint32_t mbuf_read_size(struct mbuf *);
 uint32_t mbuf_write_size(struct mbuf *);
 size_t mbuf_size(struct context *);
-void mbuf_copy(struct mbuf *, uint8_t *, size_t);
-struct mbuf *mbuf_split(struct context *, struct mbuf *, uint8_t*, mbuf_copy_t, void*);
 void mbuf_queue_insert(struct mhdr *, struct mbuf *);
 struct mbuf *mbuf_queue_top(struct context *, struct mhdr *);
 void mbuf_queue_init(struct mhdr *);
