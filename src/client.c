@@ -38,7 +38,7 @@ static int on_write(struct connection *client)
     return 0;
 }
 
-static void ready(struct connection *self, struct event_loop *loop, uint32_t mask)
+static void client_ready(struct connection *self, struct event_loop *loop, uint32_t mask)
 {
     if (mask & E_READABLE) {
         LOG(DEBUG, "client readable");
@@ -65,6 +65,6 @@ struct connection *client_create(struct context *ctx, int fd)
     socket_set_nonblocking(fd);
 
     client->fd = fd;
-    client->ready = ready;
+    client->ready = client_ready;
     return client;
 }
