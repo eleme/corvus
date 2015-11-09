@@ -479,9 +479,8 @@ void redis_data_free(struct redis_data *data)
     free(data);
 }
 
-struct reader *reader_create()
+void reader_init(struct reader *r)
 {
-    struct reader *r = malloc(sizeof(struct reader));
     r->type = PARSE_BEGIN;
     r->buf = NULL;
     r->data = NULL;
@@ -491,7 +490,6 @@ struct reader *reader_create()
 
     r->sign = 1;
     r->ready = 0;
-    return r;
 }
 
 void reader_free(struct reader *r)
@@ -507,7 +505,6 @@ void reader_free(struct reader *r)
         redis_data_free(r->rstack[i].data);
     }
     r->sidx = -1;
-    free(r);
 }
 
 void reader_feed(struct reader *r, struct mbuf *buf)

@@ -5,10 +5,6 @@
 #include "logging.h"
 
 TEST(test_parse_redirect) {
-    struct context ctx = {.syslog = false, .log_level = DEBUG};
-    mbuf_init(&ctx);
-    log_init(&ctx);
-
     char data1[] = "MOV";
     char data2[] = "ED 866 127.0.0.1:8001";
 
@@ -29,6 +25,7 @@ TEST(test_parse_redirect) {
     struct redirect_info info = {.addr = NULL, .type = CMD_ERR, .slot = -1};
     cmd_parse_redirect(&cmd, &info);
     ASSERT(strncmp(info.addr, "127.0.0.1:8001", 14) == 0);
+    free(info.addr);
     ASSERT(info.slot == 866);
     ASSERT(info.type == CMD_ERR_MOVED);
     PASS(NULL);

@@ -177,4 +177,9 @@ static void post_case()
           c->passed, c->failed, c->skipped);
 }
 
+
+struct context;
+void context_init(struct context *ctx);
+void context_free(struct context *ctx);
+
 #endif

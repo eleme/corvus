@@ -177,11 +177,13 @@ void cmd_init(struct context *ctx, struct command *cmd)
     cmd->cmd_done_count = 0;
     cmd->cmd_fail = 0;
     cmd->cmd_fail_count = 0;
+
     cmd->ctx = ctx;
+    reader_init(&cmd->reader);
+
     mbuf_queue_init(&cmd->buf_queue);
     mbuf_queue_init(&cmd->rep_queue);
 
-    cmd->reader = NULL;
     cmd->req_data = NULL;
     cmd->rep_data = NULL;
 
@@ -227,10 +229,8 @@ void cmd_free(struct command *cmd)
         cmd->rep_data = NULL;
     }
 
-    if (cmd->reader != NULL) {
-        reader_free(cmd->reader);
-        cmd->reader = NULL;
-    }
+    reader_free(&cmd->reader);
+    reader_init(&cmd->reader);
 
     while (!STAILQ_EMPTY(&cmd->rep_queue)) {
         buf = STAILQ_FIRST(&cmd->rep_queue);
@@ -537,12 +537,12 @@ void cmd_parse_redirect(struct command *cmd, struct redirect_info *info)
 
     if (strncmp(err, "MOVED", 5) == 0) {
         /* MOVED 16383 127.0.0.1:8001 */
-        info->addr = malloc(sizeof(char) * (pos->str_len - 11));
+        info->addr = malloc(sizeof(char) * (pos->str_len));
         info->type = CMD_ERR_MOVED;
         sscanf(err, "%s%d%s", name, (int*)&info->slot, info->addr);
     } else if (strncmp(err, "ASK", 3) == 0) {
         /* ASK 16383 127.0.0.1:8001 */
-        info->addr = malloc(sizeof(char) * (pos->str_len - 9));
+        info->addr = malloc(sizeof(char) * (pos->str_len));
         info->type = CMD_ERR_ASK;
         sscanf(err, "%s%d%s", name, (int*)&info->slot, info->addr);
     }
@@ -762,7 +762,7 @@ struct command *cmd_get_lastest(struct context *ctx, struct cmd_tqh *q)
 int cmd_parse_req(struct command *cmd, struct mbuf *buf)
 {
     struct command *ncmd;
-    struct reader *r = cmd->reader;
+    struct reader *r = &cmd->reader;
     reader_feed(r, buf);
 
     while (buf->pos < buf->last) {
@@ -798,7 +798,7 @@ int cmd_parse_req(struct command *cmd, struct mbuf *buf)
 
 int cmd_parse_rep(struct command *cmd, struct mbuf *buf)
 {
-    struct reader *r = cmd->reader;
+    struct reader *r = &cmd->reader;
     reader_feed(r, buf);
 
     while (buf->pos < buf->last) {
@@ -824,8 +824,6 @@ int cmd_read_request(struct command *cmd, int fd)
     int n;
     struct mbuf *buf;
 
-    if (cmd->reader == NULL) cmd->reader = reader_create();
-
     while (1) {
         do {
             buf = cmd_get_buf(cmd);
@@ -837,7 +835,7 @@ int cmd_read_request(struct command *cmd, int fd)
             if (cmd_parse_req(cmd, buf) == CORVUS_ERR) {
                 return CORVUS_ERR;
             }
-        } while (!reader_ready(cmd->reader));
+        } while (!reader_ready(&cmd->reader));
     }
 
     return CORVUS_OK;
@@ -848,15 +846,13 @@ int cmd_read_reply(struct command *cmd, struct connection *server)
     int n, rsize;
     struct mbuf *buf;
 
-    if (cmd->reader == NULL) cmd->reader = reader_create();
-
     do {
         buf = conn_get_buf(server);
         rsize = mbuf_read_size(buf);
 
         if (rsize > 0) {
             if (cmd_parse_rep(cmd, buf) == -1) return CORVUS_ERR;
-            if (reader_ready(cmd->reader)) return CORVUS_OK;
+            if (reader_ready(&cmd->reader)) return CORVUS_OK;
             continue;
         }
 
@@ -867,7 +863,7 @@ int cmd_read_reply(struct command *cmd, struct connection *server)
         if (cmd_parse_rep(cmd, buf) == -1) {
             return CORVUS_ERR;
         }
-    } while (!reader_ready(cmd->reader));
+    } while (!reader_ready(&cmd->reader));
 
     return CORVUS_OK;
 }

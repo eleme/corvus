@@ -97,7 +97,7 @@ struct pos_array {
     struct pos *items;
 };
 
-struct reader *reader_create();
+void reader_init(struct reader *r);
 void reader_free(struct reader *r);
 void reader_feed(struct reader *r, struct mbuf *buf);
 int reader_ready(struct reader *r);

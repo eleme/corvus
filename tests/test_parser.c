@@ -6,9 +6,8 @@
 #include "logging.h"
 
 TEST(test_nested_array) {
-    struct context ctx = {.syslog = false, .log_level = DEBUG};
-    mbuf_init(&ctx);
-    log_init(&ctx);
+    struct context ctx;
+    context_init(&ctx);
 
     char data[] = "*3\r\n$3\r\nSET\r\n*1\r\n$5\r\nhello\r\n$3\r\n123\r\n";
     size_t len = strlen(data);
@@ -17,15 +16,16 @@ TEST(test_nested_array) {
     memcpy(buf->last, data, len);
     buf->last += len;
 
-    struct reader *r = reader_init();
-    reader_feed(r, buf);
+    struct reader r;
+    reader_init(&r);
+    reader_feed(&r, buf);
 
-    if (parse(r) == -1) {
+    if (parse(&r) == -1) {
         printf("protocol error");
         FAIL(NULL);
     }
 
-    struct redis_data *d = r->data;
+    struct redis_data *d = r.data;
     ASSERT(d != NULL);
     ASSERT(d->elements == 3);
 
@@ -46,13 +46,15 @@ TEST(test_nested_array) {
     ASSERT(f3->pos->items[0].len == 3);
     ASSERT(strncmp("123", (const char *)f3->pos->items[0].str, 3) == 0);
 
+    mbuf_recycle(&ctx, buf);
+    reader_free(&r);
+    context_free(&ctx);
     PASS(NULL);
 }
 
 TEST(test_partial_parse) {
-    struct context ctx = {.syslog = false, .log_level = DEBUG};
-    mbuf_init(&ctx);
-    log_init(&ctx);
+    struct context ctx;
+    context_init(&ctx);
 
     int i;
     char value[16384];
@@ -71,10 +73,11 @@ TEST(test_partial_parse) {
     memcpy(buf->last, value, mbuf_write_size(buf));
     buf->last += size;
 
-    struct reader *reader = reader_init(&ctx);
-    reader_feed(reader, buf);
+    struct reader reader;
+    reader_init(&reader);
+    reader_feed(&reader, buf);
 
-    if (parse(reader) == -1) {
+    if (parse(&reader) == -1) {
         printf("Protocol Error");
         FAIL(NULL);
     }
@@ -86,14 +89,14 @@ TEST(test_partial_parse) {
     memcpy(buf2->last, "\r\n", 2);
     buf2->last += 2;
 
-    reader_feed(reader, buf2);
-    if (parse(reader) == -1) {
+    reader_feed(&reader, buf2);
+    if (parse(&reader) == -1) {
         printf("Protocol Error");
         FAIL(NULL);
     }
 
-    ASSERT(reader->ready);
-    struct redis_data *d = reader->data;
+    ASSERT(reader.ready);
+    struct redis_data *d = reader.data;
     ASSERT(d->elements == 3);
     ASSERT(d->element[0]->pos->pos_len == 1);
     ASSERT(d->element[0]->pos->items[0].len == 3);
@@ -108,41 +111,44 @@ TEST(test_partial_parse) {
     uint32_t remain = 16387 - size;
     ASSERT(d->element[2]->pos->items[1].len == remain);
     ASSERT(strncmp(value, (const char *)d->element[2]->pos->items[1].str, remain) == 0);
+
+    mbuf_recycle(&ctx, buf);
+    mbuf_recycle(&ctx, buf2);
+    reader_free(&reader);
+    context_free(&ctx);
     PASS(NULL);
 }
 
 TEST(test_process_integer) {
-    struct context ctx = {.syslog = false, .log_level = DEBUG};
-    mbuf_init(&ctx);
-    log_init(&ctx);
-
     struct mbuf buf;
 
     char data[] = ":40235\r\n:231\r\n";
     size_t len = strlen(data);
 
-    buf.pos = data;
-    buf.last = data + len;
+    buf.pos = (uint8_t*)data;
+    buf.last = (uint8_t*)data + len;
 
-    struct reader *r = reader_init(&ctx);
-    r->buf = &buf;
+    struct reader r;
+    reader_init(&r);
+    reader_feed(&r, &buf);
 
-    ASSERT(parse(r) != -1);
-    ASSERT(r->ready == 1);
-    ASSERT(r->data != NULL);
-    ASSERT(r->data->type == REP_INTEGER);
-    ASSERT(r->data->integer == 40235);
+    struct redis_data *d;
+    ASSERT(parse(&r) != -1);
+    ASSERT(r.ready == 1);
+    ASSERT(r.data != NULL);
+    ASSERT(r.data->type == REP_INTEGER);
+    ASSERT(r.data->integer == 40235);
+    d = r.data;
 
-    ASSERT(parse(r) != -1);
-    ASSERT(r->data->integer == 231);
+    ASSERT(parse(&r) != -1);
+    ASSERT(r.data->integer == 231);
+
+    redis_data_free(d);
+    reader_free(&r);
     PASS(NULL);
 }
 
 TEST(test_empty_array) {
-    struct context ctx = {.syslog = false, .log_level = DEBUG};
-    mbuf_init(&ctx);
-    log_init(&ctx);
-
     struct mbuf buf;
 
     char data[] = "*0\r\n$5\r\nhello\r\n";
@@ -152,24 +158,26 @@ TEST(test_empty_array) {
     buf.last = (uint8_t*)data + len;
     buf.end = buf.last;
 
-    struct reader *r = reader_init(&ctx);
-    r->buf = &buf;
+    struct reader r;
+    reader_init(&r);
+    reader_feed(&r, &buf);
 
-    ASSERT(parse(r) != -1);
-    ASSERT(r->ready == 1);
-    ASSERT(r->data->type == REP_ARRAY);
-    ASSERT(r->data->elements == 0);
-    ASSERT(r->data->element == NULL);
+    struct redis_data *d;
+    ASSERT(parse(&r) != -1);
+    ASSERT(r.ready == 1);
+    ASSERT(r.data->type == REP_ARRAY);
+    ASSERT(r.data->elements == 0);
+    ASSERT(r.data->element == NULL);
+    d = r.data;
 
-    ASSERT(parse(r) != -1);
+    ASSERT(parse(&r) != -1);
+
+    redis_data_free(d);
+    reader_free(&r);
     PASS(NULL);
 }
 
 TEST(test_parse_simple_string) {
-    struct context ctx = {.syslog = false, .log_level = DEBUG};
-    mbuf_init(&ctx);
-    log_init(&ctx);
-
     struct mbuf buf;
 
     char data1[] = "+O";
@@ -182,10 +190,11 @@ TEST(test_parse_simple_string) {
     buf.last = (uint8_t*)data1 + len1;
     buf.end = buf.last;
 
-    struct reader *r = reader_init(&ctx);
-    r->buf = &buf;
+    struct reader r;
+    reader_init(&r);
+    reader_feed(&r, &buf);
 
-    ASSERT(parse(r) != -1);
+    ASSERT(parse(&r) != -1);
 
     struct mbuf buf2;
 
@@ -193,17 +202,14 @@ TEST(test_parse_simple_string) {
     buf2.last = (uint8_t*)data2 + len2;
     buf2.end = buf2.last;
 
-    r->buf = &buf2;
-    ASSERT(parse(r) != -1);
+    reader_feed(&r, &buf2);
+    ASSERT(parse(&r) != -1);
 
+    reader_free(&r);
     PASS(NULL);
 }
 
 TEST(test_parse_error) {
-    struct context ctx = {.syslog = false, .log_level = DEBUG};
-    mbuf_init(&ctx);
-    log_init(&ctx);
-
     struct mbuf buf;
 
     char data1[] = "-MOV";
@@ -212,72 +218,67 @@ TEST(test_parse_error) {
     size_t len1 = strlen(data1);
     size_t len2 = strlen(data2);
 
-    buf.pos = data1;
-    buf.last = data1 + len1;
+    buf.pos = (uint8_t*)data1;
+    buf.last = (uint8_t*)data1 + len1;
     buf.end = buf.last;
 
-    struct reader *r = reader_init(&ctx);
-    r->buf = &buf;
+    struct reader r;
+    reader_init(&r);
+    reader_feed(&r, &buf);
 
-    ASSERT(parse(r) != -1);
+    ASSERT(parse(&r) != -1);
 
     struct mbuf buf2;
 
-    buf2.pos = data2;
-    buf2.last = data2 + len2;
+    buf2.pos = (uint8_t*)data2;
+    buf2.last = (uint8_t*)data2 + len2;
     buf2.end = buf2.last;
 
-    r->buf = &buf2;
-    ASSERT(parse(r) != -1);
+    reader_feed(&r, &buf2);
+    ASSERT(parse(&r) != -1);
 
+    reader_free(&r);
     PASS(NULL);
 }
 
 TEST(test_parse_null_string) {
-    struct context ctx = {.syslog = false, .log_level = DEBUG};
-    mbuf_init(&ctx);
-    log_init(&ctx);
-
     struct mbuf buf;
 
     char data[] = "$-1\r\n";
 
-    buf.pos = data;
-    buf.last = data + strlen(data);
+    buf.pos = (uint8_t*)data;
+    buf.last = (uint8_t*)data + strlen(data);
     buf.end = buf.last;
 
-    struct reader *r = reader_init(&ctx);
-    r->buf = &buf;
+    struct reader r;
+    reader_init(&r);
+    reader_feed(&r, &buf);
 
-    ASSERT(parse(r) != -1);
+    ASSERT(parse(&r) != -1);
+    reader_free(&r);
     PASS(NULL);
 }
 
 TEST(test_parse_null_array) {
-    struct context ctx = {.syslog = false, .log_level = DEBUG};
-    mbuf_init(&ctx);
-    log_init(&ctx);
-
     struct mbuf buf;
 
     char data[] = "*-1\r\n";
 
-    buf.pos = data;
-    buf.last = data + strlen(data);
+    buf.pos = (uint8_t*)data;
+    buf.last = (uint8_t*)data + strlen(data);
     buf.end = buf.last;
 
-    struct reader *r = reader_init(&ctx);
-    r->buf = &buf;
+    struct reader r;
+    reader_init(&r);
+    reader_feed(&r, &buf);
 
-    ASSERT(parse(r) != -1);
+    ASSERT(parse(&r) != -1);
+
+    reader_free(&r);
     PASS(NULL);
 }
 
 TEST(test_parse_minus_integer) {
-    struct context ctx = {.syslog = false, .log_level = DEBUG};
-    mbuf_init(&ctx);
-    log_init(&ctx);
-
     struct mbuf buf;
 
     char data[] = ":-1\r\n";
@@ -286,10 +287,13 @@ TEST(test_parse_minus_integer) {
     buf.last = (uint8_t*)data + strlen(data);
     buf.end = buf.last;
 
-    struct reader *r = reader_init(&ctx);
-    r->buf = &buf;
+    struct reader r;
+    reader_init(&r);
+    reader_feed(&r, &buf);
 
-    ASSERT(parse(r) != -1);
+    ASSERT(parse(&r) != -1);
+
+    reader_free(&r);
     PASS(NULL);
 }
 

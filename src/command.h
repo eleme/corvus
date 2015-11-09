@@ -29,8 +29,10 @@ struct command {
     STAILQ_ENTRY(command) sub_cmd_next;
     struct mhdr buf_queue;
     struct mhdr rep_queue;
+
     struct context *ctx;
-    struct reader *reader;
+    struct reader reader;
+
     int parse_done;
     int cmd_done;
     int cmd_fail;
