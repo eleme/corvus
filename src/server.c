@@ -129,7 +129,7 @@ static int on_read(struct connection *server)
     return status;
 }
 
-static void ready(struct connection *self, struct event_loop *loop, uint32_t mask)
+static void server_ready(struct connection *self, struct event_loop *loop, uint32_t mask)
 {
     if (mask & E_ERROR) {
         LOG(DEBUG, "error");
@@ -171,6 +171,6 @@ struct connection *server_create(struct context *ctx, int fd)
 {
     struct connection *server = conn_create(ctx);
     server->fd = fd;
-    server->ready = ready;
+    server->ready = server_ready;
     return server;
 }

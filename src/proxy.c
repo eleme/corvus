@@ -10,7 +10,7 @@
 #include "logging.h"
 #include "command.h"
 
-static void ready(struct connection *self, struct event_loop *loop, uint32_t mask)
+static void proxy_ready(struct connection *self, struct event_loop *loop, uint32_t mask)
 {
     char ip[16];
     int port;
@@ -35,7 +35,7 @@ struct connection *proxy_create(struct context *ctx, char *host, int port)
     proxy = malloc(sizeof(struct connection));
     proxy->ctx = ctx;
     proxy->fd = fd;
-    proxy->ready = ready;
+    proxy->ready = proxy_ready;
     cmd_queue_init(&proxy->cmd_queue);
     return proxy;
 }
