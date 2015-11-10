@@ -71,19 +71,18 @@ struct iov_data {
 };
 
 
+void init_command_map();
+struct command *cmd_create(struct context *ctx);
 void cmd_queue_init(struct cmd_tqh *cmd_queue);
 struct command *cmd_get_lastest(struct context *ctx, struct cmd_tqh *q);
-int cmd_read(struct command *cmd, int fd, int type);
 int cmd_read_reply(struct command *cmd, struct connection *server);
 int cmd_read_request(struct command *cmd, int fd);
-void init_command_map();
-void cmd_mark_done(struct command *cmd);
-void cmd_parse_redirect(struct command *cmd, struct redirect_info *info);
-void cmd_make_iovec(struct command *cmd, struct iov_data *iov);
-void cmd_mark_fail(struct command *cmd);
-void cmd_free(struct command *cmd);
-struct command *cmd_create(struct context *ctx);
 void cmd_create_iovec(struct command *cmd, struct buf_ptr *start,
         struct buf_ptr *end, struct iov_data *iov);
+void cmd_make_iovec(struct command *cmd, struct iov_data *iov);
+void cmd_parse_redirect(struct command *cmd, struct redirect_info *info);
+void cmd_mark_done(struct command *cmd);
+void cmd_mark_fail(struct command *cmd);
+void cmd_free(struct command *cmd);
 
 #endif /* end of include guard: __COMMAND_H */

@@ -171,7 +171,7 @@ static const char *rep_ping = "+PONG\r\n";
 static struct cmd_item cmds[] = {CMD_DO(CMD_BUILD_MAP)};
 static hash_t *command_map;
 
-void cmd_init(struct context *ctx, struct command *cmd)
+static void cmd_init(struct context *ctx, struct command *cmd)
 {
     cmd->parse_done = 0;
     cmd->cmd_done = 0;
@@ -203,7 +203,7 @@ void cmd_init(struct context *ctx, struct command *cmd)
     cmd->server = NULL;
 }
 
-void cmd_recycle(struct context *ctx, struct command *cmd)
+static void cmd_recycle(struct context *ctx, struct command *cmd)
 {
     LOG(DEBUG, "cmd recycle");
     STAILQ_NEXT(cmd, cmd_next) = NULL;
@@ -213,44 +213,6 @@ void cmd_recycle(struct context *ctx, struct command *cmd)
     STAILQ_NEXT(cmd, sub_cmd_next) = NULL;
     STAILQ_INSERT_HEAD(&ctx->free_cmdq, cmd, cmd_next);
     ctx->nfree_cmdq++;
-}
-
-void cmd_free(struct command *cmd)
-{
-    LOG(DEBUG, "do free");
-    struct mbuf *buf;
-    struct command *c;
-    struct context *ctx = cmd->ctx;
-    if (cmd->req_data != NULL) {
-        redis_data_free(cmd->req_data);
-        cmd->req_data = NULL;
-    }
-    if (cmd->rep_data != NULL) {
-        redis_data_free(cmd->rep_data);
-        cmd->rep_data = NULL;
-    }
-
-    reader_free(&cmd->reader);
-    reader_init(&cmd->reader);
-
-    while (!STAILQ_EMPTY(&cmd->rep_queue)) {
-        buf = STAILQ_FIRST(&cmd->rep_queue);
-        STAILQ_REMOVE_HEAD(&cmd->rep_queue, next);
-        mbuf_recycle(ctx, buf);
-    }
-
-    while (!STAILQ_EMPTY(&cmd->buf_queue)) {
-        buf = STAILQ_FIRST(&cmd->buf_queue);
-        STAILQ_REMOVE_HEAD(&cmd->buf_queue, next);
-        mbuf_recycle(ctx, buf);
-    }
-
-    while (!STAILQ_EMPTY(&cmd->sub_cmds)) {
-        c = STAILQ_FIRST(&cmd->sub_cmds);
-        STAILQ_REMOVE_HEAD(&cmd->sub_cmds, sub_cmd_next);
-        cmd_free(c);
-    }
-    cmd_recycle(ctx, cmd);
 }
 
 static void cmd_get_map_key(struct pos_array *pos, char *key)
@@ -342,26 +304,32 @@ static int cmd_forward_basic(struct command *cmd)
     return 0;
 }
 
-static void cmd_apply_range(struct command *cmd)
+static void cmd_apply_range(struct command *cmd, int type)
 {
     struct mbuf *first, *last;
-    first = STAILQ_FIRST(&cmd->buf_queue);
-    last = STAILQ_LAST(&cmd->buf_queue, mbuf, next);
-    cmd->req_buf[0].buf = first;
-    cmd->req_buf[0].pos = first->pos;
-    cmd->req_buf[1].buf = last;
-    cmd->req_buf[1].pos = last->last;
-}
+    struct buf_ptr *start, *end;
 
-static void cmd_apply_rep_range(struct command *cmd)
-{
-    struct mbuf *first, *last;
-    first = STAILQ_FIRST(&cmd->rep_queue);
-    last = STAILQ_LAST(&cmd->rep_queue, mbuf, next);
-    cmd->rep_buf[0].buf = first;
-    cmd->rep_buf[0].pos = first->pos;
-    cmd->rep_buf[1].buf = last;
-    cmd->rep_buf[1].pos = last->last;
+    switch (type) {
+        case CMD_REQ:
+            first = STAILQ_FIRST(&cmd->buf_queue);
+            last = STAILQ_LAST(&cmd->buf_queue, mbuf, next);
+            start = &cmd->req_buf[0];
+            end = &cmd->req_buf[1];
+            break;
+        case CMD_REP:
+            first = STAILQ_FIRST(&cmd->rep_queue);
+            last = STAILQ_LAST(&cmd->rep_queue, mbuf, next);
+            start = &cmd->rep_buf[0];
+            end = &cmd->rep_buf[1];
+            break;
+        default:
+            return;
+    }
+
+    start->buf = first;
+    start->pos = first->pos;
+    end->buf = last;
+    end->pos = last->last;
 }
 
 static int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len)
@@ -387,7 +355,7 @@ static int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len
 
         mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, prefix, len);
         add_fragment(ncmd, key->pos);
-        cmd_apply_range(ncmd);
+        cmd_apply_range(ncmd, CMD_REQ);
 
         STAILQ_INSERT_TAIL(&cmd->sub_cmds, ncmd, sub_cmd_next);
         cmd->cmd_count++;
@@ -427,7 +395,7 @@ static int cmd_forward_mset(struct command *cmd)
         mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, (uint8_t*)rep_set, 13);
         add_fragment(ncmd, key->pos);
         add_fragment(ncmd, value->pos);
-        cmd_apply_range(ncmd);
+        cmd_apply_range(ncmd, CMD_REQ);
 
         STAILQ_INSERT_TAIL(&cmd->sub_cmds, ncmd, sub_cmd_next);
         cmd->cmd_count++;
@@ -461,30 +429,14 @@ static int cmd_forward_complex(struct command *cmd)
     return 0;
 }
 
-struct command *cmd_create(struct context *ctx)
-{
-    struct command *cmd;
-    if (!STAILQ_EMPTY(&ctx->free_cmdq)) {
-        LOG(DEBUG, "cmd get cache");
-        cmd = STAILQ_FIRST(&ctx->free_cmdq);
-        STAILQ_REMOVE_HEAD(&ctx->free_cmdq, cmd_next);
-        ctx->nfree_cmdq--;
-        STAILQ_NEXT(cmd, cmd_next) = NULL;
-    } else {
-        cmd = malloc(sizeof(struct command));
-    }
-    cmd_init(ctx, cmd);
-    return cmd;
-}
-
-void cmd_proxy_ping(struct command *cmd)
+static void cmd_proxy_ping(struct command *cmd)
 {
     mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t *)rep_ping, 7);
-    cmd_apply_rep_range(cmd);
+    cmd_apply_range(cmd, CMD_REP);
     cmd_mark_done(cmd);
 }
 
-int cmd_proxy(struct command *cmd)
+static int cmd_proxy(struct command *cmd)
 {
     switch (cmd->cmd_type) {
     case CMD_PING:
@@ -496,7 +448,7 @@ int cmd_proxy(struct command *cmd)
     return 0;
 }
 
-int cmd_forward(struct command *cmd)
+static int cmd_forward(struct command *cmd)
 {
     switch (cmd->request_type) {
         case CMD_BASIC:
@@ -556,6 +508,315 @@ static void iov_add(struct iov_data *iov, void *buf, size_t len)
     iov->data[iov->len].iov_base = buf;
     iov->data[iov->len].iov_len = len;
     iov->len++;
+}
+
+static void cmd_gen_mget_iovec(struct command *cmd, struct iov_data *iov)
+{
+    const char *fmt = "*%ld\r\n";
+    int keys = cmd->req_data->elements - 1;
+    int n = snprintf(NULL, 0, fmt, keys);
+    char *b = malloc(sizeof(char) * (n + 1));
+    snprintf(b, n + 1, fmt, keys);
+
+    iov_add(iov, (void*)b, n);
+    iov->ptr = b;
+
+    struct command *c;
+    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
+        cmd_create_iovec(c, &c->rep_buf[0], &c->rep_buf[1], iov);
+    }
+}
+
+static void cmd_gen_mset_iovec(struct command *cmd, struct iov_data *iov)
+{
+    struct command *c;
+    struct redis_data *rep;
+    int fail = 0;
+    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
+        rep = c->rep_data;
+        if (cmd->cmd_fail || rep->type == REP_ERROR) {
+            fail = 1;
+            break;
+        }
+
+        if (rep->pos == NULL) {
+            fail = 1;
+            break;
+        }
+        if (pos_array_compare(rep->pos, "OK", 2) != 0) {
+            fail = 1;
+            break;
+        }
+    }
+    if (fail) {
+        iov_add(iov, (void*)rep_err, strlen(rep_err));
+        return;
+    }
+    iov_add(iov, (void*)rep_ok, strlen(rep_ok));
+}
+
+static void cmd_gen_del_iovec(struct command *cmd, struct iov_data *iov)
+{
+    struct command *c;
+    int one = 0, fail = 0;
+    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
+        if (c->cmd_fail || c->rep_data->type == REP_ERROR) {
+            fail = 1;
+            break;
+        }
+        if (c->rep_data->integer == 1) {
+            one = 1;
+            break;
+        }
+    }
+
+    if (fail) {
+        iov_add(iov, (void*)rep_err, strlen(rep_err));
+        return;
+    }
+    if (one) {
+        iov_add(iov, (void*)rep_one, 4);
+        return;
+    }
+    iov_add(iov, (void*)rep_zero, 4);
+}
+
+static int cmd_parse_req(struct command *cmd, struct mbuf *buf)
+{
+    struct command *ncmd;
+    struct reader *r = &cmd->reader;
+    reader_feed(r, buf);
+
+    while (buf->pos < buf->last) {
+        if (parse(r) == -1) return CORVUS_ERR;
+
+        if (reader_ready(r)) {
+            ncmd = cmd_create(cmd->ctx);
+            ncmd->parent = cmd;
+            ncmd->client = cmd->client;
+            ncmd->req_data = r->data;
+            CMD_COPY_RANGE(&ncmd->req_buf[0], &ncmd->req_buf[1], r);
+
+            STAILQ_INSERT_TAIL(&cmd->sub_cmds, ncmd, sub_cmd_next);
+            cmd->cmd_count++;
+
+            r->data = NULL;
+            r->type = PARSE_BEGIN;
+
+            if (cmd_parse_token(ncmd) == -1) {
+                cmd->cmd_fail_count++;
+                ncmd->cmd_fail = 1;
+                continue;
+            }
+            if (cmd_forward(ncmd) == -1) {
+                cmd->cmd_fail_count++;
+                ncmd->cmd_fail = 1;
+                continue;
+            }
+        }
+    }
+    return CORVUS_OK;
+}
+
+static int cmd_parse_rep(struct command *cmd, struct mbuf *buf)
+{
+    struct reader *r = &cmd->reader;
+    reader_feed(r, buf);
+
+    while (buf->pos < buf->last) {
+        if (parse(r) == -1) {
+            LOG(ERROR, "cmd_parse_rep, parse error");
+            return CORVUS_ERR;
+        }
+
+        if (reader_ready(r)) {
+            cmd->rep_data = r->data;
+            CMD_COPY_RANGE(&cmd->rep_buf[0], &cmd->rep_buf[1], r);
+
+            r->data = NULL;
+            r->type = PARSE_BEGIN;
+            break;
+        }
+    }
+    return CORVUS_OK;
+}
+
+void init_command_map()
+{
+    command_map = hash_new();
+
+    size_t i, cmds_len = sizeof(cmds) / sizeof(struct cmd_item);
+
+    for (i = 0; i < cmds_len; i++) {
+        hash_set(command_map, cmds[i].cmd, &cmds[i]);
+    }
+}
+
+struct command *cmd_create(struct context *ctx)
+{
+    struct command *cmd;
+    if (!STAILQ_EMPTY(&ctx->free_cmdq)) {
+        LOG(DEBUG, "cmd get cache");
+        cmd = STAILQ_FIRST(&ctx->free_cmdq);
+        STAILQ_REMOVE_HEAD(&ctx->free_cmdq, cmd_next);
+        ctx->nfree_cmdq--;
+        STAILQ_NEXT(cmd, cmd_next) = NULL;
+    } else {
+        cmd = malloc(sizeof(struct command));
+    }
+    cmd_init(ctx, cmd);
+    return cmd;
+}
+
+void cmd_queue_init(struct cmd_tqh *cmd_queue)
+{
+    STAILQ_INIT(cmd_queue);
+}
+
+struct command *cmd_get_lastest(struct context *ctx, struct cmd_tqh *q)
+{
+    struct command *cmd;
+    int new_cmd = 0;
+
+    if (!STAILQ_EMPTY(q)) {
+        cmd = STAILQ_LAST(q, command, cmd_next);
+        if (cmd->parse_done) {
+            new_cmd = 1;
+        }
+    } else {
+        new_cmd = 1;
+    }
+
+    if (new_cmd) {
+        cmd = cmd_create(ctx);
+        STAILQ_INSERT_TAIL(q, cmd, cmd_next);
+    }
+    return cmd;
+}
+
+int cmd_read_reply(struct command *cmd, struct connection *server)
+{
+    int n, rsize;
+    struct mbuf *buf;
+
+    do {
+        buf = conn_get_buf(server);
+        rsize = mbuf_read_size(buf);
+
+        if (rsize > 0) {
+            if (cmd_parse_rep(cmd, buf) == -1) return CORVUS_ERR;
+            if (reader_ready(&cmd->reader)) return CORVUS_OK;
+            continue;
+        }
+
+        n = socket_read(server->fd, buf);
+        if (n == 0) return CORVUS_EOF;
+        if (n == CORVUS_ERR) return CORVUS_ERR;
+        if (n == CORVUS_AGAIN) return CORVUS_AGAIN;
+        if (cmd_parse_rep(cmd, buf) == -1) {
+            return CORVUS_ERR;
+        }
+    } while (!reader_ready(&cmd->reader));
+
+    return CORVUS_OK;
+}
+
+int cmd_read_request(struct command *cmd, int fd)
+{
+    int n;
+    struct mbuf *buf;
+
+    while (1) {
+        do {
+            buf = cmd_get_buf(cmd);
+
+            n = socket_read(fd, buf);
+            if (n == 0) return CORVUS_EOF;
+            if (n == CORVUS_ERR) return CORVUS_ERR;
+            if (n == CORVUS_AGAIN) return CORVUS_AGAIN;
+            if (cmd_parse_req(cmd, buf) == CORVUS_ERR) {
+                return CORVUS_ERR;
+            }
+        } while (!reader_ready(&cmd->reader));
+    }
+
+    return CORVUS_OK;
+}
+
+void cmd_create_iovec(struct command *cmd, struct buf_ptr *start,
+        struct buf_ptr *end, struct iov_data *iov)
+{
+    struct mbuf *b = start->buf, *buf;
+    int n = get_buf_count(start, end);
+    if (n <= 0) return;
+    LOG(DEBUG, "buf count %d", n);
+
+    int remain = iov->max_size - iov->len;
+    if (n > remain) {
+        iov->max_size += n - remain;
+        iov->data = realloc(iov->data,
+                sizeof(struct iovec) * iov->max_size);
+    }
+
+    struct iovec *d = iov->data;
+    while (b != NULL) {
+        if (b == start->buf && b == end->buf) {
+            d[iov->len].iov_base = start->pos;
+            d[iov->len].iov_len = end->pos - start->pos;
+            mbuf_dec_ref_by(b, 2);
+        } else if (b == start->buf) {
+            d[iov->len].iov_base = start->pos;
+            d[iov->len].iov_len = start->buf->last - start->pos;
+            mbuf_dec_ref(b);
+        } else if (b == end->buf) {
+            d[iov->len].iov_base = b->start;
+            d[iov->len].iov_len = end->pos - b->start;
+            mbuf_dec_ref(b);
+        } else {
+            d[iov->len].iov_base = b->start;
+            d[iov->len].iov_len = b->last - b->start;
+        }
+        iov->len++;
+
+        buf = STAILQ_NEXT(b, next);
+        if (cmd != NULL && b->refcount <= 0) {
+            STAILQ_REMOVE(&cmd->server->data, b, mbuf, next);
+            STAILQ_INSERT_TAIL(&cmd->rep_queue, b, next);
+        }
+
+        if (b == end->buf) break;
+        b = buf;
+    }
+}
+
+/* cmd should be done */
+void cmd_make_iovec(struct command *cmd, struct iov_data *iov)
+{
+    LOG(DEBUG, "cmd count %d", cmd->cmd_count);
+    struct command *c;
+    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
+        if (c->cmd_fail) {
+            iov_add(iov, (void*)rep_err, strlen(rep_err));
+            continue;
+        }
+        switch (c->cmd_type) {
+            case CMD_MGET:
+                cmd_gen_mget_iovec(c, iov);
+                break;
+            case CMD_MSET:
+                cmd_gen_mset_iovec(c, iov);
+                break;
+            case CMD_DEL:
+                cmd_gen_del_iovec(c, iov);
+                break;
+            case CMD_PING:
+                cmd_create_iovec(NULL, &c->rep_buf[0], &c->rep_buf[1], iov);
+                break;
+            default:
+                cmd_create_iovec(c, &c->rep_buf[0], &c->rep_buf[1], iov);
+                break;
+        }
+    }
 }
 
 void cmd_parse_redirect(struct command *cmd, struct redirect_info *info)
@@ -629,295 +890,40 @@ void cmd_mark_fail(struct command *cmd)
     }
 }
 
-void cmd_create_iovec(struct command *cmd, struct buf_ptr *start,
-        struct buf_ptr *end, struct iov_data *iov)
+void cmd_free(struct command *cmd)
 {
-    struct mbuf *b = start->buf, *buf;
-    int n = get_buf_count(start, end);
-    if (n <= 0) return;
-    LOG(DEBUG, "buf count %d", n);
-
-    int remain = iov->max_size - iov->len;
-    if (n > remain) {
-        iov->max_size += n - remain;
-        iov->data = realloc(iov->data,
-                sizeof(struct iovec) * iov->max_size);
-    }
-
-    struct iovec *d = iov->data;
-    while (b != NULL) {
-        if (b == start->buf && b == end->buf) {
-            d[iov->len].iov_base = start->pos;
-            d[iov->len].iov_len = end->pos - start->pos;
-            mbuf_dec_ref_by(b, 2);
-        } else if (b == start->buf) {
-            d[iov->len].iov_base = start->pos;
-            d[iov->len].iov_len = start->buf->last - start->pos;
-            mbuf_dec_ref(b);
-        } else if (b == end->buf) {
-            d[iov->len].iov_base = b->start;
-            d[iov->len].iov_len = end->pos - b->start;
-            mbuf_dec_ref(b);
-        } else {
-            d[iov->len].iov_base = b->start;
-            d[iov->len].iov_len = b->last - b->start;
-        }
-        iov->len++;
-
-        buf = STAILQ_NEXT(b, next);
-        if (cmd != NULL && b->refcount <= 0) {
-            STAILQ_REMOVE(&cmd->server->data, b, mbuf, next);
-            STAILQ_INSERT_TAIL(&cmd->rep_queue, b, next);
-        }
-
-        if (b == end->buf) break;
-        b = buf;
-    }
-}
-
-void cmd_gen_mget_iovec(struct command *cmd, struct iov_data *iov)
-{
-    const char *fmt = "*%ld\r\n";
-    int keys = cmd->req_data->elements - 1;
-    int n = snprintf(NULL, 0, fmt, keys);
-    char *b = malloc(sizeof(char) * (n + 1));
-    snprintf(b, n + 1, fmt, keys);
-
-    iov_add(iov, (void*)b, n);
-    iov->ptr = b;
-
-    struct command *c;
-    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
-        cmd_create_iovec(c, &c->rep_buf[0], &c->rep_buf[1], iov);
-    }
-}
-
-void cmd_gen_mset_iovec(struct command *cmd, struct iov_data *iov)
-{
-    struct command *c;
-    struct redis_data *rep;
-    int fail = 0;
-    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
-        rep = c->rep_data;
-        if (cmd->cmd_fail || rep->type == REP_ERROR) {
-            fail = 1;
-            break;
-        }
-
-        if (rep->pos == NULL) {
-            fail = 1;
-            break;
-        }
-        if (pos_array_compare(rep->pos, "OK", 2) != 0) {
-            fail = 1;
-            break;
-        }
-    }
-    if (fail) {
-        iov_add(iov, (void*)rep_err, strlen(rep_err));
-        return;
-    }
-    iov_add(iov, (void*)rep_ok, strlen(rep_ok));
-}
-
-void cmd_gen_del_iovec(struct command *cmd, struct iov_data *iov)
-{
-    struct command *c;
-    int one = 0, fail = 0;
-    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
-        if (c->cmd_fail || c->rep_data->type == REP_ERROR) {
-            fail = 1;
-            break;
-        }
-        if (c->rep_data->integer == 1) {
-            one = 1;
-            break;
-        }
-    }
-
-    if (fail) {
-        iov_add(iov, (void*)rep_err, strlen(rep_err));
-        return;
-    }
-    if (one) {
-        iov_add(iov, (void*)rep_one, 4);
-        return;
-    }
-    iov_add(iov, (void*)rep_zero, 4);
-}
-
-/* cmd should be done */
-void cmd_make_iovec(struct command *cmd, struct iov_data *iov)
-{
-    LOG(DEBUG, "cmd count %d", cmd->cmd_count);
-    struct command *c;
-    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
-        if (c->cmd_fail) {
-            iov_add(iov, (void*)rep_err, strlen(rep_err));
-            continue;
-        }
-        switch (c->cmd_type) {
-            case CMD_MGET:
-                cmd_gen_mget_iovec(c, iov);
-                break;
-            case CMD_MSET:
-                cmd_gen_mset_iovec(c, iov);
-                break;
-            case CMD_DEL:
-                cmd_gen_del_iovec(c, iov);
-                break;
-            case CMD_PING:
-                cmd_create_iovec(NULL, &c->rep_buf[0], &c->rep_buf[1], iov);
-                break;
-            default:
-                cmd_create_iovec(c, &c->rep_buf[0], &c->rep_buf[1], iov);
-                break;
-        }
-    }
-}
-
-void cmd_queue_init(struct cmd_tqh *cmd_queue)
-{
-    STAILQ_INIT(cmd_queue);
-}
-
-struct command *cmd_get_lastest(struct context *ctx, struct cmd_tqh *q)
-{
-    struct command *cmd;
-    int new_cmd = 0;
-
-    if (!STAILQ_EMPTY(q)) {
-        cmd = STAILQ_LAST(q, command, cmd_next);
-        if (cmd->parse_done) {
-            new_cmd = 1;
-        }
-    } else {
-        new_cmd = 1;
-    }
-
-    if (new_cmd) {
-        cmd = cmd_create(ctx);
-        STAILQ_INSERT_TAIL(q, cmd, cmd_next);
-    }
-    return cmd;
-}
-
-int cmd_parse_req(struct command *cmd, struct mbuf *buf)
-{
-    struct command *ncmd;
-    struct reader *r = &cmd->reader;
-    reader_feed(r, buf);
-
-    while (buf->pos < buf->last) {
-        if (parse(r) == -1) return CORVUS_ERR;
-
-        if (reader_ready(r)) {
-            ncmd = cmd_create(cmd->ctx);
-            ncmd->parent = cmd;
-            ncmd->client = cmd->client;
-            ncmd->req_data = r->data;
-            CMD_COPY_RANGE(&ncmd->req_buf[0], &ncmd->req_buf[1], r);
-
-            STAILQ_INSERT_TAIL(&cmd->sub_cmds, ncmd, sub_cmd_next);
-            cmd->cmd_count++;
-
-            r->data = NULL;
-            r->type = PARSE_BEGIN;
-
-            if (cmd_parse_token(ncmd) == -1) {
-                cmd->cmd_fail_count++;
-                ncmd->cmd_fail = 1;
-                continue;
-            }
-            if (cmd_forward(ncmd) == -1) {
-                cmd->cmd_fail_count++;
-                ncmd->cmd_fail = 1;
-                continue;
-            }
-        }
-    }
-    return CORVUS_OK;
-}
-
-int cmd_parse_rep(struct command *cmd, struct mbuf *buf)
-{
-    struct reader *r = &cmd->reader;
-    reader_feed(r, buf);
-
-    while (buf->pos < buf->last) {
-        if (parse(r) == -1) {
-            LOG(ERROR, "cmd_parse_rep, parse error");
-            return CORVUS_ERR;
-        }
-
-        if (reader_ready(r)) {
-            cmd->rep_data = r->data;
-            CMD_COPY_RANGE(&cmd->rep_buf[0], &cmd->rep_buf[1], r);
-
-            r->data = NULL;
-            r->type = PARSE_BEGIN;
-            break;
-        }
-    }
-    return CORVUS_OK;
-}
-
-int cmd_read_request(struct command *cmd, int fd)
-{
-    int n;
+    LOG(DEBUG, "do free");
     struct mbuf *buf;
-
-    while (1) {
-        do {
-            buf = cmd_get_buf(cmd);
-
-            n = socket_read(fd, buf);
-            if (n == 0) return CORVUS_EOF;
-            if (n == CORVUS_ERR) return CORVUS_ERR;
-            if (n == CORVUS_AGAIN) return CORVUS_AGAIN;
-            if (cmd_parse_req(cmd, buf) == CORVUS_ERR) {
-                return CORVUS_ERR;
-            }
-        } while (!reader_ready(&cmd->reader));
+    struct command *c;
+    struct context *ctx = cmd->ctx;
+    if (cmd->req_data != NULL) {
+        redis_data_free(cmd->req_data);
+        cmd->req_data = NULL;
+    }
+    if (cmd->rep_data != NULL) {
+        redis_data_free(cmd->rep_data);
+        cmd->rep_data = NULL;
     }
 
-    return CORVUS_OK;
-}
+    reader_free(&cmd->reader);
+    reader_init(&cmd->reader);
 
-int cmd_read_reply(struct command *cmd, struct connection *server)
-{
-    int n, rsize;
-    struct mbuf *buf;
-
-    do {
-        buf = conn_get_buf(server);
-        rsize = mbuf_read_size(buf);
-
-        if (rsize > 0) {
-            if (cmd_parse_rep(cmd, buf) == -1) return CORVUS_ERR;
-            if (reader_ready(&cmd->reader)) return CORVUS_OK;
-            continue;
-        }
-
-        n = socket_read(server->fd, buf);
-        if (n == 0) return CORVUS_EOF;
-        if (n == CORVUS_ERR) return CORVUS_ERR;
-        if (n == CORVUS_AGAIN) return CORVUS_AGAIN;
-        if (cmd_parse_rep(cmd, buf) == -1) {
-            return CORVUS_ERR;
-        }
-    } while (!reader_ready(&cmd->reader));
-
-    return CORVUS_OK;
-}
-
-void init_command_map()
-{
-    command_map = hash_new();
-
-    size_t i, cmds_len = sizeof(cmds) / sizeof(struct cmd_item);
-
-    for (i = 0; i < cmds_len; i++) {
-        hash_set(command_map, cmds[i].cmd, &cmds[i]);
+    while (!STAILQ_EMPTY(&cmd->rep_queue)) {
+        buf = STAILQ_FIRST(&cmd->rep_queue);
+        STAILQ_REMOVE_HEAD(&cmd->rep_queue, next);
+        mbuf_recycle(ctx, buf);
     }
+
+    while (!STAILQ_EMPTY(&cmd->buf_queue)) {
+        buf = STAILQ_FIRST(&cmd->buf_queue);
+        STAILQ_REMOVE_HEAD(&cmd->buf_queue, next);
+        mbuf_recycle(ctx, buf);
+    }
+
+    while (!STAILQ_EMPTY(&cmd->sub_cmds)) {
+        c = STAILQ_FIRST(&cmd->sub_cmds);
+        STAILQ_REMOVE_HEAD(&cmd->sub_cmds, sub_cmd_next);
+        cmd_free(c);
+    }
+    cmd_recycle(ctx, cmd);
 }
