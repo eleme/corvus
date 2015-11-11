@@ -9,7 +9,6 @@
 #include "corvus.h"
 #include "hash.h"
 #include "slot.h"
-#include "connection.h"
 #include "socket.h"
 #include "logging.h"
 
@@ -35,6 +34,8 @@ enum {
 
 STAILQ_HEAD(job_queue, job);
 
+extern void context_init(struct context *ctx, bool syslog, int log_level);
+
 static struct node_info *slot_map[REDIS_CLUSTER_SLOTS];
 static const char SLOTS_CMD[] = "*2\r\n$7\r\nCLUSTER\r\n$5\r\nSLOTS\r\n";
 
@@ -45,7 +46,6 @@ static pthread_mutex_t job_queue_mutex;
 static pthread_cond_t signal_cond;
 static struct job_queue job_queue;
 
-static hash_t *node_map;
 static struct node_list node_list;
 
 static struct node_info *node_info_create(struct sockaddr *addr)
@@ -76,12 +76,12 @@ static struct node_info *node_info_find(struct redis_data *data)
     if (status == -1) return NULL;
 
     key = socket_get_key(&addr);
-    node = hash_get(node_map, key);
+    node = hash_get(slot_map_ctx.server_table, key);
     if (node != NULL) {
         free(key);
     } else {
         node = node_info_create(&addr);
-        hash_set(node_map, key, (void*)node);
+        hash_set(slot_map_ctx.server_table, key, (void*)node);
     }
     return node;
 }
@@ -140,13 +140,13 @@ static void slot_map_clear()
 {
     LOG(DEBUG, "empty slot map");
     struct node_info *node;
-    hash_each(node_map, {
+    hash_each(slot_map_ctx.server_table, {
         free((void *)key);
         node = (struct node_info *)val;
         LIST_INSERT_HEAD(&node_list, node, next);
     });
 
-    hash_clear(node_map);
+    hash_clear(slot_map_ctx.server_table);
 }
 
 static int do_update_slot_map(struct connection *server, int use_addr)
@@ -366,16 +366,10 @@ int slot_init_updater(bool syslog, int log_level)
     pthread_t thread;
     size_t stacksize;
 
-    slot_map_ctx.syslog = syslog;
-    slot_map_ctx.log_level = log_level;
-    mbuf_init(&slot_map_ctx);
-    log_init(&slot_map_ctx);
-    STAILQ_INIT(&slot_map_ctx.free_cmdq);
-    slot_map_ctx.nfree_cmdq = 0;
+    context_init(&slot_map_ctx, syslog, log_level);
 
     memset(slot_map, 0, sizeof(struct node_info*) * REDIS_CLUSTER_SLOTS);
     STAILQ_INIT(&job_queue);
-    node_map = hash_new();
     LIST_INIT(&node_list);
 
     pthread_mutex_init(&job_queue_mutex, NULL);

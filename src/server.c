@@ -1,13 +1,11 @@
 #include <sys/queue.h>
 #include <stdlib.h>
 #include "server.h"
-#include "connection.h"
+#include "corvus.h"
 #include "event.h"
 #include "logging.h"
 #include "socket.h"
-#include "corvus.h"
 #include "slot.h"
-#include "command.h"
 
 static inline void remove_queue_head(struct connection *server, int retry)
 {
@@ -23,7 +21,6 @@ static void server_eof(struct connection *server)
     LOG(WARN, "server eof");
 
     struct command *c;
-    conn_close(server);
     while (!STAILQ_EMPTY(&server->ready_queue)) {
         c = STAILQ_FIRST(&server->ready_queue);
         STAILQ_REMOVE_HEAD(&server->ready_queue, ready_next);
@@ -41,6 +38,8 @@ static void server_eof(struct connection *server)
         STAILQ_REMOVE_HEAD(&server->retry_queue, retry_next);
         cmd_mark_fail(c);
     }
+
+    conn_free(server);
     slot_create_job(SLOT_UPDATE, NULL);
 }
 

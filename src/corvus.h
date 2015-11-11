@@ -8,6 +8,7 @@
 
 #include "mbuf.h"
 #include "command.h"
+#include "connection.h"
 
 #include "hashmap/hash.h"
 
@@ -31,6 +32,9 @@ struct context {
 
     uint32_t nfree_cmdq;
     struct cmd_tqh free_cmdq;
+
+    uint32_t nfree_connq;
+    struct conn_tqh free_connq;
 
     /* logging */
     bool syslog;

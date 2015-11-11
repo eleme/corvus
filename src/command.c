@@ -4,9 +4,8 @@
 #include <errno.h>
 #include <ctype.h>
 #include <limits.h>
-#include "command.h"
-#include "socket.h"
 #include "corvus.h"
+#include "socket.h"
 #include "logging.h"
 #include "hash.h"
 #include "slot.h"

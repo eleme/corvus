@@ -1,7 +1,6 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-#include "connection.h"
 #include "corvus.h"
 #include "socket.h"
 #include "command.h"
@@ -12,6 +11,16 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
+
+#define EMPTY_CMD_QUEUE(queue, field)     \
+do {                                      \
+    struct command *c;                    \
+    while (!STAILQ_EMPTY(queue)) {        \
+        c = STAILQ_FIRST(queue);          \
+        STAILQ_REMOVE_HEAD(queue, field); \
+        cmd_free(c);                      \
+    }                                     \
+} while (0)
 
 void conn_init(struct connection *conn, struct context *ctx)
 {
@@ -31,7 +40,16 @@ void conn_init(struct connection *conn, struct context *ctx)
 
 struct connection *conn_create(struct context *ctx)
 {
-    struct connection *conn = malloc(sizeof(struct connection));
+    struct connection *conn;
+    if (!STAILQ_EMPTY(&ctx->free_connq)) {
+        LOG(DEBUG, "connection get cache");
+        conn = STAILQ_FIRST(&ctx->free_connq);
+        STAILQ_REMOVE_HEAD(&ctx->free_connq, next);
+        ctx->nfree_connq--;
+        STAILQ_NEXT(conn, next) = NULL;
+    } else {
+        conn = malloc(sizeof(struct connection));
+    }
     conn_init(conn, ctx);
     return conn;
 }
@@ -54,22 +72,35 @@ int conn_connect(struct connection *conn, int use_addr)
 
 void conn_free(struct connection *conn)
 {
-    if (conn->hostname != NULL) free(conn->hostname);
-    close(conn->fd);
+    if (conn->fd != -1) {
+        close(conn->fd);
+        conn->fd = -1;
+    }
+    if (conn->hostname != NULL) {
+        free(conn->hostname);
+        conn->hostname = NULL;
+    }
     conn->status = DISCONNECTED;
+    conn->registered = 0;
+
+    EMPTY_CMD_QUEUE(&conn->cmd_queue, cmd_next);
+    EMPTY_CMD_QUEUE(&conn->ready_queue, ready_next);
+    EMPTY_CMD_QUEUE(&conn->waiting_queue, waiting_next);
+    EMPTY_CMD_QUEUE(&conn->retry_queue, retry_next);
+
+    struct mbuf *buf;
+    while (!STAILQ_EMPTY(&conn->data)) {
+        buf = STAILQ_FIRST(&conn->data);
+        STAILQ_REMOVE_HEAD(&conn->data, next);
+        mbuf_recycle(conn->ctx, buf);
+    }
 }
 
-int conn_pool_resize(struct connection ***conn, int orig_size, int more)
+void conn_recycle(struct context *ctx, struct connection *conn)
 {
-    int bytes = sizeof(struct connection*) * more;
-    if (*conn == NULL) {
-        *conn = malloc(bytes);
-        memset(*conn, 0, bytes);
-    } else {
-        *conn = realloc(*conn, sizeof(struct connection*) * (orig_size + more));
-        memset(*conn + orig_size, 0, bytes);
-    }
-    return orig_size + more;
+    STAILQ_NEXT(conn, next) = NULL;
+    STAILQ_INSERT_HEAD(&ctx->free_connq, conn, next);
+    ctx->nfree_connq++;
 }
 
 int conn_create_fd()
@@ -187,10 +218,4 @@ struct mbuf *conn_get_buf(struct connection *conn)
         mbuf_queue_insert(&conn->data, buf);
     }
     return buf;
-}
-
-void conn_close(struct connection *conn)
-{
-    close(conn->fd);
-    conn->status = DISCONNECTED;
 }

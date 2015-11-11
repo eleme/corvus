@@ -2,25 +2,23 @@
 #include <stdlib.h>
 #include "corvus.h"
 #include "client.h"
-#include "connection.h"
 #include "mbuf.h"
 #include "socket.h"
 #include "logging.h"
 #include "event.h"
-#include "command.h"
 
 static void client_eof(struct connection *client)
 {
     LOG(DEBUG, "client eof");
 
     struct command *cmd;
-    conn_close(client);
     while (!STAILQ_EMPTY(&client->cmd_queue)) {
         cmd = STAILQ_FIRST(&client->cmd_queue);
         STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
         cmd_free(cmd);
     }
-    /* conn_recycle(client); */
+    conn_free(client);
+    conn_recycle(client->ctx, client);
 }
 
 static int on_write(struct connection *client)

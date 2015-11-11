@@ -16,7 +16,7 @@ static struct {
     int syslog;
 } config;
 
-static void context_init(struct context *ctx, bool syslog, int log_level)
+void context_init(struct context *ctx, bool syslog, int log_level)
 {
     ctx->syslog = syslog;
     ctx->log_level = log_level;
@@ -26,6 +26,9 @@ static void context_init(struct context *ctx, bool syslog, int log_level)
 
     STAILQ_INIT(&ctx->free_cmdq);
     ctx->nfree_cmdq = 0;
+
+    STAILQ_INIT(&ctx->free_connq);
+    ctx->nfree_connq = 0;
 }
 
 void config_init()

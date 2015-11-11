@@ -3,12 +3,9 @@
 #include "corvus.h"
 #include "proxy.h"
 #include "socket.h"
-#include "connection.h"
-#include "mbuf.h"
 #include "event.h"
 #include "client.h"
 #include "logging.h"
-#include "command.h"
 
 static void proxy_ready(struct connection *self, struct event_loop *loop, uint32_t mask)
 {

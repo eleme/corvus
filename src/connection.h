@@ -15,6 +15,7 @@ enum {
 };
 
 struct connection {
+    STAILQ_ENTRY(connection) next;
     struct context *ctx;
     int fd;
     char *hostname;
@@ -34,15 +35,16 @@ struct connection {
     void (*ready)(struct connection *self, struct event_loop *loop, uint32_t mask);
 };
 
+STAILQ_HEAD(conn_tqh, connection);
+
+void conn_init(struct connection *conn, struct context *ctx);
+struct connection *conn_create(struct context *ctx);
 int conn_connect(struct connection *conn, int use_addr);
 void conn_free(struct connection *conn);
-void conn_init(struct connection *conn, struct context *ctx);
-int conn_pool_resize(struct connection ***conn, int orig_size, int more);
-struct connection *conn_create(struct context *ctx);
-int conn_create_fd();
+void conn_recycle(struct context *ctx, struct connection *conn);
 struct connection *conn_get_server_from_pool(struct context *ctx, struct sockaddr *addr);
 struct connection *conn_get_server(struct context *ctx, uint16_t slot);
 struct mbuf *conn_get_buf(struct connection *conn);
-void conn_close(struct connection *conn);
+int conn_create_fd();
 
 #endif /* end of include guard: __CONNECTION_H */
