@@ -179,6 +179,108 @@ static int do_update_slot_map(struct connection *server, int use_addr)
     return count;
 }
 
+static void slot_init_map(struct node_conf *conf)
+{
+    int port, count = 0;
+    int i;
+    struct connection server;
+    char *hostname, *addr;
+    for (i = 0; i < conf->len; i++) {
+        addr = conf->nodes[i];
+        port = socket_parse_addr(addr, &hostname);
+        if (port == -1) continue;
+
+        conn_init(&server, &slot_map_ctx);
+        server.fd = socket_create_stream();
+        if (server.fd == -1) continue;
+
+        server.hostname = hostname;
+        server.port = port;
+
+        count = do_update_slot_map(&server, false);
+        if (count < REDIS_CLUSTER_SLOTS) {
+            conn_free(&server);
+            continue;
+        }
+        break;
+    }
+    LOG(INFO, "slot map inited: covered %d slots", count);
+}
+
+static void slot_map_update()
+{
+    LOG(DEBUG, "update slot map");
+    int count = 0;
+    struct node_info *node;
+    struct sockaddr addr;
+    struct connection server;
+    conn_init(&server, &slot_map_ctx);
+
+    LIST_FOREACH(node, &node_list, next) {
+        server.fd = socket_create_stream();
+        if (server.fd == -1) continue;
+        memcpy(&server.addr, &node->master, sizeof(addr));
+        count = do_update_slot_map(&server, true);
+        if (count < REDIS_CLUSTER_SLOTS) {
+            conn_free(&server);
+            continue;
+        }
+        break;
+    }
+
+    while(!LIST_EMPTY(&node_list)) {
+        node = LIST_FIRST(&node_list);
+        LIST_REMOVE(node, next);
+        if (node->slaves != NULL) free(node->slaves);
+        free(node);
+    }
+
+    LOG(INFO, "slot map updated: corverd %d slots", count);
+    conn_free(&server);
+}
+
+static void do_update(struct job *job)
+{
+    slot_map_clear();
+
+    switch (job->type) {
+        case SLOT_UPDATE_INIT:
+            slot_init_map(job->arg);
+            break;
+        case SLOT_UPDATE:
+            slot_map_update();
+            break;
+    }
+}
+
+void *slot_map_updater()
+{
+    struct job *job;
+
+    /* Make the thread killable at any time can work reliably. */
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+
+    pthread_mutex_lock(&job_queue_mutex);
+    slot_map_status = SLOT_MAP_NEW;
+
+    while (1) {
+        if (STAILQ_EMPTY(&job_queue)) {
+            pthread_cond_wait(&signal_cond, &job_queue_mutex);
+            continue;
+        }
+
+        job = STAILQ_FIRST(&job_queue);
+        STAILQ_REMOVE_HEAD(&job_queue, next);
+
+        pthread_mutex_unlock(&job_queue_mutex);
+
+        do_update(job);
+
+        pthread_mutex_lock(&job_queue_mutex);
+        slot_map_status = SLOT_MAP_NEW;
+    }
+}
 
 uint16_t slot_get(struct pos_array *pos)
 {
@@ -240,109 +342,6 @@ end:
 struct node_info *slot_get_node_info(uint16_t slot)
 {
     return slot_map[slot];
-}
-
-void slot_init_map(struct node_conf *conf)
-{
-    int port, count = 0;
-    int i;
-    struct connection server;
-    char *hostname, *addr;
-    for (i = 0; i < conf->len; i++) {
-        addr = conf->nodes[i];
-        port = socket_parse_addr(addr, &hostname);
-        if (port == -1) continue;
-
-        conn_init(&server, &slot_map_ctx);
-        server.fd = socket_create_stream();
-        if (server.fd == -1) continue;
-
-        server.hostname = hostname;
-        server.port = port;
-
-        count = do_update_slot_map(&server, false);
-        if (count < REDIS_CLUSTER_SLOTS) {
-            conn_free(&server);
-            continue;
-        }
-        break;
-    }
-    LOG(INFO, "slot map inited: covered %d slots", count);
-}
-
-void slot_map_update()
-{
-    LOG(DEBUG, "update slot map");
-    int count = 0;
-    struct node_info *node;
-    struct sockaddr addr;
-    struct connection server;
-    conn_init(&server, &slot_map_ctx);
-
-    LIST_FOREACH(node, &node_list, next) {
-        server.fd = socket_create_stream();
-        if (server.fd == -1) continue;
-        memcpy(&server.addr, &node->master, sizeof(addr));
-        count = do_update_slot_map(&server, true);
-        if (count < REDIS_CLUSTER_SLOTS) {
-            conn_free(&server);
-            continue;
-        }
-        break;
-    }
-
-    while(!LIST_EMPTY(&node_list)) {
-        node = LIST_FIRST(&node_list);
-        LIST_REMOVE(node, next);
-        if (node->slaves != NULL) free(node->slaves);
-        free(node);
-    }
-
-    LOG(INFO, "slot map updated: corverd %d slots", count);
-    conn_free(&server);
-}
-
-void do_update(struct job *job)
-{
-    slot_map_clear();
-
-    switch (job->type) {
-        case SLOT_UPDATE_INIT:
-            slot_init_map(job->arg);
-            break;
-        case SLOT_UPDATE:
-            slot_map_update();
-            break;
-    }
-}
-
-void *slot_map_updater()
-{
-    struct job *job;
-
-    /* Make the thread killable at any time can work reliably. */
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
-
-    pthread_mutex_lock(&job_queue_mutex);
-    slot_map_status = SLOT_MAP_NEW;
-
-    while (1) {
-        if (STAILQ_EMPTY(&job_queue)) {
-            pthread_cond_wait(&signal_cond, &job_queue_mutex);
-            continue;
-        }
-
-        job = STAILQ_FIRST(&job_queue);
-        STAILQ_REMOVE_HEAD(&job_queue, next);
-
-        pthread_mutex_unlock(&job_queue_mutex);
-
-        do_update(job);
-
-        pthread_mutex_lock(&job_queue_mutex);
-        slot_map_status = SLOT_MAP_NEW;
-    }
 }
 
 void slot_create_job(int type, void *arg)
