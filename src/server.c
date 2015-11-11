@@ -24,19 +24,22 @@ static void server_eof(struct connection *server)
 
     struct command *c;
     conn_close(server);
-    STAILQ_FOREACH(c, &server->ready_queue, ready_next) {
-        cmd_mark_fail(c);
+    while (!STAILQ_EMPTY(&server->ready_queue)) {
+        c = STAILQ_FIRST(&server->ready_queue);
         STAILQ_REMOVE_HEAD(&server->ready_queue, ready_next);
+        cmd_mark_fail(c);
     }
 
-    STAILQ_FOREACH(c, &server->waiting_queue, waiting_next) {
-        cmd_mark_fail(c);
+    while (!STAILQ_EMPTY(&server->waiting_queue)) {
+        c = STAILQ_FIRST(&server->waiting_queue);
         STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
+        cmd_mark_fail(c);
     }
 
-    STAILQ_FOREACH(c, &server->retry_queue, retry_next) {
-        cmd_mark_fail(c);
+    while (!STAILQ_EMPTY(&server->retry_queue)) {
+        c = STAILQ_FIRST(&server->retry_queue);
         STAILQ_REMOVE_HEAD(&server->retry_queue, retry_next);
+        cmd_mark_fail(c);
     }
     slot_create_job(SLOT_UPDATE, NULL);
 }
@@ -78,7 +81,7 @@ static int on_write(struct connection *server, int retry)
     return CORVUS_OK;
 }
 
-static void do_moved(struct command *cmd, struct redirect_info *info)
+static int do_moved(struct command *cmd, struct redirect_info *info)
 {
     int port;
     char *hostname;
@@ -89,7 +92,7 @@ static void do_moved(struct command *cmd, struct redirect_info *info)
 
     struct connection *server = conn_get_server_from_pool(cmd->ctx, &sockaddr);
     if (server == NULL) {
-        /* cmd_mark_fail(cmd); */
+        return CORVUS_ERR;
     }
     STAILQ_INSERT_TAIL(&server->retry_queue, cmd, retry_next);
 
@@ -98,6 +101,7 @@ static void do_moved(struct command *cmd, struct redirect_info *info)
         case 0: event_register(cmd->ctx->loop, server); break;
     }
     slot_create_job(SLOT_UPDATE, NULL);
+    return CORVUS_OK;
 }
 
 static int read_one_reply(struct connection *server)
@@ -107,36 +111,29 @@ static int read_one_reply(struct connection *server)
     struct command *cmd = STAILQ_FIRST(&server->waiting_queue);
 
     int status = cmd_read_reply(cmd, server);
-    if (status == CORVUS_AGAIN) return CORVUS_AGAIN;
+    switch (status) {
+        case CORVUS_AGAIN: return CORVUS_AGAIN;
+        case CORVUS_EOF: return CORVUS_EOF;
+        case CORVUS_ERR: return CORVUS_ERR;
+    }
 
     STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
 
-    if (status == CORVUS_EOF) {
-        cmd_mark_fail(cmd);
-        return CORVUS_EOF;
-    }
-
-    if (status == CORVUS_ERR) {
-        return CORVUS_ERR;
+    if (cmd->rep_data->type != REP_ERROR) {
+        cmd_mark_done(cmd);
+        return CORVUS_OK;
     }
 
     struct redirect_info info = {.addr = NULL, .type = CMD_ERR, .slot = -1};
-    int moved = 0;
-    switch (cmd->rep_data->type) {
-        case REP_ERROR:
-            cmd_parse_redirect(cmd, &info);
-            LOG(DEBUG, "redirect -> %s", info.addr);
-            switch (info.type) {
-                case CMD_ERR_MOVED:
-                    do_moved(cmd, &info);
-                    moved = 1;
-                    break;
+    cmd_parse_redirect(cmd, &info);
+    switch (info.type) {
+        case CMD_ERR_MOVED:
+            if (do_moved(cmd, &info) == CORVUS_ERR) {
+                cmd_mark_fail(cmd);
             }
-            if (moved) break;
+            break;
         default:
-            LOG(DEBUG, "mark done");
             cmd_mark_done(cmd);
-            event_reregister(server->ctx->loop, cmd->client, E_WRITABLE | E_READABLE);
             break;
     }
     if (info.addr != NULL) free(info.addr);
