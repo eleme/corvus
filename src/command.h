@@ -21,6 +21,18 @@ enum {
 
 STAILQ_HEAD(cmd_tqh, command);
 
+struct iov_data {
+    /* first element of data */
+    struct iovec *head;
+    /* total size */
+    int size;
+
+    struct iovec *data;
+    void *ptr;
+    int len;
+    size_t max_size;
+};
+
 struct command {
     STAILQ_ENTRY(command) cmd_next;
     STAILQ_ENTRY(command) ready_next;
@@ -34,21 +46,21 @@ struct command {
     struct reader reader;
 
     int parse_done;
-    int cmd_done;
-    int cmd_fail;
-    int cmd_done_count;
-    int cmd_fail_count;
 
     int slot;
     int cmd_type;
     int request_type;
 
     int cmd_count;
+    int cmd_fail;
+    int cmd_done_count;
     struct cmd_tqh sub_cmds;
     struct command *parent;
 
     struct redis_data *req_data;
     struct redis_data *rep_data;
+
+    struct iov_data iov;
 
     struct buf_ptr req_buf[2];
     struct buf_ptr rep_buf[2];
@@ -63,14 +75,6 @@ struct redirect_info {
     int type;
 };
 
-struct iov_data {
-    struct iovec *data;
-    void *ptr;
-    int len;
-    size_t max_size;
-};
-
-
 void init_command_map();
 struct command *cmd_create(struct context *ctx);
 void cmd_queue_init(struct cmd_tqh *cmd_queue);
@@ -83,6 +87,8 @@ void cmd_make_iovec(struct command *cmd, struct iov_data *iov);
 void cmd_parse_redirect(struct command *cmd, struct redirect_info *info);
 void cmd_mark_done(struct command *cmd);
 void cmd_mark_fail(struct command *cmd);
+int cmd_write_iov(struct command *cmd, int fd);
+void cmd_free_iov(struct iov_data *iov);
 void cmd_free(struct command *cmd);
 
 #endif /* end of include guard: __COMMAND_H */

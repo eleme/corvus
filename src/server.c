@@ -50,22 +50,31 @@ static int on_write(struct connection *server, int retry)
 
     struct iov_data iov;
     memset(&iov, 0, sizeof(struct iov_data));
-    cmd_create_iovec(NULL, &cmd->req_buf[0], &cmd->req_buf[1], &iov);
-    if (iov.len <= 0) {
+
+    if (cmd->iov.head == NULL) {
+        cmd_create_iovec(NULL, &cmd->req_buf[0], &cmd->req_buf[1], &cmd->iov);
+        cmd->iov.head = cmd->iov.data;
+        cmd->iov.size = cmd->iov.len;
+    }
+
+    if (cmd->iov.len <= 0) {
         LOG(WARN, "no data to write");
         remove_queue_head(server, retry);
         return CORVUS_ERR;
     }
 
-    status = socket_write(server->fd, iov.data, iov.len);
-    free(iov.data);
-    if (status == CORVUS_AGAIN) return CORVUS_OK;
+    status = cmd_write_iov(cmd, server->fd);
 
-    remove_queue_head(server, retry);
+    if (status == CORVUS_AGAIN) return CORVUS_OK;
+    if (cmd->iov.len <= 0) {
+        cmd_free_iov(&cmd->iov);
+        remove_queue_head(server, retry);
+        STAILQ_INSERT_TAIL(&server->waiting_queue, cmd, waiting_next);
+    } else {
+        event_reregister(cmd->ctx->loop, server, E_WRITABLE | E_READABLE);
+    }
 
     if (status == CORVUS_ERR) return CORVUS_ERR;
-
-    STAILQ_INSERT_TAIL(&server->waiting_queue, cmd, waiting_next);
     return CORVUS_OK;
 }
 
@@ -112,6 +121,7 @@ static int read_one_reply(struct connection *server)
     }
 
     struct redirect_info info = {.addr = NULL, .type = CMD_ERR, .slot = -1};
+    int moved = 0;
     switch (cmd->rep_data->type) {
         case REP_ERROR:
             cmd_parse_redirect(cmd, &info);
@@ -119,9 +129,10 @@ static int read_one_reply(struct connection *server)
             switch (info.type) {
                 case CMD_ERR_MOVED:
                     do_moved(cmd, &info);
+                    moved = 1;
                     break;
             }
-            break;
+            if (moved) break;
         default:
             LOG(DEBUG, "mark done");
             cmd_mark_done(cmd);

@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <ctype.h>
+#include <limits.h>
 #include "command.h"
 #include "socket.h"
 #include "corvus.h"
@@ -11,6 +12,12 @@
 #include "slot.h"
 #include "event.h"
 #include "server.h"
+
+#if (IOV_MAX > 128)
+#define CORVUS_IOV_MAX 128
+#else
+#define CORVUS_IOV_MAX IOV_MAX
+#endif
 
 #define CMD_COPY_RANGE(start_buf, end_buf, reader) \
 do {                                               \
@@ -174,10 +181,6 @@ static hash_t *command_map;
 static void cmd_init(struct context *ctx, struct command *cmd)
 {
     cmd->parse_done = 0;
-    cmd->cmd_done = 0;
-    cmd->cmd_done_count = 0;
-    cmd->cmd_fail = 0;
-    cmd->cmd_fail_count = 0;
 
     cmd->ctx = ctx;
     reader_init(&cmd->reader);
@@ -194,8 +197,11 @@ static void cmd_init(struct context *ctx, struct command *cmd)
 
     memset(cmd->req_buf, 0, sizeof(cmd->req_buf));
     memset(cmd->rep_buf, 0, sizeof(cmd->rep_buf));
+    memset(&cmd->iov, 0, sizeof(struct iov_data));
 
     cmd->cmd_count = 0;
+    cmd->cmd_done_count = 0;
+    cmd->cmd_fail = 0;
     cmd->parent = NULL;
     STAILQ_INIT(&cmd->sub_cmds);
 
@@ -604,13 +610,11 @@ static int cmd_parse_req(struct command *cmd, struct mbuf *buf)
             r->type = PARSE_BEGIN;
 
             if (cmd_parse_token(ncmd) == -1) {
-                cmd->cmd_fail_count++;
-                ncmd->cmd_fail = 1;
+                cmd_mark_fail(ncmd);
                 continue;
             }
             if (cmd_forward(ncmd) == -1) {
-                cmd->cmd_fail_count++;
-                ncmd->cmd_fail = 1;
+                cmd_mark_fail(ncmd);
                 continue;
             }
         }
@@ -639,6 +643,26 @@ static int cmd_parse_rep(struct command *cmd, struct mbuf *buf)
         }
     }
     return CORVUS_OK;
+}
+
+static void cmd_mark(struct command *cmd, int fail)
+{
+    struct command *parent = cmd->parent, *root = NULL;
+    if (fail) cmd->cmd_fail = 1;
+    while (parent != NULL) {
+        parent->cmd_done_count++;
+        if (parent->cmd_count == parent->cmd_done_count) {
+            root = parent;
+            parent = parent->parent;
+            continue;
+        }
+        break;
+    }
+    if (parent == NULL && root != NULL
+            && root->cmd_count == root->cmd_done_count)
+    {
+        event_reregister(root->ctx->loop, root->client, E_WRITABLE | E_READABLE);
+    }
 }
 
 void init_command_map()
@@ -844,50 +868,55 @@ void cmd_parse_redirect(struct command *cmd, struct redirect_info *info)
 
 void cmd_mark_done(struct command *cmd)
 {
-    int done;
-    struct command *parent = cmd->parent, *root = NULL;
-
-    cmd->cmd_done = 1;
-    while (parent != NULL) {
-        parent->cmd_done_count++;
-        done = parent->cmd_done_count + parent->cmd_fail_count;
-        if (parent->cmd_count == done) {
-            root = parent;
-            parent->cmd_done = 1;
-            parent = parent->parent;
-        } else {
-            break;
-        }
-    }
-    if (parent == NULL && root != NULL
-            && root->cmd_count ==
-            root->cmd_fail_count + root->cmd_done_count)
-    {
-        event_reregister(root->ctx->loop, root->client, E_WRITABLE | E_READABLE);
-    }
+    cmd_mark(cmd, 0);
 }
 
 void cmd_mark_fail(struct command *cmd)
 {
-    int fail;
-    struct command *parent = cmd->parent, *root = NULL;
-    cmd->cmd_fail = 1;
-    while (parent != NULL) {
-        parent->cmd_done_count++;
-        fail = parent->cmd_fail_count + parent->cmd_done_count;
-        if (parent->cmd_count == fail) {
-            root = parent;
-            parent = parent->parent;
-            continue;
+    cmd_mark(cmd, 1);
+}
+
+int cmd_write_iov(struct command *cmd, int fd)
+{
+    LOG(DEBUG, "write iov");
+
+    struct iov_data *iov = &cmd->iov;
+    int i, n = 0;
+    ssize_t remain = 0, status, bytes = 0, count = 0;
+
+    while (n < iov->len) {
+        if (n >= CORVUS_IOV_MAX || bytes >= SSIZE_MAX) break;
+        bytes += iov->data[n++].iov_len;
+    }
+
+    status = socket_write(fd, iov->data, n);
+    if (status == CORVUS_AGAIN || status == CORVUS_ERR) return status;
+
+    if (status < bytes) {
+        for (i = 0; i < n; i++) {
+            count += iov->data[i].iov_len;
+            if (count > status) {
+                remain = iov->data[i].iov_len - (count - status);
+                iov->data[i].iov_base += remain;
+                iov->data[i].iov_len -= remain;
+                break;
+            }
         }
-        break;
+        iov->data += i;
+        iov->len -= i;
+    } else {
+        iov->data += n;
+        iov->len -= n;
     }
-    if (parent == NULL && root != NULL
-            && root->cmd_count ==
-            root->cmd_fail_count + root->cmd_done_count)
-    {
-        event_reregister(root->ctx->loop, root->client, E_WRITABLE | E_READABLE);
-    }
+
+    return status;
+}
+
+void cmd_free_iov(struct iov_data *iov)
+{
+    if (iov->head != NULL) free(iov->head);
+    if (iov->ptr != NULL) free(iov->ptr);
+    memset(iov, 0, sizeof(struct iov_data));
 }
 
 void cmd_free(struct command *cmd)
@@ -904,6 +933,8 @@ void cmd_free(struct command *cmd)
         redis_data_free(cmd->rep_data);
         cmd->rep_data = NULL;
     }
+
+    cmd_free_iov(&cmd->iov);
 
     reader_free(&cmd->reader);
     reader_init(&cmd->reader);

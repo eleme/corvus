@@ -1,4 +1,4 @@
-CFLAGS=-g -std=c99 -D_POSIX_C_SOURCE=200112L -I../src -I../deps -pthread
+CFLAGS=-g -std=c99 -D_GNU_SOURCE -I../src -I../deps -pthread
 
 corvus_test: test.c \
 	test.h \

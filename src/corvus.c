@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include <errno.h>
 #include "corvus.h"
 #include "mbuf.h"

@@ -1,5 +1,5 @@
 BUILD=../build
-CFLAGS=-Wall -g -std=c99 -D_POSIX_C_SOURCE=200112L -I../deps
+CFLAGS=-Wall -g -std=c99 -D_GNU_SOURCE -I../deps
 LDFLAGS=-pthread
 
 SRC = client.c               \
