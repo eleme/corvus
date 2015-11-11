@@ -139,10 +139,10 @@ do {                                               \
     HANDLER(PFCOUNT, BASIC)          \
     HANDLER(PFMERGE, BASIC)          \
     /* script */                     \
-    HANDLER(EVAL, BASIC)             \
-    HANDLER(EVALSHA, BASIC)          \
+    HANDLER(EVAL, COMPLEX)           \
+    HANDLER(EVALSHA, UNIMPL)         \
     /* misc */                       \
-    HANDLER(PING, PROXY)            \
+    HANDLER(PING, PROXY)             \
     HANDLER(INFO, UNIMPL)            \
     HANDLER(QUIT, UNIMPL)            \
     HANDLER(AUTH, UNIMPL)            \
@@ -414,6 +414,15 @@ static int cmd_forward_mset(struct command *cmd)
     return 0;
 }
 
+static int cmd_forward_eval(struct command *cmd)
+{
+    struct redis_data *data = cmd->req_data;
+    if (data->elements < 4) return -1;
+
+    cmd->slot = slot_get(data->element[3]->pos);
+    return cmd_forward_basic(cmd);
+}
+
 static int cmd_forward_complex(struct command *cmd)
 {
     switch (cmd->cmd_type) {
@@ -427,6 +436,9 @@ static int cmd_forward_complex(struct command *cmd)
         case CMD_DEL:
             if (cmd_forward_multikey(cmd, (uint8_t*)rep_del, 13) == -1)
                 return -1;
+            break;
+        case CMD_EVAL:
+            if (cmd_forward_eval(cmd) == -1) return -1;
             break;
         default:
             return -1;

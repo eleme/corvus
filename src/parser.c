@@ -23,6 +23,7 @@ do {                                                           \
             r->type = PARSE_END;                               \
             r->ready = 1;                                      \
             r->end.buf = r->buf;                               \
+            r->end.pos = p + 1;                                \
             mbuf_inc_ref(r->buf);                              \
             break;                                             \
         case 1: r->type = PARSE_TYPE; break;                   \
@@ -297,7 +298,6 @@ static int process_string(struct reader *r)
                 if (*p != '\n') return -1;
                 if (task->elements <= 0) {
                     PROCESS_END(r, p);
-                    r->end.pos = p + 1;
                 } else {
                     r->type = PARSE_TYPE;
                 }
@@ -392,7 +392,6 @@ int process_simple_string(struct reader *r, int type)
                 if (*p != '\n') return -1;
                 if (task->elements <= 0) {
                     PROCESS_END(r, p);
-                    r->end.pos = p + 1;
                 } else {
                     r->type = PARSE_TYPE;
                 }
