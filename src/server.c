@@ -1,4 +1,3 @@
-#include <sys/queue.h>
 #include <stdlib.h>
 #include "server.h"
 #include "corvus.h"
@@ -83,16 +82,13 @@ static int on_write(struct connection *server, int retry)
 static int do_moved(struct command *cmd, struct redirect_info *info)
 {
     int port;
-    char *hostname;
-    struct sockaddr sockaddr;
+    struct address addr;
 
-    port = socket_parse_addr(info->addr, &hostname);
-    socket_get_addr(hostname, port, &sockaddr);
+    port = socket_parse_addr(info->addr, &addr);
+    if (port == CORVUS_ERR) return CORVUS_ERR;
 
-    struct connection *server = conn_get_server_from_pool(cmd->ctx, &sockaddr);
-    if (server == NULL) {
-        return CORVUS_ERR;
-    }
+    struct connection *server = conn_get_server_from_pool(cmd->ctx, &addr);
+    if (server == NULL) return CORVUS_ERR;
     STAILQ_INSERT_TAIL(&server->retry_queue, cmd, retry_next);
 
     switch (server->registered) {

@@ -72,6 +72,22 @@ static inline int _socket(int domain, int type, int protocol)
     return socket(domain, type | SOCK_CLOEXEC, protocol);
 }
 
+static int _connect(int fd, const struct sockaddr *addr, socklen_t addrlen)
+{
+    while (1) {
+        int status = connect(fd, addr, addrlen);
+        if (status == -1) {
+            switch (errno) {
+                case EINTR: continue;
+                case EINPROGRESS: return CORVUS_INPROGRESS;
+                default: return CORVUS_ERR;
+            }
+        }
+        break;
+    }
+    return CORVUS_OK;
+}
+
 static struct addrinfo *_getaddrinfo(const char *addr, int port)
 {
     int err;
@@ -82,7 +98,6 @@ static struct addrinfo *_getaddrinfo(const char *addr, int port)
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
-    /* hints.ai_flags = AI_PASSIVE; */
 
     if ((err = getaddrinfo(addr, _port, &hints, &servinfo)) != 0) {
         LOG(ERROR, "get address info %s", strerror(err));
@@ -96,27 +111,6 @@ int socket_set_nonblocking(int fd)
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags < 0) return -1;
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-}
-
-int socket_get_addr(char *host, int port, struct sockaddr *addr)
-{
-    struct addrinfo *info;
-    info = _getaddrinfo(host, port);
-    if (info == NULL) return -1;
-    memcpy(addr, info->ai_addr, info->ai_addrlen);
-    freeaddrinfo(info);
-    return 0;
-}
-
-int socket_addr_cmp(struct sockaddr *addr1, struct sockaddr *addr2)
-{
-    struct sockaddr_in *a = (struct sockaddr_in*)addr1,
-                       *b = (struct sockaddr_in*)addr2;
-
-    if (a->sin_addr.s_addr > b->sin_addr.s_addr) return 1;
-    if (a->sin_addr.s_addr == b->sin_addr.s_addr && a->sin_port > b->sin_port) return 1;
-    if (a->sin_addr.s_addr == b->sin_addr.s_addr && a->sin_port == b->sin_port) return 0;
-    return -1;
 }
 
 int socket_create_server(char *bindaddr, int port)
@@ -202,15 +196,8 @@ int socket_connect(int fd, char *addr, int port)
     if (addrs == NULL) return -1;
 
     for (p = addrs; p != NULL; p = p->ai_next) {
-        status = connect(fd, p->ai_addr, p->ai_addrlen);
-        if (status == -1) {
-            LOG(ERROR, "connect: %s", strerror(errno));
-            if (errno == EINPROGRESS) {
-                retval = CORVUS_INPROGRESS;
-                break;
-            }
-            continue;
-        }
+        status = _connect(fd, p->ai_addr, p->ai_addrlen);
+        if (status == CORVUS_ERR) continue;
         break;
     }
     freeaddrinfo(addrs);
@@ -219,17 +206,6 @@ int socket_connect(int fd, char *addr, int port)
         retval = -1;
     }
     return retval;
-}
-
-int socket_connect_addr(int fd, struct sockaddr *addr)
-{
-    int status = connect(fd, addr, sizeof(struct sockaddr));
-    if (status == -1) {
-        LOG(ERROR, "connect: %s", strerror(errno));
-        if (errno == EINPROGRESS) return CORVUS_INPROGRESS;
-        return -1;
-    }
-    return 0;
 }
 
 int socket_read(int fd, struct mbuf *buf)
@@ -251,9 +227,7 @@ int socket_write(int fd, struct iovec *iov, int invcnt)
     int n;
     while (1) {
         n = writev(fd, iov, invcnt);
-        LOG(DEBUG, "writev %d", invcnt);
         if (n == -1) {
-            LOG(ERROR, "%s", strerror(errno));
             if (errno == EINTR) {
                 continue;
             } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -267,29 +241,39 @@ int socket_write(int fd, struct iovec *iov, int invcnt)
     return CORVUS_ERR;
 }
 
-int socket_parse_addr(const char *addr, char **dest)
+void socket_get_addr(char *host, int host_len, int port, struct address *addr)
+{
+    int max_len = sizeof(addr->host) / sizeof(char);
+
+    strncpy(addr->host, host, MIN(host_len, max_len));
+    if (host_len >= max_len) {
+        LOG(WARN, "hostname length exceed %d", max_len - 1);
+        addr->host[max_len - 1] = '\0';
+    } else {
+        addr->host[host_len] = '\0';
+    }
+    addr->port = port;
+}
+
+int socket_parse_addr(char *addr, struct address *address)
 {
     unsigned long port;
     char *colon, *end;
 
     colon = strchr(addr, ':');
-    if (colon == NULL) return -1;
+    if (colon == NULL) return CORVUS_ERR;
 
     port = strtoul(colon + 1, &end, 0);
-    if (*end != '\0' || end == colon + 1) return -1;
-    if (port > 0xFFFF) return -1;
+    if (*end != '\0' || end == colon + 1) return CORVUS_ERR;
+    if (port > 0xFFFF) return CORVUS_ERR;
 
-    *dest = calloc(colon - addr, sizeof(char));
-    memcpy(*dest, addr, colon - addr);
+    socket_get_addr(addr, colon - addr, port, address);
     return port;
 }
 
-char *socket_get_key(struct sockaddr *addr)
+char *socket_get_key(struct address *addr)
 {
-    struct sockaddr_in *a = (struct sockaddr_in*)addr;
-    uint16_t port = a->sin_port;
-    int address = a->sin_addr.s_addr;
-    char *dest = calloc(17, sizeof(char));
-    sprintf(dest, "%d:%d", address, port);
+    char *dest = calloc(1, sizeof(struct address) + 8);
+    sprintf(dest, "%s:%d", addr->host, addr->port);
     return dest;
 }

@@ -4,6 +4,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include "command.h"
+#include "socket.h"
 
 struct event_loop;
 struct context;
@@ -18,10 +19,8 @@ struct connection {
     STAILQ_ENTRY(connection) next;
     struct context *ctx;
     int fd;
-    char *hostname;
-    uint16_t port;
 
-    struct sockaddr addr;
+    struct address addr;
 
     int registered;
 
@@ -39,10 +38,10 @@ STAILQ_HEAD(conn_tqh, connection);
 
 void conn_init(struct connection *conn, struct context *ctx);
 struct connection *conn_create(struct context *ctx);
-int conn_connect(struct connection *conn, int use_addr);
+int conn_connect(struct connection *conn);
 void conn_free(struct connection *conn);
 void conn_recycle(struct context *ctx, struct connection *conn);
-struct connection *conn_get_server_from_pool(struct context *ctx, struct sockaddr *addr);
+struct connection *conn_get_server_from_pool(struct context *ctx, struct address *addr);
 struct connection *conn_get_server(struct context *ctx, uint16_t slot);
 struct mbuf *conn_get_buf(struct connection *conn);
 int conn_create_fd();

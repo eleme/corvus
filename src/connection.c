@@ -26,7 +26,6 @@ void conn_init(struct connection *conn, struct context *ctx)
 {
     conn->ctx = ctx;
     conn->fd = -1;
-    conn->hostname = NULL;
     conn->status = DISCONNECTED;
     conn->ready = NULL;
     conn->registered = 0;
@@ -54,14 +53,10 @@ struct connection *conn_create(struct context *ctx)
     return conn;
 }
 
-int conn_connect(struct connection *conn, int use_addr)
+int conn_connect(struct connection *conn)
 {
-    int status;
-    if (use_addr) {
-        status = socket_connect_addr(conn->fd, &conn->addr);
-    } else {
-        status = socket_connect(conn->fd, conn->hostname, conn->port);
-    }
+    int status = -1;
+    status = socket_connect(conn->fd, conn->addr.host, conn->addr.port);
     switch (status) {
         case CORVUS_ERR: conn->status = DISCONNECTED; return -1;
         case CORVUS_INPROGRESS: conn->status = CONNECTING; break;
@@ -76,12 +71,9 @@ void conn_free(struct connection *conn)
         close(conn->fd);
         conn->fd = -1;
     }
-    if (conn->hostname != NULL) {
-        free(conn->hostname);
-        conn->hostname = NULL;
-    }
     conn->status = DISCONNECTED;
     conn->registered = 0;
+    memset(&conn->addr, 0, sizeof(conn->addr));
 
     EMPTY_CMD_QUEUE(&conn->cmd_queue, cmd_next);
     EMPTY_CMD_QUEUE(&conn->ready_queue, ready_next);
@@ -114,7 +106,7 @@ int conn_create_fd()
     return fd;
 }
 
-struct connection *conn_get_server_from_pool(struct context *ctx, struct sockaddr *addr)
+struct connection *conn_get_server_from_pool(struct context *ctx, struct address *addr)
 {
     int fd;
     struct connection *server;
@@ -127,8 +119,8 @@ struct connection *conn_get_server_from_pool(struct context *ctx, struct sockadd
         if (server->status == DISCONNECTED) {
             close(server->fd);
             server->fd = conn_create_fd();
-            if (conn_connect(server, true) == -1) {
-                close(server->fd);
+            if (conn_connect(server) == -1) {
+                conn_free(server);
                 LOG(ERROR, "can't connect");
                 return NULL;
             }
@@ -139,12 +131,12 @@ struct connection *conn_get_server_from_pool(struct context *ctx, struct sockadd
 
     fd = conn_create_fd();
     server = server_create(ctx, fd);
-    memcpy(&server->addr, addr, sizeof(struct sockaddr));
+    memcpy(&server->addr, addr, sizeof(struct address));
 
     hash_set(ctx->server_table, key, (void*)server);
 
-    if (conn_connect(server, true) == -1) {
-        close(server->fd);
+    if (conn_connect(server) == -1) {
+        conn_free(server);
         LOG(ERROR, "can't connect");
         return NULL;
     }
@@ -155,35 +147,30 @@ struct connection *conn_get_raw_server(struct context *ctx)
 {
     int i;
     int fd, port;
-    char *hostname, *addr, *key;
+    char *addr, *key;
     struct connection *server = NULL;
-    struct sockaddr sockaddr;
+    struct address a;
 
     for (i = 0; i < ctx->node_conf->len; i++) {
         addr = ctx->node_conf->nodes[i];
-        port = socket_parse_addr(addr, &hostname);
+        port = socket_parse_addr(addr, &a);
         if (port == -1) continue;
 
-        socket_get_addr(hostname, port, &sockaddr);
-        key = socket_get_key(&sockaddr);
+        key = socket_get_key(&a);
         server = hash_get(ctx->server_table, key);
         if (server != NULL) {
             free(key);
-            free(hostname);
             break;
         }
 
         fd = conn_create_fd();
         if (fd == -1) {
             free(key);
-            free(hostname);
             continue;
         }
         server = server_create(ctx, fd);
-        server->hostname = hostname;
-        server->port = port;
-        memcpy(&server->addr, &sockaddr, sizeof(sockaddr));
-        if (conn_connect(server, true) == -1) {
+        memcpy(&server->addr, &a, sizeof(a));
+        if (conn_connect(server) == -1) {
             free(key);
             conn_free(server);
             continue;

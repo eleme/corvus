@@ -104,7 +104,7 @@ int reader_ready(struct reader *r);
 int parse(struct reader *r);
 struct pos *pos_get(struct pos_array *arr, int idx);
 size_t pos_str_len(struct pos *pos);
-char *pos_to_str(struct pos_array *pos);
+int pos_to_str(struct pos_array *pos, char *str);
 int pos_array_compare(struct pos_array *arr, char *data, int len);
 void redis_data_free(struct redis_data *data);
 

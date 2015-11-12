@@ -6,8 +6,6 @@
 #include "event.h"
 #include "proxy.h"
 
-#define MIN(a, b) (a > b ? b : a)
-
 static struct {
     uint16_t bind;
     struct node_conf node;
@@ -162,8 +160,8 @@ int main(int argc, const char *argv[])
     }
 
     init_command_map();
-    slot_init_updater(config.syslog, config.loglevel);
-    slot_create_job(SLOT_UPDATE_INIT, &config.node);
+    slot_init_updater(config.syslog, config.loglevel, &config.node);
+    slot_create_job(SLOT_UPDATE_INIT, NULL);
 
     main_loop();
     return EXIT_SUCCESS;

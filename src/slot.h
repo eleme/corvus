@@ -2,10 +2,9 @@
 #define __SLOT_H
 
 #include <stdint.h>
-#include <sys/queue.h>
-#include <sys/socket.h>
-#include <sys/types.h>
+#include "corvus.h"
 #include "parser.h"
+#include "socket.h"
 
 #define REDIS_CLUSTER_SLOTS 16384
 
@@ -19,9 +18,9 @@ enum {
 struct node_info {
     LIST_ENTRY(node_info) next;
     int id;
-    struct sockaddr master;
+    struct address master;
     size_t slave_count;
-    struct sockaddr *slaves;
+    struct address *slaves;
 };
 
 LIST_HEAD(node_list, node_info);
@@ -30,6 +29,6 @@ uint16_t slot_get(struct pos_array *pos);
 struct node_info *slot_get_node_info(uint16_t slot);
 void slot_create_job(int type, void *arg);
 void slot_kill_updater();
-int slot_init_updater(bool syslog, int log_level);
+int slot_init_updater(bool syslog, int log_level, struct node_conf *nodes);
 
 #endif /* end of include guard: __SLOT_H */

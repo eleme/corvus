@@ -4,7 +4,6 @@
 #include <sys/uio.h>
 #include <sys/queue.h>
 #include <pthread.h>
-#include <netdb.h>
 #include <errno.h>
 #include "corvus.h"
 #include "hash.h"
@@ -48,32 +47,34 @@ static struct job_queue job_queue;
 
 static struct node_list node_list;
 
-static struct node_info *node_info_create(struct sockaddr *addr)
+static struct node_info *node_info_create(struct address *addr)
 {
     struct node_info *node = malloc(sizeof(struct node_info));
     node->id = -1;
     node->slave_count = 0;
     node->slaves = NULL;
-    memcpy(&node->master, addr, sizeof(struct sockaddr));
+
+    memcpy(&node->master, addr, sizeof(struct address));
     return node;
 }
 
 static struct node_info *node_info_find(struct redis_data *data)
 {
-    struct sockaddr addr;
     struct node_info *node;
     char *key;
 
     if (data->elements != 2) return NULL;
 
-    char *hostname = pos_to_str(data->element[0]->pos);
-    if (hostname == NULL) return NULL;
+    struct pos_array *p = data->element[0]->pos;
+    if (p->str_len <= 0) return NULL;
+
+    char hostname[p->str_len + 1];
+    if (pos_to_str(p, hostname) == CORVUS_ERR) return NULL;
 
     uint16_t port = data->element[1]->integer;
-    int status = socket_get_addr(hostname, port, &addr);
-    free(hostname);
 
-    if (status == -1) return NULL;
+    struct address addr;
+    socket_get_addr(hostname, p->str_len, port, &addr);
 
     key = socket_get_key(&addr);
     node = hash_get(slot_map_ctx.server_table, key);
@@ -88,17 +89,18 @@ static struct node_info *node_info_find(struct redis_data *data)
 
 static int node_info_add_slave(struct node_info *node, struct redis_data *data)
 {
-    struct sockaddr *addr = &node->slaves[node->slave_count++];
+    struct address *addr = &node->slaves[node->slave_count++];
 
     if (data->elements != 2) return -1;
 
-    char *hostname = pos_to_str(data->element[0]->pos);
-    if (hostname == NULL) return -1;
+    struct pos_array *p = data->element[0]->pos;
+    if (p->str_len <= 0) return CORVUS_ERR;
+
+    char hostname[p->str_len + 1];
+    if (pos_to_str(p, hostname) == CORVUS_ERR) return CORVUS_ERR;
 
     uint16_t port = data->element[1]->integer;
-    int status = socket_get_addr(hostname, port, addr);
-    free(hostname);
-    if (status == -1) return -1;
+    socket_get_addr(hostname, p->str_len, port, addr);
     return 0;
 }
 
@@ -126,7 +128,7 @@ static int parse_slots_data(struct redis_data *data)
         }
 
         if (node->slaves == NULL && d->elements - 3 > 0) {
-            node->slaves = malloc(sizeof(struct sockaddr) * (d->elements - 3));
+            node->slaves = malloc(sizeof(struct address) * (d->elements - 3));
             for (h = 3; h < d->elements; h++) {
                 if (node_info_add_slave(node, d->element[h]) == -1) return -1;
             }
@@ -149,11 +151,11 @@ static void slot_map_clear()
     hash_clear(slot_map_ctx.server_table);
 }
 
-static int do_update_slot_map(struct connection *server, int use_addr)
+static int do_update_slot_map(struct connection *server)
 {
-    conn_connect(server, use_addr);
+    conn_connect(server);
     if (server->status != CONNECTED) {
-        LOG(ERROR, "update_slot_map, server not connected: %s", strerror(errno));
+        LOG(ERROR, "update slot map, server not connected: %s", strerror(errno));
         return -1;
     }
 
@@ -162,7 +164,7 @@ static int do_update_slot_map(struct connection *server, int use_addr)
     iov.iov_len = strlen(SLOTS_CMD);
 
     if (socket_write(server->fd, &iov, 1) <= 0) {
-        LOG(ERROR, "update_slot_map: socket write: %s", strerror(errno));
+        LOG(ERROR, "update slot map, socket write: %s", strerror(errno));
         conn_free(server);
         return -1;
     }
@@ -170,7 +172,7 @@ static int do_update_slot_map(struct connection *server, int use_addr)
     struct command *cmd = cmd_create(&slot_map_ctx);
     cmd->server = server;
     if(cmd_read_reply(cmd, server) != CORVUS_OK) {
-        LOG(ERROR, "update_slot_map: cmd read error");
+        LOG(ERROR, "update slot map, cmd read error");
         return -1;
     }
 
@@ -179,25 +181,25 @@ static int do_update_slot_map(struct connection *server, int use_addr)
     return count;
 }
 
-static void slot_init_map(struct node_conf *conf)
+static void slot_map_init()
 {
-    int port, count = 0;
-    int i;
+    int i, port, count = 0;
+    char *addr;
     struct connection server;
-    char *hostname, *addr;
+    struct address address;
+    struct node_conf *conf = slot_map_ctx.node_conf;
+
     for (i = 0; i < conf->len; i++) {
         addr = conf->nodes[i];
-        port = socket_parse_addr(addr, &hostname);
+        port = socket_parse_addr(addr, &address);
         if (port == -1) continue;
 
         conn_init(&server, &slot_map_ctx);
         server.fd = socket_create_stream();
         if (server.fd == -1) continue;
 
-        server.hostname = hostname;
-        server.port = port;
-
-        count = do_update_slot_map(&server, false);
+        memcpy(&server.addr, &address, sizeof(struct address));
+        count = do_update_slot_map(&server);
         if (count < REDIS_CLUSTER_SLOTS) {
             conn_free(&server);
             continue;
@@ -209,18 +211,18 @@ static void slot_init_map(struct node_conf *conf)
 
 static void slot_map_update()
 {
-    LOG(DEBUG, "update slot map");
     int count = 0;
     struct node_info *node;
-    struct sockaddr addr;
     struct connection server;
+
     conn_init(&server, &slot_map_ctx);
 
     LIST_FOREACH(node, &node_list, next) {
         server.fd = socket_create_stream();
         if (server.fd == -1) continue;
-        memcpy(&server.addr, &node->master, sizeof(addr));
-        count = do_update_slot_map(&server, true);
+        memcpy(&server.addr, &node->master, sizeof(struct address));
+
+        count = do_update_slot_map(&server);
         if (count < REDIS_CLUSTER_SLOTS) {
             conn_free(&server);
             continue;
@@ -243,9 +245,13 @@ static void do_update(struct job *job)
 {
     slot_map_clear();
 
+    if (job->type == SLOT_UPDATE && LIST_EMPTY(&node_list)) {
+        job->type = SLOT_UPDATE_INIT;
+    }
+
     switch (job->type) {
         case SLOT_UPDATE_INIT:
-            slot_init_map(job->arg);
+            slot_map_init();
             break;
         case SLOT_UPDATE:
             slot_map_update();
@@ -359,13 +365,14 @@ void slot_create_job(int type, void *arg)
     pthread_mutex_unlock(&job_queue_mutex);
 }
 
-int slot_init_updater(bool syslog, int log_level)
+int slot_init_updater(bool syslog, int log_level, struct node_conf *nodes)
 {
     pthread_attr_t attr;
     pthread_t thread;
     size_t stacksize;
 
     context_init(&slot_map_ctx, syslog, log_level);
+    slot_map_ctx.node_conf = nodes;
 
     memset(slot_map, 0, sizeof(struct node_info*) * REDIS_CLUSTER_SLOTS);
     STAILQ_INIT(&job_queue);

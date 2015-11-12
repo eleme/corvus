@@ -18,6 +18,8 @@
 #define CORVUS_EOF -3
 #define CORVUS_INPROGRESS -4
 
+#define MIN(a, b) ((a) > (b) ? (b) : (a))
+
 struct node_conf {
     char **nodes;
     int len;

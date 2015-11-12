@@ -858,7 +858,10 @@ void cmd_parse_redirect(struct command *cmd, struct redirect_info *info)
 {
     LOG(DEBUG, "parse redirect");
     struct pos_array *pos = cmd->rep_data->pos;
-    char *err = pos_to_str(pos);
+    if (pos->str_len <= 0) return;
+
+    char err[pos->str_len + 1];
+    if (pos_to_str(pos, err) == CORVUS_ERR) return;
 
     char name[6];
     LOG(DEBUG, "%.*s", pos->str_len, err);
@@ -874,7 +877,6 @@ void cmd_parse_redirect(struct command *cmd, struct redirect_info *info)
         info->type = CMD_ERR_ASK;
         sscanf(err, "%s%d%s", name, (int*)&info->slot, info->addr);
     }
-    free(err);
 }
 
 void cmd_mark_done(struct command *cmd)

@@ -2,8 +2,8 @@
 #include <stdint.h>
 #include <assert.h>
 #include <string.h>
+#include "corvus.h"
 #include "parser.h"
-#include "mbuf.h"
 #include "logging.h"
 
 #define TO_NUMBER(v, c)                                        \
@@ -516,20 +516,18 @@ int reader_ready(struct reader *r)
     return r->ready;
 }
 
-char *pos_to_str(struct pos_array *pos)
+int pos_to_str(struct pos_array *pos, char *str)
 {
     int i, cur_len = 0;
     int length = pos->str_len;
-    char *str;
-    if (length <= 0) return NULL;
-    str = malloc(sizeof(char) * (length + 1));
+    if (length <= 0) return CORVUS_ERR;
 
     for (i = 0; i < pos->pos_len; i++) {
         memcpy(str + cur_len, pos->items[i].str, pos->items[i].len);
         cur_len += pos->items[i].len;
     }
     str[length] = '\0';
-    return str;
+    return CORVUS_OK;
 }
 
 int pos_array_compare(struct pos_array *arr, char *data, int len)
