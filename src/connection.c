@@ -188,7 +188,7 @@ struct connection *conn_get_raw_server(struct context *ctx)
 struct connection *conn_get_server(struct context *ctx, uint16_t slot)
 {
     struct node_info *node = slot_get_node_info(slot);
-    struct connection *server;
+    struct connection *server = NULL;
 
     server = (node == NULL) ?
         conn_get_raw_server(ctx) :

@@ -153,7 +153,7 @@ static void slot_map_clear()
 
 static int do_update_slot_map(struct connection *server)
 {
-    conn_connect(server);
+    if (conn_connect(server) == CORVUS_ERR) return CORVUS_ERR;
     if (server->status != CONNECTED) {
         LOG(ERROR, "update slot map, server not connected: %s", strerror(errno));
         return -1;
@@ -198,6 +198,11 @@ static void slot_map_init()
         server.fd = socket_create_stream();
         if (server.fd == -1) continue;
 
+        if (socket_set_timeout(server.fd, 5) == CORVUS_ERR) {
+            close(server.fd);
+            continue;
+        }
+
         memcpy(&server.addr, &address, sizeof(struct address));
         count = do_update_slot_map(&server);
         if (count < REDIS_CLUSTER_SLOTS) {
@@ -206,7 +211,12 @@ static void slot_map_init()
         }
         break;
     }
-    LOG(INFO, "slot map inited: covered %d slots", count);
+    conn_free(&server);
+    if (count == CORVUS_ERR) {
+        LOG(WARN, "can not init slot map");
+    } else {
+        LOG(INFO, "slot map inited: covered %d slots", count);
+    }
 }
 
 static void slot_map_update()
@@ -220,6 +230,12 @@ static void slot_map_update()
     LIST_FOREACH(node, &node_list, next) {
         server.fd = socket_create_stream();
         if (server.fd == -1) continue;
+
+        if (socket_set_timeout(server.fd, 5) == CORVUS_ERR) {
+            close(server.fd);
+            continue;
+        }
+
         memcpy(&server.addr, &node->master, sizeof(struct address));
 
         count = do_update_slot_map(&server);
@@ -237,8 +253,12 @@ static void slot_map_update()
         free(node);
     }
 
-    LOG(INFO, "slot map updated: corverd %d slots", count);
     conn_free(&server);
+    if (count == CORVUS_ERR) {
+        LOG(WARN, "can not update slot map");
+    } else {
+        LOG(INFO, "slot map updated: corverd %d slots", count);
+    }
 }
 
 static void do_update(struct job *job)

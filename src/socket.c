@@ -100,7 +100,7 @@ static struct addrinfo *_getaddrinfo(const char *addr, int port)
     hints.ai_socktype = SOCK_STREAM;
 
     if ((err = getaddrinfo(addr, _port, &hints, &servinfo)) != 0) {
-        LOG(ERROR, "get address info %s", strerror(err));
+        LOG(ERROR, "get address info: %s", strerror(err));
         return NULL;
     }
     return servinfo;
@@ -111,6 +111,22 @@ int socket_set_nonblocking(int fd)
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags < 0) return -1;
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
+
+int socket_set_timeout(int fd, int timeout)
+{
+    struct timeval tv;
+    tv.tv_sec = timeout;
+    tv.tv_usec = 0;
+    if (setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) == -1) {
+        LOG(ERROR, "setsockopt SO_SNDTIMEO: %s", strerror(errno));
+        return CORVUS_ERR;
+    }
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == -1) {
+        LOG(ERROR, "setsockopt SO_SNDTIMEO: %s", strerror(errno));
+        return CORVUS_ERR;
+    }
+    return CORVUS_OK;
 }
 
 int socket_create_server(char *bindaddr, int port)

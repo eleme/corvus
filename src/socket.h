@@ -20,6 +20,7 @@ int socket_read(int fd, struct mbuf *buf);
 int socket_write(int fd, struct iovec *iov, int invcnt);
 void socket_get_addr(char *host, int host_len, int port, struct address *addr);
 int socket_set_nonblocking(int fd);
+int socket_set_timeout(int fd, int timeout);
 int socket_parse_addr(char *addr, struct address *address);
 char *socket_get_key(struct address *addr);
 
