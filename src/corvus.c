@@ -1,4 +1,8 @@
 #include <errno.h>
+#include <signal.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <sys/eventfd.h>
 #include "corvus.h"
 #include "mbuf.h"
 #include "slot.h"
@@ -14,22 +18,9 @@ static struct {
     int syslog;
 } config;
 
-void context_init(struct context *ctx, bool syslog, int log_level)
-{
-    ctx->syslog = syslog;
-    ctx->log_level = log_level;
-    ctx->server_table = hash_new();
-    mbuf_init(ctx);
-    log_init(ctx);
+static struct context *contexts;
 
-    STAILQ_INIT(&ctx->free_cmdq);
-    ctx->nfree_cmdq = 0;
-
-    STAILQ_INIT(&ctx->free_connq);
-    ctx->nfree_connq = 0;
-}
-
-void config_init()
+static void config_init()
 {
     config.bind = 12345;
     memset(&config.node, 0, sizeof(struct node_conf));
@@ -38,7 +29,7 @@ void config_init()
     config.syslog = 0;
 }
 
-int config_add(char *name, char *value)
+static int config_add(char *name, char *value)
 {
     int name_len = strlen(name),
         value_len = strlen(value);
@@ -88,7 +79,7 @@ int config_add(char *name, char *value)
     return 0;
 }
 
-int read_conf(const char *filename)
+static int read_conf(const char *filename)
 {
     FILE *fp = fopen(filename, "r");
     if (fp == NULL) {
@@ -121,25 +112,136 @@ int read_conf(const char *filename)
     return 0;
 }
 
-void main_loop()
+static void do_quit()
 {
-    struct context ctx;
+    int status, i;
+    uint64_t data = 1;
+    for (i = 0; i <= config.thread; i++) {
+        if (!contexts[i].started) continue;
+        switch (contexts[i].role) {
+            case THREAD_SLOT_UPDATER:
+                slot_create_job(SLOT_UPDATER_QUIT, NULL);
+                break;
+            case THREAD_MAIN_WORKER:
+                status = write(contexts[i].notifier->fd, &data, sizeof(data));
+                if (status == -1) {
+                    LOG(ERROR, "quitting signal fail to send, force quit...");
+                    exit(EXIT_FAILURE);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+static void sig_handler(int sig)
+{
+    if (sig != SIGINT && sig != SIGTERM) return;
+    do_quit();
+}
+
+static void setup_signal()
+{
+    struct sigaction act;
+    sigemptyset(&act.sa_mask);
+    act.sa_flags = 0;
+    act.sa_handler = sig_handler;
+    sigaction(SIGINT, &act, NULL);
+    sigaction(SIGTERM, &act, NULL);
+}
+
+static void notify_ready(struct connection *conn, struct event_loop *loop, uint32_t mask)
+{
+    if (mask & E_READABLE) {
+        conn->ctx->quit = 1;
+        LOG(INFO, "existing signal received");
+    }
+}
+
+static int setup_notifier(struct context *ctx)
+{
+    struct connection *notifier = conn_create(ctx);
+    notifier->fd = eventfd(0, 0);
+    notifier->ready = notify_ready;
+    if (notifier->fd == -1) {
+        LOG(ERROR, "thread quit, can not create event fd");
+        return CORVUS_ERR;
+    }
+    ctx->notifier = notifier;
+    event_register(ctx->loop, notifier);
+    return CORVUS_OK;
+}
+
+void context_init(struct context *ctx, bool syslog, int log_level)
+{
+    ctx->syslog = syslog;
+    ctx->log_level = log_level;
+    ctx->server_table = hash_new();
+    ctx->started = false;
+    ctx->quit = 0;
+    ctx->notifier = NULL;
+    mbuf_init(ctx);
+    log_init(ctx);
+
+    STAILQ_INIT(&ctx->free_cmdq);
+    ctx->nfree_cmdq = 0;
+
+    STAILQ_INIT(&ctx->free_connq);
+    ctx->nfree_connq = 0;
+}
+
+void *main_loop(void *data)
+{
+    struct context *ctx = data;
     struct event_loop *loop = event_create(1024);
+    ctx->loop = loop;
 
-    context_init(&ctx, config.syslog, config.loglevel);
-    ctx.loop = loop;
-    ctx.node_conf = &config.node;
-
-    struct connection *proxy = proxy_create(&ctx, "0.0.0.0", config.bind);
+    struct connection *proxy = proxy_create(ctx, "0.0.0.0", config.bind);
     if (proxy == NULL) {
-        LOG(ERROR, "Error: can not create proxy");
-        return;
+        LOG(ERROR, "Fatal: fail to create proxy.");
+        exit(EXIT_FAILURE);
+    }
+    event_register(loop, proxy);
+
+    if (setup_notifier(ctx) == CORVUS_ERR) {
+        LOG(ERROR, "Fatal: fail to setup notifier.");
+        exit(EXIT_FAILURE);
     }
 
-    event_register(loop, proxy);
-    while (1) {
+    while (!ctx->quit) {
         event_wait(loop, -1);
     }
+    LOG(DEBUG, "main loop quiting");
+    return NULL;
+}
+
+void start_worker(int i)
+{
+    pthread_attr_t attr;
+    pthread_t thread;
+    size_t stacksize;
+
+    struct context *ctx = &contexts[i];
+
+    /* Make the thread killable at any time can work reliably. */
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+
+    /* Set the stack size as by default it may be small in some system */
+    pthread_attr_init(&attr);
+    pthread_attr_getstacksize(&attr, &stacksize);
+    if (!stacksize) stacksize = 1; /* The world is full of Solaris Fixes */
+    while (stacksize < THREAD_STACK_SIZE) stacksize *= 2;
+    pthread_attr_setstacksize(&attr, stacksize);
+
+    if (pthread_create(&thread, &attr, main_loop, (void*)ctx) != 0) {
+        LOG(ERROR, "can't initialize slot updating thread");
+        exit(EXIT_FAILURE);
+    }
+    ctx->thread = thread;
+    ctx->started = true;
+    ctx->role = THREAD_MAIN_WORKER;
 }
 
 int main(int argc, const char *argv[])
@@ -159,10 +261,28 @@ int main(int argc, const char *argv[])
         return EXIT_FAILURE;
     }
 
+    int i;
+
+    contexts = malloc(sizeof(struct context) * (config.thread + 1));
+    for (i = 0; i <= config.thread; i++) {
+        context_init(&contexts[i], config.syslog, config.loglevel);
+        contexts[i].node_conf = &config.node;
+        contexts[i].role = THREAD_UNKNOWN;
+    }
+
     init_command_map();
-    slot_init_updater(config.syslog, config.loglevel, &config.node);
+    slot_init_updater(&contexts[config.thread]);
     slot_create_job(SLOT_UPDATE_INIT, NULL);
 
-    main_loop();
+    for (i = 0; i < config.thread; i++) {
+        start_worker(i);
+    }
+
+    setup_signal();
+
+    for (i = 0; i <= config.thread; i++) {
+        if (!contexts[i].started) continue;
+        pthread_join(contexts[i].thread, NULL);
+    }
     return EXIT_SUCCESS;
 }

@@ -226,16 +226,22 @@ int socket_connect(int fd, char *addr, int port)
 
 int socket_read(int fd, struct mbuf *buf)
 {
-    ssize_t n = read(fd, buf->last, mbuf_write_size(buf));
-    if (n == -1) {
-        LOG(WARN, "socket_read: %s", strerror(errno));
-        if (errno == EAGAIN) {
-            return CORVUS_AGAIN;
+    ssize_t n;
+    while (1) {
+        n = read(fd, buf->last, mbuf_write_size(buf));
+        if (n == -1) {
+            switch (errno) {
+                case EINTR: continue;
+                case EAGAIN: return CORVUS_AGAIN;
+                default:
+                    LOG(WARN, "socket read: %s", strerror(errno));
+                    return CORVUS_ERR;
+            }
         }
-        return CORVUS_ERR;
+        buf->last += n;
+        return n;
     }
-    buf->last += n;
-    return n;
+    return CORVUS_ERR;
 }
 
 int socket_write(int fd, struct iovec *iov, int invcnt)
@@ -244,12 +250,12 @@ int socket_write(int fd, struct iovec *iov, int invcnt)
     while (1) {
         n = writev(fd, iov, invcnt);
         if (n == -1) {
-            if (errno == EINTR) {
-                continue;
-            } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                return CORVUS_AGAIN;
-            } else {
-                return CORVUS_ERR;
+            switch (errno) {
+                case EINTR: continue;
+                case EAGAIN: return CORVUS_AGAIN;
+                default:
+                    LOG(WARN, "socket write: %s", strerror(errno));
+                    return CORVUS_ERR;
             }
         }
         return n;

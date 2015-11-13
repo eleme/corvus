@@ -11,9 +11,6 @@
 #include "socket.h"
 #include "logging.h"
 
-#define SERVER_LIST_LEN 1024
-#define THREAD_STACK_SIZE (1024*1024*4)
-
 struct server_list {
     struct connection *list;
     size_t len;
@@ -38,7 +35,6 @@ extern void context_init(struct context *ctx, bool syslog, int log_level);
 static struct node_info *slot_map[REDIS_CLUSTER_SLOTS];
 static const char SLOTS_CMD[] = "*2\r\n$7\r\nCLUSTER\r\n$5\r\nSLOTS\r\n";
 
-static struct context slot_map_ctx;
 static int slot_map_status;
 static pthread_t slot_update_thread;
 static pthread_mutex_t job_queue_mutex;
@@ -58,7 +54,7 @@ static struct node_info *node_info_create(struct address *addr)
     return node;
 }
 
-static struct node_info *node_info_find(struct redis_data *data)
+static struct node_info *node_info_find(struct context *ctx, struct redis_data *data)
 {
     struct node_info *node;
     char *key;
@@ -77,12 +73,12 @@ static struct node_info *node_info_find(struct redis_data *data)
     socket_get_addr(hostname, p->str_len, port, &addr);
 
     key = socket_get_key(&addr);
-    node = hash_get(slot_map_ctx.server_table, key);
+    node = hash_get(ctx->server_table, key);
     if (node != NULL) {
         free(key);
     } else {
         node = node_info_create(&addr);
-        hash_set(slot_map_ctx.server_table, key, (void*)node);
+        hash_set(ctx->server_table, key, (void*)node);
     }
     return node;
 }
@@ -104,7 +100,7 @@ static int node_info_add_slave(struct node_info *node, struct redis_data *data)
     return 0;
 }
 
-static int parse_slots_data(struct redis_data *data)
+static int parse_slots_data(struct context *ctx, struct redis_data *data)
 {
     size_t i, h;
     long long j;
@@ -119,7 +115,7 @@ static int parse_slots_data(struct redis_data *data)
 
         if (d->elements < 3) return -1;
 
-        node = node_info_find(d->element[2]);
+        node = node_info_find(ctx, d->element[2]);
         if (node == NULL) return -1;
 
         for (j = d->element[0]->integer; j < d->element[1]->integer + 1; j++) {
@@ -138,17 +134,17 @@ static int parse_slots_data(struct redis_data *data)
     return count;
 }
 
-static void slot_map_clear()
+static void slot_map_clear(struct context *ctx)
 {
     LOG(DEBUG, "empty slot map");
     struct node_info *node;
-    hash_each(slot_map_ctx.server_table, {
+    hash_each(ctx->server_table, {
         free((void *)key);
         node = (struct node_info *)val;
         LIST_INSERT_HEAD(&node_list, node, next);
     });
 
-    hash_clear(slot_map_ctx.server_table);
+    hash_clear(ctx->server_table);
 }
 
 static int do_update_slot_map(struct connection *server)
@@ -169,32 +165,32 @@ static int do_update_slot_map(struct connection *server)
         return -1;
     }
 
-    struct command *cmd = cmd_create(&slot_map_ctx);
+    struct command *cmd = cmd_create(server->ctx);
     cmd->server = server;
     if(cmd_read_reply(cmd, server) != CORVUS_OK) {
         LOG(ERROR, "update slot map, cmd read error");
         return -1;
     }
 
-    int count = parse_slots_data(cmd->rep_data);
+    int count = parse_slots_data(server->ctx, cmd->rep_data);
     cmd_free(cmd);
     return count;
 }
 
-static void slot_map_init()
+static void slot_map_init(struct context *ctx)
 {
     int i, port, count = 0;
     char *addr;
     struct connection server;
     struct address address;
-    struct node_conf *conf = slot_map_ctx.node_conf;
+    struct node_conf *conf = ctx->node_conf;
 
     for (i = 0; i < conf->len; i++) {
         addr = conf->nodes[i];
         port = socket_parse_addr(addr, &address);
         if (port == -1) continue;
 
-        conn_init(&server, &slot_map_ctx);
+        conn_init(&server, ctx);
         server.fd = socket_create_stream();
         if (server.fd == -1) continue;
 
@@ -219,13 +215,13 @@ static void slot_map_init()
     }
 }
 
-static void slot_map_update()
+static void slot_map_update(struct context *ctx)
 {
     int count = 0;
     struct node_info *node;
     struct connection server;
 
-    conn_init(&server, &slot_map_ctx);
+    conn_init(&server, ctx);
 
     LIST_FOREACH(node, &node_list, next) {
         server.fd = socket_create_stream();
@@ -261,9 +257,9 @@ static void slot_map_update()
     }
 }
 
-static void do_update(struct job *job)
+static void do_update(struct context *ctx, struct job *job)
 {
-    slot_map_clear();
+    slot_map_clear(ctx);
 
     if (job->type == SLOT_UPDATE && LIST_EMPTY(&node_list)) {
         job->type = SLOT_UPDATE_INIT;
@@ -271,17 +267,21 @@ static void do_update(struct job *job)
 
     switch (job->type) {
         case SLOT_UPDATE_INIT:
-            slot_map_init();
+            slot_map_init(ctx);
             break;
         case SLOT_UPDATE:
-            slot_map_update();
+            slot_map_update(ctx);
+            break;
+        case SLOT_UPDATER_QUIT:
+            ctx->quit = 1;
             break;
     }
 }
 
-void *slot_map_updater()
+void *slot_map_updater(void *data)
 {
     struct job *job;
+    struct context *ctx = data;
 
     /* Make the thread killable at any time can work reliably. */
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
@@ -290,7 +290,7 @@ void *slot_map_updater()
     pthread_mutex_lock(&job_queue_mutex);
     slot_map_status = SLOT_MAP_NEW;
 
-    while (1) {
+    while (!ctx->quit) {
         if (STAILQ_EMPTY(&job_queue)) {
             pthread_cond_wait(&signal_cond, &job_queue_mutex);
             continue;
@@ -301,11 +301,13 @@ void *slot_map_updater()
 
         pthread_mutex_unlock(&job_queue_mutex);
 
-        do_update(job);
+        do_update(ctx, job);
 
         pthread_mutex_lock(&job_queue_mutex);
         slot_map_status = SLOT_MAP_NEW;
     }
+    LOG(INFO, "quiting");
+    return NULL;
 }
 
 uint16_t slot_get(struct pos_array *pos)
@@ -385,21 +387,15 @@ void slot_create_job(int type, void *arg)
     pthread_mutex_unlock(&job_queue_mutex);
 }
 
-int slot_init_updater(bool syslog, int log_level, struct node_conf *nodes)
+int slot_init_updater(struct context *ctx)
 {
-    pthread_attr_t attr;
     pthread_t thread;
+    pthread_attr_t attr;
     size_t stacksize;
 
-    context_init(&slot_map_ctx, syslog, log_level);
-    slot_map_ctx.node_conf = nodes;
-
-    memset(slot_map, 0, sizeof(struct node_info*) * REDIS_CLUSTER_SLOTS);
-    STAILQ_INIT(&job_queue);
-    LIST_INIT(&node_list);
-
-    pthread_mutex_init(&job_queue_mutex, NULL);
-    pthread_cond_init(&signal_cond, NULL);
+    /* Make the thread killable at any time can work reliably. */
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
     /* Set the stack size as by default it may be small in some system */
     pthread_attr_init(&attr);
@@ -408,11 +404,21 @@ int slot_init_updater(bool syslog, int log_level, struct node_conf *nodes)
     while (stacksize < THREAD_STACK_SIZE) stacksize *= 2;
     pthread_attr_setstacksize(&attr, stacksize);
 
-    if (pthread_create(&thread, &attr, slot_map_updater, NULL) != 0) {
+    memset(slot_map, 0, sizeof(struct node_info*) * REDIS_CLUSTER_SLOTS);
+    STAILQ_INIT(&job_queue);
+    LIST_INIT(&node_list);
+
+    pthread_mutex_init(&job_queue_mutex, NULL);
+    pthread_cond_init(&signal_cond, NULL);
+
+    if (pthread_create(&thread, &attr, slot_map_updater, (void*)ctx) != 0) {
         LOG(ERROR, "can't initialize slot updating thread");
         return -1;
     }
     slot_update_thread = thread;
+    ctx->thread = thread;
+    ctx->started = true;
+    ctx->role = THREAD_SLOT_UPDATER;
     return 0;
 }
 

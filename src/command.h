@@ -6,8 +6,6 @@
 #include "mbuf.h"
 #include "parser.h"
 
-#define CMD_MAP_LEN 1024
-
 struct context;
 
 enum {

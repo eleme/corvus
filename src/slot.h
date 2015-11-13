@@ -13,6 +13,7 @@ struct context;
 enum {
     SLOT_UPDATE_INIT,
     SLOT_UPDATE,
+    SLOT_UPDATER_QUIT,
 };
 
 struct node_info {
@@ -29,6 +30,6 @@ uint16_t slot_get(struct pos_array *pos);
 struct node_info *slot_get_node_info(uint16_t slot);
 void slot_create_job(int type, void *arg);
 void slot_kill_updater();
-int slot_init_updater(bool syslog, int log_level, struct node_conf *nodes);
+int slot_init_updater(struct context *ctx);
 
 #endif /* end of include guard: __SLOT_H */
