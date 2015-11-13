@@ -45,12 +45,12 @@ static inline bool mbuf_full(struct mbuf *mbuf)
 }
 
 void mbuf_init(struct context *);
-void mbuf_deinit(struct context *);
 struct mbuf *mbuf_get(struct context *);
 void mbuf_recycle(struct context *, struct mbuf *);
 uint32_t mbuf_read_size(struct mbuf *);
 uint32_t mbuf_write_size(struct mbuf *);
 size_t mbuf_size(struct context *);
+void mbuf_destroy(struct context *ctx);
 void mbuf_queue_insert(struct mhdr *, struct mbuf *);
 struct mbuf *mbuf_queue_top(struct context *, struct mhdr *);
 void mbuf_queue_init(struct mhdr *);

@@ -89,6 +89,12 @@ static int do_moved(struct command *cmd, struct redirect_info *info)
 
     struct connection *server = conn_get_server_from_pool(cmd->ctx, &addr);
     if (server == NULL) return CORVUS_ERR;
+
+    /* reset rep data */
+    cmd->server = server;
+    redis_data_free(cmd->rep_data);
+    memset(cmd->rep_buf, 0, sizeof(cmd->rep_buf));
+
     STAILQ_INSERT_TAIL(&server->retry_queue, cmd, retry_next);
 
     switch (server->registered) {

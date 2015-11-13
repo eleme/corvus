@@ -67,6 +67,7 @@ int conn_connect(struct connection *conn)
 
 void conn_free(struct connection *conn)
 {
+    if (conn == NULL) return;
     if (conn->fd != -1) {
         close(conn->fd);
         conn->fd = -1;

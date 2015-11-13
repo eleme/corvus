@@ -73,7 +73,8 @@ struct redirect_info {
     int type;
 };
 
-void init_command_map();
+void cmd_map_init();
+void cmd_map_destroy();
 struct command *cmd_create(struct context *ctx);
 void cmd_queue_init(struct cmd_tqh *cmd_queue);
 struct command *cmd_get_lastest(struct context *ctx, struct cmd_tqh *q);

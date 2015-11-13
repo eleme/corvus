@@ -93,11 +93,7 @@ static int read_conf(const char *filename)
         char name[r], value[r];
         for (i = 0; i < r && (line[i] == ' ' || line[i] == '\r'
                     || line[i] == '\t' || line[i] == '\n'); i++);
-        if (i == r || line[i] == '#') {
-            free(line);
-            line = NULL;
-            continue;
-        }
+        if (i == r || line[i] == '#') continue;
 
         sscanf(line, "%s%s", name, value);
         if (config_add(name, value) == -1) {
@@ -105,9 +101,8 @@ static int read_conf(const char *filename)
             fclose(fp);
             return -1;
         }
-        free(line);
-        line = NULL;
     }
+    free(line);
     fclose(fp);
     return 0;
 }
@@ -181,6 +176,10 @@ void context_init(struct context *ctx, bool syslog, int log_level)
     ctx->started = false;
     ctx->quit = 0;
     ctx->notifier = NULL;
+    ctx->proxy = NULL;
+    ctx->loop = NULL;
+    ctx->node_conf = NULL;
+    ctx->role = THREAD_UNKNOWN;
     mbuf_init(ctx);
     log_init(ctx);
 
@@ -189,6 +188,51 @@ void context_init(struct context *ctx, bool syslog, int log_level)
 
     STAILQ_INIT(&ctx->free_connq);
     ctx->nfree_connq = 0;
+}
+
+void context_free(struct context *ctx)
+{
+    /* server pool */
+    struct connection *conn;
+    hash_each(ctx->server_table, {
+        free((void*)key);
+        conn = (struct connection*)val;
+        conn_free(conn);
+        free(conn);
+    })
+    hash_clear(ctx->server_table);
+    hash_free(ctx->server_table);
+
+    /* mbuf queue */
+    mbuf_destroy(ctx);
+
+    /* cmd queue */
+    struct command *cmd;
+    while (!STAILQ_EMPTY(&ctx->free_cmdq)) {
+        cmd = STAILQ_FIRST(&ctx->free_cmdq);
+        STAILQ_REMOVE_HEAD(&ctx->free_cmdq, cmd_next);
+        free(cmd);
+        ctx->nfree_cmdq--;
+    }
+
+    /* connection queue */
+    while (!STAILQ_EMPTY(&ctx->free_connq)) {
+        conn = STAILQ_FIRST(&ctx->free_connq);
+        STAILQ_REMOVE_HEAD(&ctx->free_connq, next);
+        free(conn);
+        ctx->nfree_connq--;
+    }
+
+    /* event loop */
+    event_destory(ctx->loop);
+
+    /* notifier */
+    conn_free(ctx->notifier);
+    if (ctx->notifier != NULL) free(ctx->notifier);
+
+    /* proxy */
+    conn_free(ctx->proxy);
+    if (ctx->proxy != NULL) free(ctx->proxy);
 }
 
 void *main_loop(void *data)
@@ -212,6 +256,8 @@ void *main_loop(void *data)
     while (!ctx->quit) {
         event_wait(loop, -1);
     }
+    context_free(ctx);
+
     LOG(DEBUG, "main loop quiting");
     return NULL;
 }
@@ -270,7 +316,7 @@ int main(int argc, const char *argv[])
         contexts[i].role = THREAD_UNKNOWN;
     }
 
-    init_command_map();
+    cmd_map_init();
     slot_init_updater(&contexts[config.thread]);
     slot_create_job(SLOT_UPDATE_INIT, NULL);
 
@@ -284,5 +330,13 @@ int main(int argc, const char *argv[])
         if (!contexts[i].started) continue;
         pthread_join(contexts[i].thread, NULL);
     }
+
+    free(contexts);
+    cmd_map_destroy();
+
+    for (i = 0; i < config.node.len; i++) {
+        free(config.node.nodes[i]);
+    }
+    free(config.node.nodes);
     return EXIT_SUCCESS;
 }

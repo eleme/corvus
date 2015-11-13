@@ -85,7 +85,6 @@ static void client_ready(struct connection *self, struct event_loop *loop, uint3
                     event_deregister(loop, self);
                     client_eof(self);
                     break;
-
             }
         }
     }

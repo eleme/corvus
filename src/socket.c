@@ -19,7 +19,7 @@ static int set_reuseaddr(int fd)
 {
     int optval = 1;
     if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)) == -1) {
-        perror("set_reuseaddr: setsockopt");
+        LOG(ERROR, "setsockopt SO_REUSEADDR: %s", strerror(errno));
         return -1;
     }
     return 0;
@@ -29,7 +29,7 @@ static int set_reuseport(int fd)
 {
     int optval = 1;
     if (setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(int)) == -1) {
-        perror("set_reuseport: setsockopt");
+        LOG(ERROR, "setsockopt SO_REUSEPORT: %s", strerror(errno));
         return -1;
     }
     return 0;
@@ -38,12 +38,12 @@ static int set_reuseport(int fd)
 static int _listen(int fd, struct sockaddr *sa, socklen_t len, int backlog)
 {
     if (bind(fd, sa, len) == -1) {
-        perror("socket_listen: bind");
+        LOG(ERROR, "bind: %s", strerror(errno));
         return -1;
     }
 
     if (listen(fd, backlog) == -1) {
-        perror("socket_listen: listen");
+        LOG(ERROR, "listen: %s", strerror(errno));
         return -1;
     }
     return 0;
@@ -54,13 +54,10 @@ static int _accept(int fd, struct sockaddr *sa, socklen_t *len)
     int s = -1;
     while (1) {
         s = accept(fd, sa, len);
-        if (fd == -1) {
-            if (errno == EINTR) {
-                continue;
-            } else {
-                perror("_accept: accept");
-                return -1;
-            }
+        if (s == -1) {
+            if (errno == EINTR) continue;
+            LOG(ERROR, "accept: %s", strerror(errno));
+            return -1;
         }
         break;
     }
@@ -69,7 +66,12 @@ static int _accept(int fd, struct sockaddr *sa, socklen_t *len)
 
 static inline int _socket(int domain, int type, int protocol)
 {
-    return socket(domain, type | SOCK_CLOEXEC, protocol);
+    int fd;
+    if ((fd = socket(domain, type | SOCK_CLOEXEC, protocol)) == -1) {
+        LOG(ERROR, "Fail to create socket: %s", strerror(errno));
+        return -1;
+    }
+    return fd;
 }
 
 static int _connect(int fd, const struct sockaddr *addr, socklen_t addrlen)
@@ -88,29 +90,36 @@ static int _connect(int fd, const struct sockaddr *addr, socklen_t addrlen)
     return CORVUS_OK;
 }
 
-static struct addrinfo *_getaddrinfo(const char *addr, int port)
+static int _getaddrinfo(const char *addr, int port, struct addrinfo **servinfo)
 {
     int err;
     char _port[6];
-    struct addrinfo hints, *servinfo;
+    struct addrinfo hints;
 
     snprintf(_port, 6, "%d", port);
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
 
-    if ((err = getaddrinfo(addr, _port, &hints, &servinfo)) != 0) {
-        LOG(ERROR, "get address info: %s", strerror(err));
-        return NULL;
+    if ((err = getaddrinfo(addr, _port, &hints, servinfo)) != 0) {
+        LOG(ERROR, "getaddrinfo: %s", strerror(errno));
+        return CORVUS_ERR;
     }
-    return servinfo;
+    return CORVUS_OK;
 }
 
 int socket_set_nonblocking(int fd)
 {
     int flags = fcntl(fd, F_GETFL, 0);
-    if (flags < 0) return -1;
-    return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    if (flags == -1) {
+        LOG(ERROR, "fcntl: %s", strerror(errno));
+        return -1;
+    }
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+        LOG(ERROR, "Fail to set nonblock for fd %d: %s", fd, strerror(errno));
+        return -1;
+    }
+    return 0;
 }
 
 int socket_set_timeout(int fd, int timeout)
@@ -131,11 +140,12 @@ int socket_set_timeout(int fd, int timeout)
 
 int socket_create_server(char *bindaddr, int port)
 {
-    int s;
+    int s = -1;
     struct addrinfo *p, *servinfo;
 
-    servinfo = _getaddrinfo(bindaddr, port);
-    if (servinfo == NULL) return -1;
+    if (_getaddrinfo(bindaddr, port, &servinfo) == CORVUS_ERR) {
+        return CORVUS_ERR;
+    }
 
     for (p = servinfo; p != NULL; p = p->ai_next) {
         if ((s = _socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
@@ -143,31 +153,36 @@ int socket_create_server(char *bindaddr, int port)
         }
         break;
     }
-    freeaddrinfo(servinfo);
 
-    if (p == NULL) {
-        perror("unable to bind");
+    if (p == NULL || s == -1) {
+        freeaddrinfo(servinfo);
         return -1;
     }
+
     if (socket_set_nonblocking(s) == -1) {
         close(s);
+        freeaddrinfo(servinfo);
         return -1;
     }
 
     if (set_reuseaddr(s) == -1) {
         close(s);
+        freeaddrinfo(servinfo);
         return -1;
     }
 
     if (set_reuseport(s) == -1) {
         close(s);
+        freeaddrinfo(servinfo);
         return -1;
     }
 
     if (_listen(s, p->ai_addr, p->ai_addrlen, 1024) == -1) {
         close(s);
+        freeaddrinfo(servinfo);
         return -1;
     }
+    freeaddrinfo(servinfo);
 
     return s;
 }
@@ -176,7 +191,6 @@ int socket_create_stream()
 {
     int s;
     if ((s = _socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-        perror("socket_create_stream: socket");
         return -1;
     }
     return s;
@@ -191,9 +205,9 @@ int socket_accept(int fd, char *ip, size_t ip_len, int *port)
     s = _accept(fd, (struct sockaddr*)&sa, &salen);
     if (s == -1) {
         if (errno == EAGAIN) {
-            return errno;
+            return CORVUS_AGAIN;
         }
-        return -1;
+        return CORVUS_ERR;
     }
 
     struct sockaddr_in *addr = (struct sockaddr_in*)&sa;
@@ -208,8 +222,9 @@ int socket_connect(int fd, char *addr, int port)
     int retval = 0;
     struct addrinfo *p, *addrs;
 
-    addrs = _getaddrinfo(addr, port);
-    if (addrs == NULL) return -1;
+    if (_getaddrinfo(addr, port, &addrs) == CORVUS_ERR) {
+        return CORVUS_ERR;
+    }
 
     for (p = addrs; p != NULL; p = p->ai_next) {
         status = _connect(fd, p->ai_addr, p->ai_addrlen);

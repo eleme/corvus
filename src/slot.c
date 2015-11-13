@@ -31,6 +31,7 @@ enum {
 STAILQ_HEAD(job_queue, job);
 
 extern void context_init(struct context *ctx, bool syslog, int log_level);
+extern void context_free(struct context *ctx);
 
 static struct node_info *slot_map[REDIS_CLUSTER_SLOTS];
 static const char SLOTS_CMD[] = "*2\r\n$7\r\nCLUSTER\r\n$5\r\nSLOTS\r\n";
@@ -42,6 +43,17 @@ static pthread_cond_t signal_cond;
 static struct job_queue job_queue;
 
 static struct node_list node_list;
+
+static void node_list_free()
+{
+    struct node_info *node;
+    while(!LIST_EMPTY(&node_list)) {
+        node = LIST_FIRST(&node_list);
+        LIST_REMOVE(node, next);
+        if (node->slaves != NULL) free(node->slaves);
+        free(node);
+    }
+}
 
 static struct node_info *node_info_create(struct address *addr)
 {
@@ -242,14 +254,9 @@ static void slot_map_update(struct context *ctx)
         break;
     }
 
-    while(!LIST_EMPTY(&node_list)) {
-        node = LIST_FIRST(&node_list);
-        LIST_REMOVE(node, next);
-        if (node->slaves != NULL) free(node->slaves);
-        free(node);
-    }
-
+    node_list_free();
     conn_free(&server);
+
     if (count == CORVUS_ERR) {
         LOG(WARN, "can not update slot map");
     } else {
@@ -276,6 +283,7 @@ static void do_update(struct context *ctx, struct job *job)
             ctx->quit = 1;
             break;
     }
+    free(job);
 }
 
 void *slot_map_updater(void *data)
@@ -306,6 +314,16 @@ void *slot_map_updater(void *data)
         pthread_mutex_lock(&job_queue_mutex);
         slot_map_status = SLOT_MAP_NEW;
     }
+    pthread_mutex_unlock(&job_queue_mutex);
+
+    while (!STAILQ_EMPTY(&job_queue)) {
+        job = STAILQ_FIRST(&job_queue);
+        STAILQ_REMOVE_HEAD(&job_queue, next);
+        free(job);
+    }
+    node_list_free();
+    context_free(ctx);
+
     LOG(INFO, "quiting");
     return NULL;
 }

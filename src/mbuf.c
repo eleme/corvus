@@ -43,16 +43,6 @@ static void mbuf_free(struct context *ctx, struct mbuf *mbuf)
     free(buf);
 }
 
-void mbuf_deinit(struct context *ctx)
-{
-    while (!STAILQ_EMPTY(&ctx->free_mbufq)) {
-        struct mbuf *mbuf = STAILQ_FIRST(&ctx->free_mbufq);
-        STAILQ_REMOVE_HEAD(&ctx->free_mbufq, next);
-        mbuf_free(ctx, mbuf);
-        ctx->nfree_mbufq--;
-    }
-}
-
 struct mbuf *mbuf_get(struct context *ctx)
 {
     struct mbuf *mbuf;
@@ -94,6 +84,17 @@ uint32_t mbuf_write_size(struct mbuf *mbuf)
 size_t mbuf_size(struct context *ctx)
 {
     return ctx->mbuf_offset;
+}
+
+void mbuf_destroy(struct context *ctx)
+{
+    struct mbuf *buf;
+    while (!STAILQ_EMPTY(&ctx->free_mbufq)) {
+        buf = STAILQ_FIRST(&ctx->free_mbufq);
+        STAILQ_REMOVE_HEAD(&ctx->free_mbufq, next);
+        mbuf_free(ctx, buf);
+        ctx->nfree_mbufq--;
+    }
 }
 
 void mbuf_queue_init(struct mhdr *mhdr)

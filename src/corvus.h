@@ -46,6 +46,8 @@ struct context {
     uint32_t nfree_connq;
     struct conn_tqh free_connq;
 
+    struct connection *proxy;
+
     /* logging */
     bool syslog;
     int log_level;

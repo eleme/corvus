@@ -19,7 +19,7 @@ struct event_loop *event_create(int nevent)
         return NULL;
     }
 
-    events = malloc(nevent * sizeof(struct epoll_event));
+    events = calloc(nevent, sizeof(struct epoll_event));
     if (events == NULL) {
         close(epfd);
         return NULL;
@@ -37,6 +37,15 @@ struct event_loop *event_create(int nevent)
     loop->nevent = nevent;
 
     return loop;
+}
+
+void event_destory(struct event_loop *loop)
+{
+    if (loop == NULL) return;
+
+    close(loop->epfd);
+    free(loop->events);
+    free(loop);
 }
 
 int event_register(struct event_loop *loop, struct connection *c)

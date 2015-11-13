@@ -676,7 +676,7 @@ static void cmd_mark(struct command *cmd, int fail)
     }
 }
 
-void init_command_map()
+void cmd_map_init()
 {
     command_map = hash_new();
 
@@ -685,6 +685,11 @@ void init_command_map()
     for (i = 0; i < cmds_len; i++) {
         hash_set(command_map, cmds[i].cmd, &cmds[i]);
     }
+}
+
+void cmd_map_destroy()
+{
+    hash_free(command_map);
 }
 
 struct command *cmd_create(struct context *ctx)

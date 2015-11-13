@@ -14,10 +14,15 @@ static void proxy_ready(struct connection *self, struct event_loop *loop, uint32
 
     if (mask & E_READABLE) {
         int fd = socket_accept(self->fd, ip, sizeof(ip), &port);
-        LOG(DEBUG, "accepted %s:%d", ip, port);
-
-        struct connection *client = client_create(self->ctx, fd);
-        event_register(loop, client);
+        struct connection *client;
+        switch (fd) {
+            case CORVUS_ERR: close(fd); break;
+            case CORVUS_AGAIN: break;
+            default:
+                client = client_create(self->ctx, fd);
+                event_register(loop, client);
+                break;
+        }
     }
 }
 
@@ -27,18 +32,9 @@ struct connection *proxy_create(struct context *ctx, char *host, int port)
     int fd = socket_create_server(host, port);
     if (fd == -1) return NULL;
 
-    LOG(INFO, "serve at %s:%d", host, port);
-
-    proxy = malloc(sizeof(struct connection));
-    proxy->ctx = ctx;
+    proxy = conn_create(ctx);
+    ctx->proxy = proxy;
     proxy->fd = fd;
     proxy->ready = proxy_ready;
-    cmd_queue_init(&proxy->cmd_queue);
     return proxy;
-}
-
-void proxy_destroy(struct connection *proxy)
-{
-    close(proxy->fd);
-    free(proxy);
 }
