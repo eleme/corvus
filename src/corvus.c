@@ -10,14 +10,6 @@
 #include "event.h"
 #include "proxy.h"
 
-static struct {
-    uint16_t bind;
-    struct node_conf node;
-    int thread;
-    int loglevel;
-    int syslog;
-} config;
-
 static struct context *contexts;
 
 static void config_init()
@@ -183,6 +175,7 @@ void context_init(struct context *ctx, bool syslog, int log_level)
     ctx->notifier = NULL;
     mbuf_init(ctx);
     log_init(ctx);
+    stats_init();
 
     STAILQ_INIT(&ctx->free_cmdq);
     ctx->nfree_cmdq = 0;

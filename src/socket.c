@@ -238,6 +238,7 @@ int socket_read(int fd, struct mbuf *buf)
                     return CORVUS_ERR;
             }
         }
+        stats.recv_bytes += n;
         buf->last += n;
         return n;
     }
@@ -258,6 +259,7 @@ int socket_write(int fd, struct iovec *iov, int invcnt)
                     return CORVUS_ERR;
             }
         }
+        stats.send_bytes += n;
         return n;
     }
     return CORVUS_ERR;

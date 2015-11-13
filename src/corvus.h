@@ -9,6 +9,7 @@
 #include "mbuf.h"
 #include "command.h"
 #include "connection.h"
+#include "stats.h"
 
 #include "hashmap/hash.h"
 
@@ -21,6 +22,8 @@
 #define THREAD_STACK_SIZE (1024*1024*4)
 
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
+
+#define VERSION "0.1"
 
 enum thread_role {
     THREAD_UNKNOWN,
@@ -65,5 +68,12 @@ struct context {
     struct connection *notifier;
 };
 
+struct {
+    uint16_t bind;
+    struct node_conf node;
+    int thread;
+    int loglevel;
+    int syslog;
+} config;
 
 #endif /* end of include guard: __MAIN_H */
