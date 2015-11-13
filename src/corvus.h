@@ -68,12 +68,4 @@ struct context {
     struct connection *notifier;
 };
 
-struct {
-    uint16_t bind;
-    struct node_conf node;
-    int thread;
-    int loglevel;
-    int syslog;
-} config;
-
 #endif /* end of include guard: __MAIN_H */

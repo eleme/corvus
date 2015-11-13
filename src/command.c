@@ -472,7 +472,7 @@ static void cmd_proxy_info(struct command *cmd)
         "total_commands:%d\r\n",
         VERSION,
         stats.pid,
-        config.thread,
+        stats.thread,
         res.ru_stime.tv_sec + res.ru_stime.tv_usec / 1000000.0,
         res.ru_utime.tv_sec + res.ru_utime.tv_usec / 1000000.0,
         stats.send_bytes, stats.recv_bytes, stats.total_commands

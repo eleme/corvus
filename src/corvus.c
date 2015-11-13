@@ -10,6 +10,14 @@
 #include "event.h"
 #include "proxy.h"
 
+static struct {
+    uint16_t bind;
+    struct node_conf node;
+    int thread;
+    int loglevel;
+    int syslog;
+} config;
+
 static struct context *contexts;
 
 static void config_init()
@@ -36,6 +44,7 @@ static int config_add(char *name, char *value)
     } else if (strncmp(name, "thread", MIN(6, name_len)) == 0) {
         config.thread = strtoul(value, &end, 0);
         if (config.thread < 0) config.thread = 4;
+        stats.thread = config.thread;
     } else if (strncmp(name, "loglevel", MIN(8, name_len)) == 0) {
         if (strncmp(value, "debug", MIN(5, value_len)) == 0) {
             config.loglevel = DEBUG;
