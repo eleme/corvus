@@ -42,7 +42,7 @@ static void server_eof(struct connection *server)
     slot_create_job(SLOT_UPDATE, NULL);
 }
 
-static int on_write(struct connection *server, int retry)
+static int server_write(struct connection *server, int retry)
 {
     int status;
     struct command *cmd;
@@ -170,7 +170,7 @@ static void server_ready(struct connection *self, struct event_loop *loop, uint3
             }
 
             if (retry != -1) {
-                switch (on_write(self, retry)) {
+                switch (server_write(self, retry)) {
                     case CORVUS_ERR:
                         event_deregister(loop, self);
                         server_eof(self);

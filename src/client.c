@@ -21,7 +21,7 @@ static void client_eof(struct connection *client)
     conn_recycle(client->ctx, client);
 }
 
-static int on_write(struct connection *client)
+static int client_write(struct connection *client)
 {
     int status;
     struct command *cmd = STAILQ_FIRST(&client->cmd_queue);
@@ -47,6 +47,7 @@ static int on_write(struct connection *client)
     if (cmd->iov.len <= 0) {
         cmd_free_iov(&cmd->iov);
         STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
+        stats.total_commands++;
         cmd_free(cmd);
     } else {
         event_reregister(client->ctx->loop, client, E_READABLE | E_WRITABLE);
@@ -80,7 +81,7 @@ static void client_ready(struct connection *self, struct event_loop *loop, uint3
     if (mask & E_WRITABLE) {
         LOG(DEBUG, "client writable");
         if (!STAILQ_EMPTY(&self->cmd_queue)) {
-            switch (on_write(self)) {
+            switch (client_write(self)) {
                 case CORVUS_ERR:
                     event_deregister(loop, self);
                     client_eof(self);

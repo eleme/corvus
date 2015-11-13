@@ -4,6 +4,9 @@
 #include <errno.h>
 #include <ctype.h>
 #include <limits.h>
+#include <sys/time.h>
+#include <sys/resource.h>
+
 #include "corvus.h"
 #include "socket.h"
 #include "logging.h"
@@ -143,7 +146,7 @@ do {                                               \
     HANDLER(EVALSHA, UNIMPL)         \
     /* misc */                       \
     HANDLER(PING, PROXY)             \
-    HANDLER(INFO, UNIMPL)            \
+    HANDLER(INFO, PROXY)             \
     HANDLER(QUIT, UNIMPL)            \
     HANDLER(AUTH, UNIMPL)            \
     HANDLER(SELECT, UNIMPL)
@@ -453,14 +456,46 @@ static void cmd_proxy_ping(struct command *cmd)
     cmd_mark_done(cmd);
 }
 
-static int cmd_proxy(struct command *cmd)
+static void cmd_proxy_info(struct command *cmd)
+{
+    char info[1024], h[10];
+    struct rusage res;
+    getrusage(RUSAGE_SELF, &res);
+    snprintf(info, 1024,
+        "version:%s\r\n"
+        "pid:%d\r\n"
+        "threads:%d\r\n"
+        "used_cpu_sys:%f\r\n"
+        "used_cpu_user:%f\r\n"
+        "send_bytes:%d\r\n"
+        "recv_bytes:%d\r\n"
+        "total_commands:%d\r\n",
+        VERSION,
+        stats.pid,
+        stats.thread,
+        res.ru_stime.tv_sec + res.ru_stime.tv_usec / 1000000.0,
+        res.ru_utime.tv_sec + res.ru_utime.tv_usec / 1000000.0,
+        stats.send_bytes, stats.recv_bytes, stats.total_commands
+    );
+    snprintf(h, 10, "$%lu\r\n", strlen(info));
+    mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t *)h, strlen(h));
+    mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t *)info, strlen(info));
+    mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t *)"\r\n", 2);
+    cmd_apply_range(cmd, CMD_REP);
+    cmd_mark_done(cmd);
+}
+
+static int cmd_process(struct command *cmd)
 {
     switch (cmd->cmd_type) {
-    case CMD_PING:
-        cmd_proxy_ping(cmd);
-        break;
-    default:
-        return -1;
+        case CMD_PING:
+            cmd_proxy_ping(cmd);
+            break;
+        case CMD_INFO:
+            cmd_proxy_info(cmd);
+            break;
+        default:
+            return -1;
     }
     return 0;
 }
@@ -475,7 +510,7 @@ static int cmd_forward(struct command *cmd)
             if (cmd_forward_complex(cmd) == -1) return -1;
             break;
         case CMD_PROXY:
-            if (cmd_proxy(cmd) == -1) return -1;
+            if (cmd_process(cmd) == -1) return -1;
             break;
         case CMD_UNIMPL:
             break;
@@ -850,6 +885,7 @@ void cmd_make_iovec(struct command *cmd, struct iov_data *iov)
                 cmd_gen_del_iovec(c, iov);
                 break;
             case CMD_PING:
+            case CMD_INFO:
                 cmd_create_iovec(NULL, &c->rep_buf[0], &c->rep_buf[1], iov);
                 break;
             default:

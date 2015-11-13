@@ -44,6 +44,7 @@ static int config_add(char *name, char *value)
     } else if (strncmp(name, "thread", MIN(6, name_len)) == 0) {
         config.thread = strtoul(value, &end, 0);
         if (config.thread < 0) config.thread = 4;
+        stats.thread = config.thread;
     } else if (strncmp(name, "loglevel", MIN(8, name_len)) == 0) {
         if (strncmp(value, "debug", MIN(5, value_len)) == 0) {
             config.loglevel = DEBUG;
@@ -182,6 +183,7 @@ void context_init(struct context *ctx, bool syslog, int log_level)
     ctx->role = THREAD_UNKNOWN;
     mbuf_init(ctx);
     log_init(ctx);
+    stats_init();
 
     STAILQ_INIT(&ctx->free_cmdq);
     ctx->nfree_cmdq = 0;
