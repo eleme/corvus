@@ -15,7 +15,7 @@ static void client_eof(struct connection *client)
     while (!STAILQ_EMPTY(&client->cmd_queue)) {
         cmd = STAILQ_FIRST(&client->cmd_queue);
         STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
-        cmd_free(cmd);
+        cmd_set_stale(cmd);
     }
     conn_free(client);
     conn_recycle(client->ctx, client);
@@ -43,16 +43,22 @@ static int on_write(struct connection *client)
     }
     status = cmd_write_iov(cmd, client->fd);
 
+    if (status == CORVUS_ERR) return CORVUS_ERR;
     if (status == CORVUS_AGAIN) return CORVUS_OK;
+
     if (cmd->iov.len <= 0) {
         cmd_free_iov(&cmd->iov);
         STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
         cmd_free(cmd);
     } else {
-        event_reregister(client->ctx->loop, client, E_READABLE | E_WRITABLE);
+        switch (conn_register(client)) {
+            case CORVUS_ERR:
+                LOG(ERROR, "fail to register client %d", client->fd);
+                return CORVUS_ERR;
+            case CORVUS_OK:
+                break;
+        }
     }
-
-    if (status == CORVUS_ERR) return CORVUS_ERR;
 
     LOG(DEBUG, "client write ok");
     return CORVUS_OK;

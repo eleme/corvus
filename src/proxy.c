@@ -20,9 +20,14 @@ static void proxy_ready(struct connection *self, struct event_loop *loop, uint32
             case CORVUS_AGAIN: break;
             default:
                 client = client_create(self->ctx, fd);
-                event_register(loop, client);
+                if (conn_register(client) == CORVUS_ERR) {
+                    LOG(ERROR, "fail to register client");
+                    conn_free(client);
+                    conn_recycle(self->ctx, client);
+                }
                 break;
         }
+        if (fd != CORVUS_ERR) conn_register(self);
     }
 }
 

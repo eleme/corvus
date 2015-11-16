@@ -101,7 +101,7 @@ int conn_create_fd()
     int fd = socket_create_stream();
     if (fd == -1) return -1;
     if (socket_set_nonblocking(fd) == -1) {
-        LOG(ERROR, "can't set nonblocking");
+        LOG(ERROR, "fail to set nonblocking");
         return -1;
     }
     return fd;
@@ -118,11 +118,12 @@ struct connection *conn_get_server_from_pool(struct context *ctx, struct address
     if (server != NULL) {
         free(key);
         if (server->status == DISCONNECTED) {
-            close(server->fd);
+            if (server->fd != -1) close(server->fd);
+            memcpy(&server->addr, addr, sizeof(struct address));
             server->fd = conn_create_fd();
             if (conn_connect(server) == -1) {
                 conn_free(server);
-                LOG(ERROR, "can't connect");
+                LOG(ERROR, "fail to connect %s:%d", server->addr.host, server->addr.port);
                 return NULL;
             }
             server->registered = 0;
@@ -138,7 +139,7 @@ struct connection *conn_get_server_from_pool(struct context *ctx, struct address
 
     if (conn_connect(server) == -1) {
         conn_free(server);
-        LOG(ERROR, "can't connect");
+        LOG(ERROR, "fail to connect %s:%d", server->addr.host, server->addr.port);
         return NULL;
     }
     return server;
@@ -206,4 +207,21 @@ struct mbuf *conn_get_buf(struct connection *conn)
         mbuf_queue_insert(&conn->data, buf);
     }
     return buf;
+}
+
+int conn_register(struct connection *conn)
+{
+    int status;
+    struct context *ctx = conn->ctx;
+    switch (conn->registered) {
+        case 1:
+            status = event_reregister(ctx->loop, conn, E_WRITABLE | E_READABLE);
+            if (status == -1) return CORVUS_ERR;
+            break;
+        case 0:
+            status = event_register(ctx->loop, conn);
+            if (status == -1) return CORVUS_ERR;
+            break;
+    }
+    return CORVUS_OK;
 }

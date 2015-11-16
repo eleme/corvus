@@ -150,7 +150,7 @@ static void notify_ready(struct connection *conn, struct event_loop *loop, uint3
 {
     if (mask & E_READABLE) {
         conn->ctx->quit = 1;
-        LOG(INFO, "existing signal received");
+        LOG(DEBUG, "existing signal received");
     }
 }
 
@@ -292,6 +292,7 @@ void start_worker(int i)
 
 int main(int argc, const char *argv[])
 {
+    int i;
     if (argc != 2) {
         fprintf(stderr, "Usage: corvus corvus.conf\n");
         return EXIT_FAILURE;
@@ -307,7 +308,9 @@ int main(int argc, const char *argv[])
         return EXIT_FAILURE;
     }
 
-    int i;
+    if (config.syslog) {
+        openlog(NULL, LOG_PID | LOG_NDELAY | LOG_NOWAIT, LOG_USER);
+    }
 
     contexts = malloc(sizeof(struct context) * (config.thread + 1));
     for (i = 0; i <= config.thread; i++) {
@@ -326,6 +329,8 @@ int main(int argc, const char *argv[])
 
     setup_signal();
 
+    LOG(INFO, "serve at 0.0.0.0:%d", config.bind);
+
     for (i = 0; i <= config.thread; i++) {
         if (!contexts[i].started) continue;
         pthread_join(contexts[i].thread, NULL);
@@ -338,5 +343,6 @@ int main(int argc, const char *argv[])
         free(config.node.nodes[i]);
     }
     free(config.node.nodes);
+    if (config.syslog) closelog();
     return EXIT_SUCCESS;
 }

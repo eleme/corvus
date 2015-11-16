@@ -102,7 +102,7 @@ static int _getaddrinfo(const char *addr, int port, struct addrinfo **servinfo)
     hints.ai_socktype = SOCK_STREAM;
 
     if ((err = getaddrinfo(addr, _port, &hints, servinfo)) != 0) {
-        LOG(ERROR, "getaddrinfo: %s", strerror(errno));
+        LOG(ERROR, "getaddrinfo: %s", gai_strerror(err));
         return CORVUS_ERR;
     }
     return CORVUS_OK;

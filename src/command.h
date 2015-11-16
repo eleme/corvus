@@ -45,6 +45,8 @@ struct command {
 
     int parse_done;
 
+    int stale;
+
     int slot;
     int cmd_type;
     int request_type;
@@ -80,14 +82,15 @@ void cmd_queue_init(struct cmd_tqh *cmd_queue);
 struct command *cmd_get_lastest(struct context *ctx, struct cmd_tqh *q);
 int cmd_read_reply(struct command *cmd, struct connection *server);
 int cmd_read_request(struct command *cmd, int fd);
-void cmd_create_iovec(struct command *cmd, struct buf_ptr *start,
-        struct buf_ptr *end, struct iov_data *iov);
+void cmd_create_iovec(struct buf_ptr *start, struct buf_ptr *end, struct iov_data *iov);
 void cmd_make_iovec(struct command *cmd, struct iov_data *iov);
 void cmd_parse_redirect(struct command *cmd, struct redirect_info *info);
 void cmd_mark_done(struct command *cmd);
 void cmd_mark_fail(struct command *cmd);
 int cmd_write_iov(struct command *cmd, int fd);
+void cmd_set_stale(struct command *cmd);
 void cmd_free_iov(struct iov_data *iov);
+void cmd_free_reply(struct command *cmd);
 void cmd_free(struct command *cmd);
 
 #endif /* end of include guard: __COMMAND_H */

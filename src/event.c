@@ -4,7 +4,9 @@
 #include <assert.h>
 #include <errno.h>
 #include <unistd.h>
+#include <string.h>
 #include "event.h"
+#include "logging.h"
 
 struct event_loop *event_create(int nevent)
 {
@@ -50,23 +52,21 @@ void event_destory(struct event_loop *loop)
 
 int event_register(struct event_loop *loop, struct connection *c)
 {
-    int status;
     struct epoll_event event;
 
     event.events = (uint32_t)(EPOLLIN | EPOLLOUT | EPOLLET);
     event.data.ptr = c;
 
-    status = epoll_ctl(loop->epfd, EPOLL_CTL_ADD, c->fd, &event);
-    if (status < 0) {
-        perror("event_register: epoll_ctl");
+    if (epoll_ctl(loop->epfd, EPOLL_CTL_ADD, c->fd, &event) == -1) {
+        LOG(ERROR, "event_register: %s", strerror(errno));
+        return -1;
     }
     c->registered = 1;
-    return status;
+    return 0;
 }
 
 int event_reregister(struct event_loop *loop, struct connection *c, int mask)
 {
-    int status;
     struct epoll_event event;
 
     int op = mask == E_NONE ? EPOLL_CTL_DEL : EPOLL_CTL_MOD;
@@ -76,20 +76,21 @@ int event_reregister(struct event_loop *loop, struct connection *c, int mask)
     if (mask & E_WRITABLE) event.events |= EPOLLOUT;
     if (mask & E_READABLE) event.events |= EPOLLIN;
 
-    status = epoll_ctl(loop->epfd, op, c->fd, &event);
-    if (status < 0) {
-        perror("evnet_reregister: epoll_ctl");
+    if (epoll_ctl(loop->epfd, op, c->fd, &event) == -1) {
+        LOG(ERROR, "event_reregister: %s", strerror(errno));
+        return -1;
     }
-    return status;
+    return 0;
 }
 
 int event_deregister(struct event_loop *loop, struct connection *c)
 {
-    int status = epoll_ctl(loop->epfd, EPOLL_CTL_DEL, c->fd, NULL);
-    if (status < 0) {
-        perror("event_deregister: epoll_ctl");
+    if (epoll_ctl(loop->epfd, EPOLL_CTL_DEL, c->fd, NULL) == -1) {
+        LOG(ERROR, "event_deregister: %s", strerror(errno));
+        return -1;
     }
-    return status;
+    c->registered = 0;
+    return 0;
 }
 
 int event_wait(struct event_loop *loop, int timeout)

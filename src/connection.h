@@ -45,5 +45,6 @@ struct connection *conn_get_server_from_pool(struct context *ctx, struct address
 struct connection *conn_get_server(struct context *ctx, uint16_t slot);
 struct mbuf *conn_get_buf(struct connection *conn);
 int conn_create_fd();
+int conn_register(struct connection *conn);
 
 #endif /* end of include guard: __CONNECTION_H */

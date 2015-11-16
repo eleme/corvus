@@ -6,12 +6,14 @@
 #include "socket.h"
 #include "slot.h"
 
-static inline void remove_queue_head(struct connection *server, int retry)
+static inline void remove_queue_head(struct connection *server, struct command *cmd, int retry)
 {
     if (retry) {
         STAILQ_REMOVE_HEAD(&server->retry_queue, retry_next);
+        STAILQ_NEXT(cmd, retry_next) = NULL;
     } else {
         STAILQ_REMOVE_HEAD(&server->ready_queue, ready_next);
+        STAILQ_NEXT(cmd, ready_next) = NULL;
     }
 }
 
@@ -23,18 +25,21 @@ static void server_eof(struct connection *server)
     while (!STAILQ_EMPTY(&server->ready_queue)) {
         c = STAILQ_FIRST(&server->ready_queue);
         STAILQ_REMOVE_HEAD(&server->ready_queue, ready_next);
+        STAILQ_NEXT(c, ready_next) = NULL;
         cmd_mark_fail(c);
     }
 
     while (!STAILQ_EMPTY(&server->waiting_queue)) {
         c = STAILQ_FIRST(&server->waiting_queue);
         STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
+        STAILQ_NEXT(c, waiting_next) = NULL;
         cmd_mark_fail(c);
     }
 
     while (!STAILQ_EMPTY(&server->retry_queue)) {
         c = STAILQ_FIRST(&server->retry_queue);
         STAILQ_REMOVE_HEAD(&server->retry_queue, retry_next);
+        STAILQ_NEXT(c, retry_next) = NULL;
         cmd_mark_fail(c);
     }
 
@@ -48,19 +53,24 @@ static int on_write(struct connection *server, int retry)
     struct command *cmd;
 
     cmd = retry ? STAILQ_FIRST(&server->retry_queue) : STAILQ_FIRST(&server->ready_queue);
+    if (cmd->stale) {
+        remove_queue_head(server, cmd, retry);
+        cmd_free(cmd);
+        return CORVUS_OK;
+    }
 
     struct iov_data iov;
     memset(&iov, 0, sizeof(struct iov_data));
 
     if (cmd->iov.head == NULL) {
-        cmd_create_iovec(NULL, &cmd->req_buf[0], &cmd->req_buf[1], &cmd->iov);
+        cmd_create_iovec(&cmd->req_buf[0], &cmd->req_buf[1], &cmd->iov);
         cmd->iov.head = cmd->iov.data;
         cmd->iov.size = cmd->iov.len;
     }
 
     if (cmd->iov.len <= 0) {
         LOG(WARN, "no data to write");
-        remove_queue_head(server, retry);
+        remove_queue_head(server, cmd, retry);
         return CORVUS_ERR;
     }
 
@@ -69,7 +79,7 @@ static int on_write(struct connection *server, int retry)
     if (status == CORVUS_AGAIN) return CORVUS_OK;
     if (cmd->iov.len <= 0) {
         cmd_free_iov(&cmd->iov);
-        remove_queue_head(server, retry);
+        remove_queue_head(server, cmd, retry);
         STAILQ_INSERT_TAIL(&server->waiting_queue, cmd, waiting_next);
     } else {
         event_reregister(cmd->ctx->loop, server, E_WRITABLE | E_READABLE);
@@ -84,6 +94,8 @@ static int do_moved(struct command *cmd, struct redirect_info *info)
     int port;
     struct address addr;
 
+    cmd_free_reply(cmd);
+
     port = socket_parse_addr(info->addr, &addr);
     if (port == CORVUS_ERR) return CORVUS_ERR;
 
@@ -97,9 +109,9 @@ static int do_moved(struct command *cmd, struct redirect_info *info)
 
     STAILQ_INSERT_TAIL(&server->retry_queue, cmd, retry_next);
 
-    switch (server->registered) {
-        case 1: event_reregister(cmd->ctx->loop, server, E_WRITABLE | E_READABLE); break;
-        case 0: event_register(cmd->ctx->loop, server); break;
+    switch (conn_register(server)) {
+        case CORVUS_ERR: return CORVUS_ERR;
+        case CORVUS_OK: break;
     }
     slot_create_job(SLOT_UPDATE, NULL);
     return CORVUS_OK;
@@ -112,13 +124,21 @@ static int read_one_reply(struct connection *server)
     struct command *cmd = STAILQ_FIRST(&server->waiting_queue);
 
     int status = cmd_read_reply(cmd, server);
+    if (status != CORVUS_AGAIN) {
+        STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
+        STAILQ_NEXT(cmd, waiting_next) = NULL;
+    }
+
     switch (status) {
         case CORVUS_AGAIN: return CORVUS_AGAIN;
         case CORVUS_EOF: return CORVUS_EOF;
         case CORVUS_ERR: return CORVUS_ERR;
     }
 
-    STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
+    if (cmd->stale) {
+        cmd_free(cmd);
+        return CORVUS_OK;
+    }
 
     if (cmd->rep_data->type != REP_ERROR) {
         cmd_mark_done(cmd);

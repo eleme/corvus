@@ -19,6 +19,5 @@ struct context;
 
 void log_init(struct context *ctx);
 void logger(const char *file, int line, int level, const char *fmt, ...);
-void log_destroy();
 
 #endif /* end of include guard: __LOGGING_H */

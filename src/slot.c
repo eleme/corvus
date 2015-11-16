@@ -148,7 +148,6 @@ static int parse_slots_data(struct context *ctx, struct redis_data *data)
 
 static void slot_map_clear(struct context *ctx)
 {
-    LOG(DEBUG, "empty slot map");
     struct node_info *node;
     hash_each(ctx->server_table, {
         free((void *)key);
@@ -324,17 +323,17 @@ void *slot_map_updater(void *data)
     node_list_free();
     context_free(ctx);
 
-    LOG(INFO, "quiting");
+    LOG(DEBUG, "slot map update thread quiting");
     return NULL;
 }
 
 uint16_t slot_get(struct pos_array *pos)
 {
-    uint32_t s, len, orig_len;
-    uint8_t *str, *orig_str;
+    uint32_t s, len, orig_len = 0;
+    uint8_t *str, *orig_str = NULL;
     uint16_t hash;
     int h, found = 0, found_s = 0, pos_len = pos->pos_len;
-    struct pos *changed_pos = NULL, *p, *start, *end, *items = pos->items;
+    struct pos *changed_pos = NULL, *start = pos->items, *items = pos->items, *end, *p;
 
     for (h = 0; h < pos->pos_len; h++) {
         p = &pos->items[h];
@@ -433,6 +432,8 @@ int slot_init_updater(struct context *ctx)
         LOG(ERROR, "can't initialize slot updating thread");
         return -1;
     }
+    LOG(INFO, "starting slot updating thread");
+
     slot_update_thread = thread;
     ctx->thread = thread;
     ctx->started = true;
