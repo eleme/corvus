@@ -43,11 +43,12 @@ static void server_eof(struct connection *server)
         cmd_mark_fail(c);
     }
 
+    event_deregister(server->ctx->loop, server);
     conn_free(server);
     slot_create_job(SLOT_UPDATE, NULL);
 }
 
-static int on_write(struct connection *server, int retry)
+static int server_write(struct connection *server, int retry)
 {
     int status;
     struct command *cmd;
@@ -70,7 +71,6 @@ static int on_write(struct connection *server, int retry)
 
     if (cmd->iov.len <= 0) {
         LOG(WARN, "no data to write");
-        remove_queue_head(server, cmd, retry);
         return CORVUS_ERR;
     }
 
@@ -100,7 +100,10 @@ static int do_moved(struct command *cmd, struct redirect_info *info)
     if (port == CORVUS_ERR) return CORVUS_ERR;
 
     struct connection *server = conn_get_server_from_pool(cmd->ctx, &addr);
-    if (server == NULL) return CORVUS_ERR;
+    if (server == NULL) {
+        cmd_mark_fail(cmd);
+        return CORVUS_OK;
+    }
 
     /* reset rep data */
     cmd->server = server;
@@ -124,7 +127,7 @@ static int read_one_reply(struct connection *server)
     struct command *cmd = STAILQ_FIRST(&server->waiting_queue);
 
     int status = cmd_read_reply(cmd, server);
-    if (status != CORVUS_AGAIN) {
+    if (status == CORVUS_OK) {
         STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
         STAILQ_NEXT(cmd, waiting_next) = NULL;
     }
@@ -150,7 +153,8 @@ static int read_one_reply(struct connection *server)
     switch (info.type) {
         case CMD_ERR_MOVED:
             if (do_moved(cmd, &info) == CORVUS_ERR) {
-                cmd_mark_fail(cmd);
+                if (info.addr != NULL) free(info.addr);
+                return CORVUS_ERR;
             }
             break;
         default:
@@ -161,7 +165,7 @@ static int read_one_reply(struct connection *server)
     return CORVUS_OK;
 }
 
-static int on_read(struct connection *server)
+static int server_read(struct connection *server)
 {
     int status;
     do {
@@ -170,14 +174,14 @@ static int on_read(struct connection *server)
     return status;
 }
 
-static void server_ready(struct connection *self, struct event_loop *loop, uint32_t mask)
+static void server_ready(struct connection *self, uint32_t mask)
 {
     int retry = -1;
 
     if (mask & E_ERROR) {
         LOG(DEBUG, "error");
-        event_deregister(loop, self);
         server_eof(self);
+        return;
     }
     if (mask & E_WRITABLE) {
         LOG(DEBUG, "server writable");
@@ -189,32 +193,30 @@ static void server_ready(struct connection *self, struct event_loop *loop, uint3
                 retry = 0;
             }
 
-            if (retry != -1) {
-                switch (on_write(self, retry)) {
-                    case CORVUS_ERR:
-                        event_deregister(loop, self);
-                        server_eof(self);
-                        break;
-                }
+            if (retry != -1 && server_write(self, retry) == CORVUS_ERR) {
+                server_eof(self);
+                return;
             }
-
         } else {
             LOG(ERROR, "server not connected");
-            event_deregister(loop, self);
             server_eof(self);
+            return;
         }
     }
     if (mask & E_READABLE) {
         LOG(DEBUG, "server readable");
 
         if (!STAILQ_EMPTY(&self->waiting_queue)) {
-            switch (on_read(self)) {
+            switch (server_read(self)) {
                 case CORVUS_ERR:
                 case CORVUS_EOF:
-                    event_deregister(loop, self);
                     server_eof(self);
-                    break;
+                    return;
             }
+        } else {
+            LOG(WARN, "server is readable but waiting_queue is empty");
+            server_eof(self);
+            return;
         }
     }
 }

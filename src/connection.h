@@ -31,7 +31,7 @@ struct connection {
 
     struct mhdr data;
     int status;
-    void (*ready)(struct connection *self, struct event_loop *loop, uint32_t mask);
+    void (*ready)(struct connection *self, uint32_t mask);
 };
 
 STAILQ_HEAD(conn_tqh, connection);

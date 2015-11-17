@@ -17,11 +17,13 @@ static void client_eof(struct connection *client)
         STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
         cmd_set_stale(cmd);
     }
+
+    event_deregister(client->ctx->loop, client);
     conn_free(client);
     conn_recycle(client->ctx, client);
 }
 
-static int on_write(struct connection *client)
+static int client_write(struct connection *client)
 {
     int status;
     struct command *cmd = STAILQ_FIRST(&client->cmd_queue);
@@ -64,12 +66,12 @@ static int on_write(struct connection *client)
     return CORVUS_OK;
 }
 
-static void client_ready(struct connection *self, struct event_loop *loop, uint32_t mask)
+static void client_ready(struct connection *self, uint32_t mask)
 {
     if (mask & E_ERROR) {
         LOG(DEBUG, "error");
-        event_deregister(loop, self);
         client_eof(self);
+        return;
     }
     if (mask & E_READABLE) {
         LOG(DEBUG, "client readable");
@@ -78,19 +80,16 @@ static void client_ready(struct connection *self, struct event_loop *loop, uint3
         switch (cmd_read_request(cmd, self->fd)) {
             case CORVUS_ERR:
             case CORVUS_EOF:
-                event_deregister(loop, self);
                 client_eof(self);
-                break;
+                return;
         }
     }
     if (mask & E_WRITABLE) {
         LOG(DEBUG, "client writable");
         if (!STAILQ_EMPTY(&self->cmd_queue)) {
-            switch (on_write(self)) {
-                case CORVUS_ERR:
-                    event_deregister(loop, self);
-                    client_eof(self);
-                    break;
+            if (client_write(self) == CORVUS_ERR) {
+                client_eof(self);
+                return;
             }
         }
     }

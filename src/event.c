@@ -110,7 +110,7 @@ int event_wait(struct event_loop *loop, int timeout)
                 if (e->events & EPOLLHUP) mask |= E_READABLE;
                 if (e->events & EPOLLERR) mask |= E_ERROR;
 
-                c->ready(c, loop, mask);
+                c->ready(c, mask);
             }
             return nevents;
         }

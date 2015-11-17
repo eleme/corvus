@@ -146,7 +146,7 @@ static void setup_signal()
     sigaction(SIGTERM, &act, NULL);
 }
 
-static void notify_ready(struct connection *conn, struct event_loop *loop, uint32_t mask)
+static void notify_ready(struct connection *conn, uint32_t mask)
 {
     if (mask & E_READABLE) {
         conn->ctx->quit = 1;

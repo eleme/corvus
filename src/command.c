@@ -481,7 +481,7 @@ static int cmd_forward(struct command *cmd)
             if (cmd_proxy(cmd) == -1) return -1;
             break;
         case CMD_UNIMPL:
-            break;
+            return -1;
     }
     return 0;
 }

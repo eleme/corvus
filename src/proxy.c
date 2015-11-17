@@ -7,7 +7,7 @@
 #include "client.h"
 #include "logging.h"
 
-static void proxy_ready(struct connection *self, struct event_loop *loop, uint32_t mask)
+static void proxy_ready(struct connection *self, uint32_t mask)
 {
     char ip[16];
     int port;
