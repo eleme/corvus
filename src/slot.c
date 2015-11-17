@@ -42,6 +42,8 @@ static pthread_mutex_t job_queue_mutex;
 static pthread_cond_t signal_cond;
 static struct job_queue job_queue;
 
+static pthread_rwlock_t slot_map_lock = PTHREAD_RWLOCK_INITIALIZER;
+
 static struct node_list node_list;
 
 static void node_list_free()
@@ -148,6 +150,10 @@ static int parse_slots_data(struct context *ctx, struct redis_data *data)
 
 static void slot_map_clear(struct context *ctx)
 {
+    pthread_rwlock_wrlock(&slot_map_lock);
+    memset(slot_map, 0, sizeof(slot_map));
+    pthread_rwlock_unlock(&slot_map_lock);
+
     struct node_info *node;
     hash_each(ctx->server_table, {
         free((void *)key);
@@ -322,6 +328,7 @@ void *slot_map_updater(void *data)
     }
     node_list_free();
     context_free(ctx);
+    pthread_rwlock_destroy(&slot_map_lock);
 
     LOG(DEBUG, "slot map update thread quiting");
     return NULL;
@@ -384,9 +391,18 @@ end:
     return crc16(pos) & 0x3FFF;
 }
 
-struct node_info *slot_get_node_info(uint16_t slot)
+int slot_get_node_addr(uint16_t slot, struct address *addr)
 {
-    return slot_map[slot];
+    int res = 0;
+    struct node_info *info;
+    pthread_rwlock_rdlock(&slot_map_lock);
+    info = slot_map[slot];
+    if (info != NULL) {
+        memcpy(addr, &info->master, sizeof(struct address));
+        res = 1;
+    }
+    pthread_rwlock_unlock(&slot_map_lock);
+    return res;
 }
 
 void slot_create_job(int type, void *arg)

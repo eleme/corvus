@@ -27,7 +27,7 @@ struct node_info {
 LIST_HEAD(node_list, node_info);
 
 uint16_t slot_get(struct pos_array *pos);
-struct node_info *slot_get_node_info(uint16_t slot);
+int slot_get_node_addr(uint16_t slot, struct address *addr);
 void slot_create_job(int type, void *arg);
 void slot_kill_updater();
 int slot_init_updater(struct context *ctx);

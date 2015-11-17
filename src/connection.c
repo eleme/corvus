@@ -189,12 +189,12 @@ struct connection *conn_get_raw_server(struct context *ctx)
 
 struct connection *conn_get_server(struct context *ctx, uint16_t slot)
 {
-    struct node_info *node = slot_get_node_info(slot);
+    struct address addr;
     struct connection *server = NULL;
 
-    server = (node == NULL) ?
-        conn_get_raw_server(ctx) :
-        conn_get_server_from_pool(ctx, &node->master);
+    server = slot_get_node_addr(slot, &addr) ?
+        conn_get_server_from_pool(ctx, &addr) :
+        conn_get_raw_server(ctx);
     return server;
 }
 
