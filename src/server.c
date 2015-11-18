@@ -6,7 +6,10 @@
 #include "socket.h"
 #include "slot.h"
 
-static inline void remove_queue_head(struct connection *server, struct command *cmd, int retry)
+static const char *req_ask = "*1\r\n$6\r\nASKING\r\n";
+
+static inline void remove_queue_head(struct connection *server,
+        struct command *cmd, int retry)
 {
     if (retry) {
         STAILQ_REMOVE_HEAD(&server->retry_queue, retry_next);
@@ -17,35 +20,29 @@ static inline void remove_queue_head(struct connection *server, struct command *
     }
 }
 
-static void server_eof(struct connection *server)
+static void server_free_buf(struct command *cmd)
 {
-    LOG(WARN, "server eof");
+    struct mbuf *b, *buf;
+    b = cmd->rep_buf[0].buf;
+    while (b != NULL) {
+        if (b == cmd->rep_buf[0].buf && b == cmd->rep_buf[1].buf) {
+            mbuf_dec_ref_by(b, 2);
+        } else if (b == cmd->rep_buf[0].buf || b == cmd->rep_buf[1].buf) {
+            mbuf_dec_ref(b);
+        }
 
-    struct command *c;
-    while (!STAILQ_EMPTY(&server->ready_queue)) {
-        c = STAILQ_FIRST(&server->ready_queue);
-        STAILQ_REMOVE_HEAD(&server->ready_queue, ready_next);
-        STAILQ_NEXT(c, ready_next) = NULL;
-        cmd_mark_fail(c);
+        buf = STAILQ_NEXT(b, next);
+        if (b->refcount <= 0 && (b != cmd->rep_buf[1].buf
+                    || cmd->rep_buf[1].pos >= b->last))
+        {
+            STAILQ_REMOVE(&cmd->server->data, b, mbuf, next);
+            STAILQ_NEXT(b, next) = NULL;
+            mbuf_recycle(cmd->ctx, b);
+        }
+        if (b == cmd->rep_buf[1].buf) break;
+        b = buf;
     }
-
-    while (!STAILQ_EMPTY(&server->waiting_queue)) {
-        c = STAILQ_FIRST(&server->waiting_queue);
-        STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
-        STAILQ_NEXT(c, waiting_next) = NULL;
-        cmd_mark_fail(c);
-    }
-
-    while (!STAILQ_EMPTY(&server->retry_queue)) {
-        c = STAILQ_FIRST(&server->retry_queue);
-        STAILQ_REMOVE_HEAD(&server->retry_queue, retry_next);
-        STAILQ_NEXT(c, retry_next) = NULL;
-        cmd_mark_fail(c);
-    }
-
-    event_deregister(server->ctx->loop, server);
-    conn_free(server);
-    slot_create_job(SLOT_UPDATE, NULL);
+    memset(&cmd->rep_buf, 0, sizeof(cmd->rep_buf));
 }
 
 static int server_write(struct connection *server, int retry)
@@ -64,6 +61,9 @@ static int server_write(struct connection *server, int retry)
     memset(&iov, 0, sizeof(struct iov_data));
 
     if (cmd->iov.head == NULL) {
+        if (cmd->asking) {
+            cmd_iov_add(&cmd->iov, (void*)req_ask, strlen(req_ask));
+        }
         cmd_create_iovec(&cmd->req_buf[0], &cmd->req_buf[1], &cmd->iov);
         cmd->iov.head = cmd->iov.data;
         cmd->iov.size = cmd->iov.len;
@@ -89,34 +89,36 @@ static int server_write(struct connection *server, int retry)
     return CORVUS_OK;
 }
 
-static int do_moved(struct command *cmd, struct redirect_info *info)
+static int server_redirect(struct command *cmd, struct redirect_info *info)
 {
     int port;
     struct address addr;
 
-    cmd_free_reply(cmd);
+    server_free_buf(cmd);
+    redis_data_destroy(cmd->rep_data);
+    cmd->rep_data = NULL;
 
     port = socket_parse_addr(info->addr, &addr);
-    if (port == CORVUS_ERR) return CORVUS_ERR;
-
-    struct connection *server = conn_get_server_from_pool(cmd->ctx, &addr);
-    if (server == NULL) {
+    if (port == CORVUS_ERR) {
+        LOG(WARN, "server_redirect: fail to parse addr %s", info->addr);
         cmd_mark_fail(cmd);
         return CORVUS_OK;
     }
 
-    /* reset rep data */
-    cmd->server = server;
-    redis_data_free(cmd->rep_data);
-    memset(cmd->rep_buf, 0, sizeof(cmd->rep_buf));
+    struct connection *server = conn_get_server_from_pool(cmd->ctx, &addr);
+    if (server == NULL) {
+        LOG(WARN, "server_redirect: fail to get server %s", info->addr);
+        cmd_mark_fail(cmd);
+        return CORVUS_OK;
+    }
 
+    cmd->server = server;
     STAILQ_INSERT_TAIL(&server->retry_queue, cmd, retry_next);
 
     switch (conn_register(server)) {
         case CORVUS_ERR: return CORVUS_ERR;
         case CORVUS_OK: break;
     }
-    slot_create_job(SLOT_UPDATE, NULL);
     return CORVUS_OK;
 }
 
@@ -128,8 +130,17 @@ static int read_one_reply(struct connection *server)
 
     int status = cmd_read_reply(cmd, server);
     if (status == CORVUS_OK) {
-        STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
-        STAILQ_NEXT(cmd, waiting_next) = NULL;
+        if (!cmd->asking) {
+            STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
+            STAILQ_NEXT(cmd, waiting_next) = NULL;
+        } else {
+            LOG(DEBUG, "recv asking");
+            server_free_buf(cmd);
+            redis_data_destroy(cmd->rep_data);
+            cmd->rep_data = NULL;
+            cmd->asking = 0;
+            return CORVUS_OK;
+        }
     }
 
     switch (status) {
@@ -139,6 +150,7 @@ static int read_one_reply(struct connection *server)
     }
 
     if (cmd->stale) {
+        server_free_buf(cmd);
         cmd_free(cmd);
         return CORVUS_OK;
     }
@@ -152,10 +164,18 @@ static int read_one_reply(struct connection *server)
     cmd_parse_redirect(cmd, &info);
     switch (info.type) {
         case CMD_ERR_MOVED:
-            if (do_moved(cmd, &info) == CORVUS_ERR) {
+            if (server_redirect(cmd, &info) == CORVUS_ERR) {
                 if (info.addr != NULL) free(info.addr);
                 return CORVUS_ERR;
             }
+            slot_create_job(SLOT_UPDATE, NULL);
+            break;
+        case CMD_ERR_ASK:
+            if (server_redirect(cmd, &info) == CORVUS_ERR) {
+                if (info.addr != NULL) free(info.addr);
+                return CORVUS_ERR;
+            }
+            cmd->asking = 1;
             break;
         default:
             cmd_mark_done(cmd);
@@ -227,4 +247,35 @@ struct connection *server_create(struct context *ctx, int fd)
     server->fd = fd;
     server->ready = server_ready;
     return server;
+}
+
+void server_eof(struct connection *server)
+{
+    LOG(WARN, "server eof");
+
+    struct command *c;
+    while (!STAILQ_EMPTY(&server->ready_queue)) {
+        c = STAILQ_FIRST(&server->ready_queue);
+        STAILQ_REMOVE_HEAD(&server->ready_queue, ready_next);
+        STAILQ_NEXT(c, ready_next) = NULL;
+        cmd_mark_fail(c);
+    }
+
+    while (!STAILQ_EMPTY(&server->waiting_queue)) {
+        c = STAILQ_FIRST(&server->waiting_queue);
+        STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
+        STAILQ_NEXT(c, waiting_next) = NULL;
+        cmd_mark_fail(c);
+    }
+
+    while (!STAILQ_EMPTY(&server->retry_queue)) {
+        c = STAILQ_FIRST(&server->retry_queue);
+        STAILQ_REMOVE_HEAD(&server->retry_queue, retry_next);
+        STAILQ_NEXT(c, retry_next) = NULL;
+        cmd_mark_fail(c);
+    }
+
+    event_deregister(server->ctx->loop, server);
+    conn_free(server);
+    slot_create_job(SLOT_UPDATE, NULL);
 }

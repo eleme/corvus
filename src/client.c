@@ -7,22 +7,6 @@
 #include "logging.h"
 #include "event.h"
 
-static void client_eof(struct connection *client)
-{
-    LOG(DEBUG, "client eof");
-
-    struct command *cmd;
-    while (!STAILQ_EMPTY(&client->cmd_queue)) {
-        cmd = STAILQ_FIRST(&client->cmd_queue);
-        STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
-        cmd_set_stale(cmd);
-    }
-
-    event_deregister(client->ctx->loop, client);
-    conn_free(client);
-    conn_recycle(client->ctx, client);
-}
-
 static int client_write(struct connection *client)
 {
     int status;
@@ -103,4 +87,20 @@ struct connection *client_create(struct context *ctx, int fd)
     client->fd = fd;
     client->ready = client_ready;
     return client;
+}
+
+void client_eof(struct connection *client)
+{
+    LOG(DEBUG, "client eof");
+
+    struct command *cmd;
+    while (!STAILQ_EMPTY(&client->cmd_queue)) {
+        cmd = STAILQ_FIRST(&client->cmd_queue);
+        STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
+        cmd_set_stale(cmd);
+    }
+
+    event_deregister(client->ctx->loop, client);
+    conn_free(client);
+    conn_recycle(client->ctx, client);
 }

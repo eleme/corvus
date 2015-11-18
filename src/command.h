@@ -45,6 +45,9 @@ struct command {
 
     int parse_done;
 
+    /* asking redirect */
+    int asking;
+
     int stale;
 
     int slot;
@@ -83,6 +86,7 @@ struct command *cmd_get_lastest(struct context *ctx, struct cmd_tqh *q);
 int cmd_read_reply(struct command *cmd, struct connection *server);
 int cmd_read_request(struct command *cmd, int fd);
 void cmd_create_iovec(struct buf_ptr *start, struct buf_ptr *end, struct iov_data *iov);
+void cmd_iov_add(struct iov_data *iov, void *buf, size_t len);
 void cmd_make_iovec(struct command *cmd, struct iov_data *iov);
 void cmd_parse_redirect(struct command *cmd, struct redirect_info *info);
 void cmd_mark_done(struct command *cmd);

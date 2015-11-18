@@ -11,6 +11,7 @@
 #include "slot.h"
 #include "event.h"
 #include "server.h"
+#include "client.h"
 
 #if (IOV_MAX > 128)
 #define CORVUS_IOV_MAX 128
@@ -194,6 +195,7 @@ static void cmd_init(struct context *ctx, struct command *cmd)
     cmd->slot = -1;
     cmd->cmd_type = -1;
     cmd->request_type = -1;
+    cmd->asking = 0;
 
     memset(cmd->req_buf, 0, sizeof(cmd->req_buf));
     memset(cmd->rep_buf, 0, sizeof(cmd->rep_buf));
@@ -303,12 +305,10 @@ static int cmd_forward_basic(struct command *cmd)
     STAILQ_INSERT_TAIL(&server->ready_queue, cmd, ready_next);
     if (conn_register(server) == -1) {
         LOG(ERROR, "fail to register server %d", server->fd);
-        event_deregister(server->ctx->loop, server);
-        conn_free(server);
-        return CORVUS_ERR;
+        server_eof(server);
+    } else {
+        LOG(DEBUG, "register server event");
     }
-    LOG(DEBUG, "register server event server");
-
     return CORVUS_OK;
 }
 
@@ -521,15 +521,6 @@ static int get_buf_count(struct buf_ptr *start, struct buf_ptr *end)
     return n;
 }
 
-static void iov_add(struct iov_data *iov, void *buf, size_t len)
-{
-    iov->max_size++;
-    iov->data = realloc(iov->data, sizeof(struct iovec) * iov->max_size);
-    iov->data[iov->len].iov_base = buf;
-    iov->data[iov->len].iov_len = len;
-    iov->len++;
-}
-
 static void cmd_gen_mget_iovec(struct command *cmd, struct iov_data *iov)
 {
     const char *fmt = "*%ld\r\n";
@@ -538,7 +529,7 @@ static void cmd_gen_mget_iovec(struct command *cmd, struct iov_data *iov)
     char *b = malloc(sizeof(char) * (n + 1));
     snprintf(b, n + 1, fmt, keys);
 
-    iov_add(iov, (void*)b, n);
+    cmd_iov_add(iov, (void*)b, n);
     iov->ptr = b;
 
     struct command *c;
@@ -569,10 +560,10 @@ static void cmd_gen_mset_iovec(struct command *cmd, struct iov_data *iov)
         }
     }
     if (fail) {
-        iov_add(iov, (void*)rep_err, strlen(rep_err));
+        cmd_iov_add(iov, (void*)rep_err, strlen(rep_err));
         return;
     }
-    iov_add(iov, (void*)rep_ok, strlen(rep_ok));
+    cmd_iov_add(iov, (void*)rep_ok, strlen(rep_ok));
 }
 
 static void cmd_gen_del_iovec(struct command *cmd, struct iov_data *iov)
@@ -591,14 +582,14 @@ static void cmd_gen_del_iovec(struct command *cmd, struct iov_data *iov)
     }
 
     if (fail) {
-        iov_add(iov, (void*)rep_err, strlen(rep_err));
+        cmd_iov_add(iov, (void*)rep_err, strlen(rep_err));
         return;
     }
     if (one) {
-        iov_add(iov, (void*)rep_one, 4);
+        cmd_iov_add(iov, (void*)rep_one, 4);
         return;
     }
-    iov_add(iov, (void*)rep_zero, 4);
+    cmd_iov_add(iov, (void*)rep_zero, 4);
 }
 
 static int cmd_parse_req(struct command *cmd, struct mbuf *buf)
@@ -677,9 +668,7 @@ static void cmd_mark(struct command *cmd, int fail)
     {
         if (conn_register(root->client) == -1) {
             LOG(INFO, "fail to reregister client %d", root->client->fd);
-            event_deregister(root->ctx->loop, root->client);
-            conn_free(root->client);
-            conn_recycle(root->ctx, root->client);
+            client_eof(root->client);
         }
     }
 }
@@ -833,7 +822,7 @@ void cmd_make_iovec(struct command *cmd, struct iov_data *iov)
     struct command *c;
     STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
         if (c->cmd_fail) {
-            iov_add(iov, (void*)rep_err, strlen(rep_err));
+            cmd_iov_add(iov, (void*)rep_err, strlen(rep_err));
             continue;
         }
         switch (c->cmd_type) {
@@ -889,6 +878,15 @@ void cmd_mark_done(struct command *cmd)
 void cmd_mark_fail(struct command *cmd)
 {
     cmd_mark(cmd, 1);
+}
+
+void cmd_iov_add(struct iov_data *iov, void *buf, size_t len)
+{
+    iov->max_size++;
+    iov->data = realloc(iov->data, sizeof(struct iovec) * iov->max_size);
+    iov->data[iov->len].iov_base = buf;
+    iov->data[iov->len].iov_len = len;
+    iov->len++;
 }
 
 int cmd_write_iov(struct command *cmd, int fd)
@@ -1000,11 +998,11 @@ void cmd_free(struct command *cmd)
     struct command *c;
     struct context *ctx = cmd->ctx;
     if (cmd->req_data != NULL) {
-        redis_data_free(cmd->req_data);
+        redis_data_destroy(cmd->req_data);
         cmd->req_data = NULL;
     }
     if (cmd->rep_data != NULL) {
-        redis_data_free(cmd->rep_data);
+        redis_data_destroy(cmd->rep_data);
         cmd->rep_data = NULL;
     }
 

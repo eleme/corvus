@@ -143,7 +143,7 @@ TEST(test_process_integer) {
     ASSERT(parse(&r) != -1);
     ASSERT(r.data->integer == 231);
 
-    redis_data_free(d);
+    redis_data_destroy(d);
     reader_free(&r);
     PASS(NULL);
 }
@@ -172,7 +172,7 @@ TEST(test_empty_array) {
 
     ASSERT(parse(&r) != -1);
 
-    redis_data_free(d);
+    redis_data_destroy(d);
     reader_free(&r);
     PASS(NULL);
 }

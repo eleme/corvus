@@ -443,7 +443,7 @@ int parse(struct reader *r)
     return 0;
 }
 
-void pos_array_free(struct pos_array *arr)
+void pos_array_destroy(struct pos_array *arr)
 {
     if (arr == NULL) return;
     if (arr->items != NULL) free(arr->items);
@@ -454,7 +454,7 @@ void pos_array_free(struct pos_array *arr)
     free(arr);
 }
 
-void redis_data_free(struct redis_data *data)
+void redis_data_destroy(struct redis_data *data)
 {
     if (data == NULL) return;
 
@@ -463,13 +463,13 @@ void redis_data_free(struct redis_data *data)
         case REP_STRING:
         case REP_SIMPLE_STRING:
         case REP_ERROR:
-            pos_array_free(data->pos);
+            pos_array_destroy(data->pos);
             data->pos = NULL;
             break;
         case REP_ARRAY:
             if (data->element == NULL) break;
             for (i = 0; i < data->elements; i++) {
-                redis_data_free(data->element[i]);
+                redis_data_destroy(data->element[i]);
             }
             free(data->element);
             data->element = NULL;
@@ -495,13 +495,14 @@ void reader_free(struct reader *r)
 {
     if (r == NULL) return;
     if (r->data != NULL) {
-        redis_data_free(r->data);
+        redis_data_destroy(r->data);
         r->data = NULL;
     }
     int i;
     for (i = 0; i <= r->sidx; i++) {
         if (r->rstack[i].data == NULL) continue;
-        redis_data_free(r->rstack[i].data);
+        redis_data_destroy(r->rstack[i].data);
+        r->rstack[i].data = NULL;
     }
     r->sidx = -1;
 }
