@@ -57,9 +57,6 @@ static int server_write(struct connection *server, int retry)
         return CORVUS_OK;
     }
 
-    struct iov_data iov;
-    memset(&iov, 0, sizeof(struct iov_data));
-
     if (cmd->iov.head == NULL) {
         if (cmd->asking) {
             cmd_iov_add(&cmd->iov, (void*)req_ask, strlen(req_ask));
