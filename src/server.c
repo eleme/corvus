@@ -76,16 +76,19 @@ static int server_write(struct connection *server, int retry)
 
     status = cmd_write_iov(cmd, server->fd);
 
+    if (status == CORVUS_ERR) return CORVUS_ERR;
     if (status == CORVUS_AGAIN) return CORVUS_OK;
+
     if (cmd->iov.len <= 0) {
         cmd_free_iov(&cmd->iov);
         remove_queue_head(server, cmd, retry);
         STAILQ_INSERT_TAIL(&server->waiting_queue, cmd, waiting_next);
     } else {
-        event_reregister(cmd->ctx->loop, server, E_WRITABLE | E_READABLE);
+        if (conn_register(server) == CORVUS_ERR) {
+            LOG(ERROR, "fail to reregister server %d", server->fd);
+            return CORVUS_ERR;
+        }
     }
-
-    if (status == CORVUS_ERR) return CORVUS_ERR;
     return CORVUS_OK;
 }
 
@@ -258,6 +261,7 @@ void server_eof(struct connection *server)
         c = STAILQ_FIRST(&server->ready_queue);
         STAILQ_REMOVE_HEAD(&server->ready_queue, ready_next);
         STAILQ_NEXT(c, ready_next) = NULL;
+        cmd_free_iov(&c->iov);
         cmd_mark_fail(c);
     }
 
@@ -265,6 +269,7 @@ void server_eof(struct connection *server)
         c = STAILQ_FIRST(&server->waiting_queue);
         STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
         STAILQ_NEXT(c, waiting_next) = NULL;
+        cmd_free_iov(&c->iov);
         cmd_mark_fail(c);
     }
 
@@ -272,6 +277,7 @@ void server_eof(struct connection *server)
         c = STAILQ_FIRST(&server->retry_queue);
         STAILQ_REMOVE_HEAD(&server->retry_queue, retry_next);
         STAILQ_NEXT(c, retry_next) = NULL;
+        cmd_free_iov(&c->iov);
         cmd_mark_fail(c);
     }
 
