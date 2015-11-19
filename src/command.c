@@ -245,6 +245,19 @@ static struct mbuf *cmd_get_buf(struct command *cmd)
     return buf;
 }
 
+static int get_buf_count(struct buf_ptr *start, struct buf_ptr *end)
+{
+    int n = 0;
+    struct mbuf *b = start->buf;
+
+    while (b != end->buf && b != NULL) {
+        b = STAILQ_NEXT(b, next);
+        n++;
+    }
+    if (b == end->buf) n++;
+    return n;
+}
+
 static int cmd_get_type(struct command *cmd, struct pos_array *pos)
 {
     char key[pos->str_len + 1];
@@ -317,30 +330,6 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             stats->remote_nodes);
 }
 
-static int cmd_forward_basic(struct command *cmd)
-{
-    int slot;
-    struct connection *server = NULL;
-    struct context *ctx = cmd->ctx;
-
-    slot = cmd->slot != -1 ? cmd->slot : cmd_get_slot(cmd);
-    if (slot == -1) return CORVUS_ERR;
-
-    LOG(DEBUG, "slot %d", slot);
-    server = conn_get_server(ctx, slot);
-    if (server == NULL) return CORVUS_ERR;
-    cmd->server = server;
-
-    STAILQ_INSERT_TAIL(&server->ready_queue, cmd, ready_next);
-    if (conn_register(server) == -1) {
-        LOG(ERROR, "fail to register server %d", server->fd);
-        server_eof(server);
-    } else {
-        LOG(DEBUG, "register server event");
-    }
-    return CORVUS_OK;
-}
-
 static void cmd_apply_range(struct command *cmd, int type)
 {
     struct mbuf *first, *last;
@@ -367,6 +356,30 @@ static void cmd_apply_range(struct command *cmd, int type)
     start->pos = first->pos;
     end->buf = last;
     end->pos = last->last;
+}
+
+static int cmd_forward_basic(struct command *cmd)
+{
+    int slot;
+    struct connection *server = NULL;
+    struct context *ctx = cmd->ctx;
+
+    slot = cmd->slot != -1 ? cmd->slot : cmd_get_slot(cmd);
+    if (slot == -1) return CORVUS_ERR;
+
+    LOG(DEBUG, "slot %d", slot);
+    server = conn_get_server(ctx, slot);
+    if (server == NULL) return CORVUS_ERR;
+    cmd->server = server;
+
+    STAILQ_INSERT_TAIL(&server->ready_queue, cmd, ready_next);
+    if (conn_register(server) == -1) {
+        LOG(ERROR, "fail to register server %d", server->fd);
+        server_eof(server);
+    } else {
+        LOG(DEBUG, "register server event");
+    }
+    return CORVUS_OK;
 }
 
 static int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len)
@@ -575,18 +588,6 @@ static int cmd_parse_token(struct command *cmd)
         return -1;
     }
     return 0;
-}
-
-static int get_buf_count(struct buf_ptr *start, struct buf_ptr *end)
-{
-    int n = 0;
-    struct mbuf *b = start->buf;
-    while (b != end->buf && b != NULL) {
-        n++;
-        b = b->next.stqe_next;
-    }
-    if (b == end->buf) n++;
-    return n;
 }
 
 static void cmd_gen_mget_iovec(struct command *cmd, struct iov_data *iov)
@@ -909,9 +910,6 @@ void cmd_make_iovec(struct command *cmd, struct iov_data *iov)
                 break;
             case CMD_DEL:
                 cmd_gen_del_iovec(c, iov);
-                break;
-            case CMD_PING:
-                cmd_create_iovec(&c->rep_buf[0], &c->rep_buf[1], iov);
                 break;
             default:
                 cmd_create_iovec(&c->rep_buf[0], &c->rep_buf[1], iov);
