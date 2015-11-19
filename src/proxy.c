@@ -25,6 +25,7 @@ static void proxy_ready(struct connection *self, uint32_t mask)
                     conn_free(client);
                     conn_recycle(self->ctx, client);
                 }
+                self->ctx->stats.connected_clients++;
                 break;
         }
         if (fd != CORVUS_ERR) conn_register(self);

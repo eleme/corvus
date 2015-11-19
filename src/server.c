@@ -61,6 +61,9 @@ static int server_write(struct connection *server, int retry)
         if (cmd->asking) {
             cmd_iov_add(&cmd->iov, (void*)req_ask, strlen(req_ask));
         }
+        /* before write */
+        cmd->rep_time[0] = get_time();
+
         cmd_create_iovec(&cmd->req_buf[0], &cmd->req_buf[1], &cmd->iov);
         cmd->iov.head = cmd->iov.data;
         cmd->iov.size = cmd->iov.len;
@@ -93,6 +96,14 @@ static int server_redirect(struct command *cmd, struct redirect_info *info)
 {
     int port;
     struct address addr;
+
+    if (cmd->redirected) {
+        LOG(WARN, "multiple redirect error");
+        cmd_mark_fail(cmd);
+        return CORVUS_OK;
+    } else {
+        cmd->redirected = 1;
+    }
 
     server_free_buf(cmd);
     redis_data_destroy(cmd->rep_data);
@@ -129,6 +140,8 @@ static int read_one_reply(struct connection *server)
     struct command *cmd = STAILQ_FIRST(&server->waiting_queue);
 
     int status = cmd_read_reply(cmd, server);
+    /* after read */
+    cmd->rep_time[1] = get_time();
     if (status == CORVUS_OK) {
         if (!cmd->asking) {
             STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);

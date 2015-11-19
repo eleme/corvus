@@ -11,11 +11,8 @@
 #include "socket.h"
 #include "logging.h"
 
-struct server_list {
-    struct connection *list;
-    size_t len;
-    int max_len;
-};
+#define ADDR_LIST_CHUNK 128
+#define ADDR_NAME_LEN (HOST_NAME_MAX + 8)
 
 struct job {
     STAILQ_ENTRY(job) next;
@@ -37,14 +34,46 @@ static struct node_info *slot_map[REDIS_CLUSTER_SLOTS];
 static const char SLOTS_CMD[] = "*2\r\n$7\r\nCLUSTER\r\n$5\r\nSLOTS\r\n";
 
 static int slot_map_status;
-static pthread_t slot_update_thread;
 static pthread_mutex_t job_queue_mutex;
 static pthread_cond_t signal_cond;
 static struct job_queue job_queue;
 
 static pthread_rwlock_t slot_map_lock = PTHREAD_RWLOCK_INITIALIZER;
+static pthread_rwlock_t addr_list_lock = PTHREAD_RWLOCK_INITIALIZER;
 
 static struct node_list node_list;
+
+static struct {
+    char *addrs;
+    int bytes;
+    int max_size;
+} addr_list = {NULL, 0, 0};
+
+static void addr_add(char *host, uint16_t port)
+{
+    int n;
+    pthread_rwlock_wrlock(&addr_list_lock);
+    if (addr_list.bytes > 0) {
+        addr_list.addrs[addr_list.bytes++] = ',';
+    }
+    if (addr_list.max_size - addr_list.bytes < ADDR_NAME_LEN) {
+        addr_list.max_size += ADDR_LIST_CHUNK * ADDR_NAME_LEN;
+        addr_list.addrs = realloc(addr_list.addrs, addr_list.max_size);
+    }
+    n = snprintf(addr_list.addrs + addr_list.bytes, ADDR_NAME_LEN, "%s:%d", host, port);
+    addr_list.bytes += n;
+    pthread_rwlock_unlock(&addr_list_lock);
+}
+
+static void addr_list_clear()
+{
+    pthread_rwlock_wrlock(&addr_list_lock);
+    if (addr_list.addrs != NULL) {
+        memset(addr_list.addrs, 0, addr_list.max_size);
+    }
+    addr_list.bytes = 0;
+    pthread_rwlock_unlock(&addr_list_lock);
+}
 
 static void node_list_free()
 {
@@ -63,6 +92,8 @@ static struct node_info *node_info_create(struct address *addr)
     node->id = -1;
     node->slave_count = 0;
     node->slaves = NULL;
+
+    addr_add(addr->host, addr->port);
 
     memcpy(&node->master, addr, sizeof(struct address));
     return node;
@@ -111,6 +142,8 @@ static int node_info_add_slave(struct node_info *node, struct redis_data *data)
 
     uint16_t port = data->element[1]->integer;
     socket_get_addr(hostname, p->str_len, port, addr);
+
+    addr_add(addr->host, addr->port);
     return 0;
 }
 
@@ -153,6 +186,8 @@ static void slot_map_clear(struct context *ctx)
     pthread_rwlock_wrlock(&slot_map_lock);
     memset(slot_map, 0, sizeof(slot_map));
     pthread_rwlock_unlock(&slot_map_lock);
+
+    addr_list_clear();
 
     struct node_info *node;
     hash_each(ctx->server_table, {
@@ -326,9 +361,18 @@ void *slot_map_updater(void *data)
         STAILQ_REMOVE_HEAD(&job_queue, next);
         free(job);
     }
+    pthread_rwlock_wrlock(&addr_list_lock);
+    if (addr_list.addrs != NULL) free(addr_list.addrs);
+    addr_list.addrs = NULL;
+    addr_list.bytes = 0;
+    pthread_rwlock_unlock(&addr_list_lock);
+
     node_list_free();
-    context_free(ctx);
+
     pthread_rwlock_destroy(&slot_map_lock);
+    pthread_rwlock_destroy(&addr_list_lock);
+    pthread_mutex_destroy(&job_queue_mutex);
+    context_free(ctx);
 
     LOG(DEBUG, "slot map update thread quiting");
     return NULL;
@@ -405,6 +449,18 @@ int slot_get_node_addr(uint16_t slot, struct address *addr)
     return res;
 }
 
+void slot_get_addr_list(char **dest)
+{
+    pthread_rwlock_rdlock(&addr_list_lock);
+    *dest = calloc(addr_list.bytes + 1, sizeof(char));
+    if (addr_list.addrs != NULL) {
+        memcpy(*dest, addr_list.addrs, addr_list.bytes + 1);
+    } else {
+        (*dest)[0] = '\0';
+    }
+    pthread_rwlock_unlock(&addr_list_lock);
+}
+
 void slot_create_job(int type, void *arg)
 {
     if (slot_map_status == SLOT_MAP_DIRTY) return;
@@ -450,21 +506,8 @@ int slot_init_updater(struct context *ctx)
     }
     LOG(INFO, "starting slot updating thread");
 
-    slot_update_thread = thread;
     ctx->thread = thread;
     ctx->started = true;
     ctx->role = THREAD_SLOT_UPDATER;
     return 0;
-}
-
-void slot_kill_updater()
-{
-    int err;
-    if (pthread_cancel(slot_update_thread) == 0) {
-        if ((err = pthread_join(slot_update_thread, NULL)) != 0) {
-            LOG(ERROR, "slot update thread can not be joined: %s", strerror(err));
-        } else {
-            LOG(WARN, "slot update thread terminated");
-        }
-    }
 }

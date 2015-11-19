@@ -3,6 +3,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <sys/eventfd.h>
+#include <sys/resource.h>
 #include "corvus.h"
 #include "mbuf.h"
 #include "slot.h"
@@ -168,17 +169,55 @@ static int setup_notifier(struct context *ctx)
     return CORVUS_OK;
 }
 
+double get_time()
+{
+    double ms = 0;
+    struct timespec spec;
+    memset(&spec, 0, sizeof(struct timespec));
+
+    clock_gettime(CLOCK_REALTIME, &spec);
+    ms = spec.tv_sec * 1000;
+    ms += spec.tv_nsec / 1.0e6;
+    return ms;
+}
+
+void get_stats(struct stats *stats)
+{
+    struct rusage ru;
+    memset(&ru, 0, sizeof(ru));
+    getrusage(RUSAGE_SELF, &ru);
+
+    stats->pid = getpid();
+    stats->threads = config.thread;
+
+    stats->used_cpu_sys = ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1000000.0;
+    stats->used_cpu_user = ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1000000.0;
+    stats->last_command_latency = calloc(config.thread, sizeof(double));
+
+    slot_get_addr_list(&stats->remote_nodes);
+
+    int i;
+    for (i = 0; i < config.thread; i++) {
+        stats->basic_stats.connected_clients += contexts[i].stats.connected_clients;
+        stats->basic_stats.completed_commands += contexts[i].stats.completed_commands;
+        stats->basic_stats.remote_latency += contexts[i].stats.remote_latency;
+        stats->basic_stats.total_latency += contexts[i].stats.total_latency;
+        stats->basic_stats.recv_bytes += contexts[i].stats.recv_bytes;
+        stats->basic_stats.send_bytes += contexts[i].stats.send_bytes;
+        stats->basic_stats.buffers += contexts[i].stats.buffers;
+        stats->free_buffers += contexts[i].nfree_mbufq;
+        stats->last_command_latency[i] = contexts[i].last_command_latency;
+    }
+}
+
 void context_init(struct context *ctx, bool syslog, int log_level)
 {
+    memset(ctx, 0, sizeof(struct context));
+
     ctx->syslog = syslog;
     ctx->log_level = log_level;
     ctx->server_table = hash_new();
     ctx->started = false;
-    ctx->quit = 0;
-    ctx->notifier = NULL;
-    ctx->proxy = NULL;
-    ctx->loop = NULL;
-    ctx->node_conf = NULL;
     ctx->role = THREAD_UNKNOWN;
     mbuf_init(ctx);
     log_init(ctx);

@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <ctype.h>
 #include <limits.h>
+#include <time.h>
 #include "corvus.h"
 #include "socket.h"
 #include "logging.h"
@@ -144,7 +145,7 @@ do {                                               \
     HANDLER(EVALSHA, UNIMPL)         \
     /* misc */                       \
     HANDLER(PING, PROXY)             \
-    HANDLER(INFO, UNIMPL)            \
+    HANDLER(INFO, PROXY)             \
     HANDLER(QUIT, UNIMPL)            \
     HANDLER(AUTH, UNIMPL)            \
     HANDLER(SELECT, UNIMPL)
@@ -180,8 +181,7 @@ static hash_t *command_map;
 
 static void cmd_init(struct context *ctx, struct command *cmd)
 {
-    cmd->parse_done = 0;
-    cmd->stale = 0;
+    memset(cmd, 0, sizeof(struct command));
 
     cmd->ctx = ctx;
     reader_init(&cmd->reader);
@@ -189,26 +189,11 @@ static void cmd_init(struct context *ctx, struct command *cmd)
     mbuf_queue_init(&cmd->buf_queue);
     mbuf_queue_init(&cmd->rep_queue);
 
-    cmd->req_data = NULL;
-    cmd->rep_data = NULL;
-
     cmd->slot = -1;
     cmd->cmd_type = -1;
     cmd->request_type = -1;
-    cmd->asking = 0;
 
-    memset(cmd->req_buf, 0, sizeof(cmd->req_buf));
-    memset(cmd->rep_buf, 0, sizeof(cmd->rep_buf));
-    memset(&cmd->iov, 0, sizeof(struct iov_data));
-
-    cmd->cmd_count = 0;
-    cmd->cmd_done_count = 0;
-    cmd->cmd_fail = 0;
-    cmd->parent = NULL;
     STAILQ_INIT(&cmd->sub_cmds);
-
-    cmd->client = NULL;
-    cmd->server = NULL;
 }
 
 static void cmd_recycle(struct context *ctx, struct command *cmd)
@@ -221,6 +206,20 @@ static void cmd_recycle(struct context *ctx, struct command *cmd)
     STAILQ_NEXT(cmd, sub_cmd_next) = NULL;
     STAILQ_INSERT_HEAD(&ctx->free_cmdq, cmd, cmd_next);
     ctx->nfree_cmdq++;
+}
+
+static int cmd_in_queue(struct command *cmd, struct connection *server)
+{
+    struct command *ready = STAILQ_LAST(&server->ready_queue, command, ready_next),
+                   *retry = STAILQ_LAST(&server->retry_queue, command, retry_next),
+                   *wait = STAILQ_LAST(&server->waiting_queue, command, waiting_next);
+
+    return STAILQ_NEXT(cmd, ready_next) != NULL
+        || STAILQ_NEXT(cmd, retry_next) != NULL
+        || STAILQ_NEXT(cmd, waiting_next) != NULL
+        || ready == cmd
+        || retry == cmd
+        || wait == cmd;
 }
 
 static void cmd_get_map_key(struct pos_array *pos, char *key)
@@ -286,6 +285,36 @@ static void add_fragment(struct command *cmd, struct pos_array *data)
         mbuf_queue_copy(cmd->ctx, &cmd->buf_queue, p->str, p->len);
     }
     mbuf_queue_copy(cmd->ctx, &cmd->buf_queue, (uint8_t*)"\r\n", 2);
+}
+
+static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *latency)
+{
+    return snprintf(dest, n,
+            "version:%s\r\n"
+            "pid:%d\r\n"
+            "threads:%d\r\n"
+            "used_cpu_sys:%.2f\r\n"
+            "used_cpu_user:%.2f\r\n"
+            "connected_clients:%lld\r\n"
+            "completed_commands:%lld\r\n"
+            "recv_bytes:%lld\r\n"
+            "send_bytes:%lld\r\n"
+            "remote_latency:%.6f\r\n"
+            "total_latency:%.6f\r\n"
+            "last_command_latency:%s\r\n"
+            "in_use_buffers:%lld\r\n"
+            "free_buffers:%lld\r\n"
+            "remotes:%s\r\n",
+            VERSION, stats->pid, stats->threads,
+            stats->used_cpu_sys, stats->used_cpu_user,
+            stats->basic_stats.connected_clients,
+            stats->basic_stats.completed_commands,
+            stats->basic_stats.recv_bytes, stats->basic_stats.send_bytes,
+            stats->basic_stats.remote_latency,
+            stats->basic_stats.total_latency, latency,
+            stats->basic_stats.buffers,
+            stats->free_buffers,
+            stats->remote_nodes);
 }
 
 static int cmd_forward_basic(struct command *cmd)
@@ -456,14 +485,53 @@ static void cmd_proxy_ping(struct command *cmd)
     cmd_mark_done(cmd);
 }
 
+static void cmd_proxy_info(struct command *cmd)
+{
+    int i, n = 0, size = 0;
+    struct stats stats;
+    memset(&stats, 0, sizeof(stats));
+    get_stats(&stats);
+
+    char latency[16 * stats.threads];
+    memset(latency, 0, sizeof(latency));
+
+    for (i = 0; i < stats.threads; i++) {
+        n = snprintf(latency + size, 16, "%.6f", stats.last_command_latency[i]);
+        size += n;
+        if (i < stats.threads - 1) {
+            latency[size] = ',';
+            size += 1;
+        }
+    }
+    n = cmd_format_stats(NULL, 0, &stats, latency);
+    char info[n + 1];
+    cmd_format_stats(info, sizeof(info), &stats, latency);
+    free(stats.remote_nodes);
+    free(stats.last_command_latency);
+
+    char *fmt = "$%lu\r\n";
+    size = snprintf(NULL, 0, fmt, n);
+    char head[size + 1];
+    snprintf(head, sizeof(head), fmt, n);
+
+    mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t*)head, size);
+    mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t*)info, n);
+    mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t*)"\r\n", 2);
+    cmd_apply_range(cmd, CMD_REP);
+    cmd_mark_done(cmd);
+}
+
 static int cmd_proxy(struct command *cmd)
 {
     switch (cmd->cmd_type) {
-    case CMD_PING:
-        cmd_proxy_ping(cmd);
-        break;
-    default:
-        return -1;
+        case CMD_PING:
+            cmd_proxy_ping(cmd);
+            break;
+        case CMD_INFO:
+            cmd_proxy_info(cmd);
+            break;
+        default:
+            return -1;
     }
     return 0;
 }
@@ -603,6 +671,7 @@ static int cmd_parse_req(struct command *cmd, struct mbuf *buf)
 
         if (reader_ready(r)) {
             ncmd = cmd_create(cmd->ctx);
+            ncmd->req_time[0] = get_time();
             ncmd->parent = cmd;
             ncmd->client = cmd->client;
             ncmd->req_data = r->data;
@@ -750,6 +819,9 @@ int cmd_read_reply(struct command *cmd, struct connection *server)
         if (n == 0) return CORVUS_EOF;
         if (n == CORVUS_ERR) return CORVUS_ERR;
         if (n == CORVUS_AGAIN) return CORVUS_AGAIN;
+
+        cmd->ctx->stats.recv_bytes += n;
+
         if (cmd_parse_rep(cmd, buf) == -1) {
             return CORVUS_ERR;
         }
@@ -771,6 +843,9 @@ int cmd_read_request(struct command *cmd, int fd)
             if (n == 0) return CORVUS_EOF;
             if (n == CORVUS_ERR) return CORVUS_ERR;
             if (n == CORVUS_AGAIN) return CORVUS_AGAIN;
+
+            cmd->ctx->stats.recv_bytes += n;
+
             if (cmd_parse_req(cmd, buf) == CORVUS_ERR) {
                 return CORVUS_ERR;
             }
@@ -905,6 +980,8 @@ int cmd_write_iov(struct command *cmd, int fd)
     status = socket_write(fd, iov->data, n);
     if (status == CORVUS_AGAIN || status == CORVUS_ERR) return status;
 
+    cmd->ctx->stats.send_bytes += status;
+
     if (status < bytes) {
         for (i = 0; i < n; i++) {
             count += iov->data[i].iov_len;
@@ -925,18 +1002,18 @@ int cmd_write_iov(struct command *cmd, int fd)
     return status;
 }
 
-int cmd_in_queue(struct command *cmd, struct connection *server)
+void cmd_stats(struct command *cmd)
 {
-    struct command *ready = STAILQ_LAST(&server->ready_queue, command, ready_next),
-                   *retry = STAILQ_LAST(&server->retry_queue, command, retry_next),
-                   *wait = STAILQ_LAST(&server->waiting_queue, command, waiting_next);
-
-    return STAILQ_NEXT(cmd, ready_next) != NULL
-        || STAILQ_NEXT(cmd, retry_next) != NULL
-        || STAILQ_NEXT(cmd, waiting_next) != NULL
-        || ready == cmd
-        || retry == cmd
-        || wait == cmd;
+    struct context *ctx = cmd->ctx;
+    struct command *c;
+    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
+        ctx->stats.completed_commands += 1;
+        ctx->stats.remote_latency += c->rep_time[1] - c->rep_time[0];
+        ctx->stats.total_latency += cmd->req_time[1] - c->req_time[0];
+        if (STAILQ_NEXT(c, sub_cmd_next) == NULL) {
+            ctx->last_command_latency = cmd->req_time[1] - c->req_time[0];
+        }
+    }
 }
 
 void cmd_set_stale(struct command *cmd)

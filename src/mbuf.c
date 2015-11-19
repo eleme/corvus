@@ -61,6 +61,7 @@ struct mbuf *mbuf_get(struct context *ctx)
     mbuf->last = mbuf->start;
     mbuf->refcount = 0;
 
+    ctx->stats.buffers++;
     return mbuf;
 }
 
@@ -69,6 +70,8 @@ void mbuf_recycle(struct context *ctx, struct mbuf *mbuf)
     STAILQ_NEXT(mbuf, next) = NULL;
     STAILQ_INSERT_HEAD(&ctx->free_mbufq, mbuf, next);
     ctx->nfree_mbufq++;
+
+    ctx->stats.buffers--;
 }
 
 uint32_t mbuf_read_size(struct mbuf *mbuf)

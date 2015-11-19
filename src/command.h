@@ -45,8 +45,9 @@ struct command {
 
     int parse_done;
 
-    /* asking redirect */
+    /* redirect */
     int asking;
+    int redirected;
 
     int stale;
 
@@ -70,6 +71,11 @@ struct command {
 
     struct connection *client;
     struct connection *server;
+
+    /* before read, after write*/
+    double req_time[2];
+    /* before write, after read */
+    double rep_time[2];
 };
 
 struct redirect_info {
@@ -92,6 +98,7 @@ void cmd_parse_redirect(struct command *cmd, struct redirect_info *info);
 void cmd_mark_done(struct command *cmd);
 void cmd_mark_fail(struct command *cmd);
 int cmd_write_iov(struct command *cmd, int fd);
+void cmd_stats(struct command *cmd);
 void cmd_set_stale(struct command *cmd);
 void cmd_free_iov(struct iov_data *iov);
 void cmd_free_reply(struct command *cmd);

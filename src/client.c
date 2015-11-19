@@ -16,6 +16,8 @@ static int client_write(struct connection *client)
         return CORVUS_OK;
 
     if (cmd->iov.head == NULL) {
+        /* before write */
+        cmd->req_time[1] = get_time();
         cmd_make_iovec(cmd, &cmd->iov);
         cmd->iov.head = cmd->iov.data;
         cmd->iov.size = cmd->iov.len;
@@ -35,6 +37,7 @@ static int client_write(struct connection *client)
     if (cmd->iov.len <= 0) {
         cmd_free_iov(&cmd->iov);
         STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
+        cmd_stats(cmd);
         cmd_free(cmd);
     } else {
         switch (conn_register(client)) {
@@ -61,6 +64,7 @@ static void client_ready(struct connection *self, uint32_t mask)
         LOG(DEBUG, "client readable");
         struct command *cmd = cmd_get_lastest(self->ctx, &self->cmd_queue);
         cmd->client = self;
+        cmd->req_time[0] = get_time();
         switch (cmd_read_request(cmd, self->fd)) {
             case CORVUS_ERR:
             case CORVUS_EOF:
@@ -99,6 +103,8 @@ void client_eof(struct connection *client)
         STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
         cmd_set_stale(cmd);
     }
+
+    client->ctx->stats.connected_clients--;
 
     event_deregister(client->ctx->loop, client);
     conn_free(client);
