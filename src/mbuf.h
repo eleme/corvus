@@ -29,10 +29,7 @@ struct mbuf {
 STAILQ_HEAD(mhdr, mbuf);
 
 #define MBUF_MAGIC      0xdeadbeef
-#define MBUF_MIN_SIZE   512
-#define MBUF_MAX_SIZE   16777216
 #define MBUF_SIZE       16384
-#define MBUF_HSIZE      sizeof(struct mbuf)
 
 static inline bool mbuf_empty(struct mbuf *mbuf)
 {
@@ -49,7 +46,6 @@ struct mbuf *mbuf_get(struct context *);
 void mbuf_recycle(struct context *, struct mbuf *);
 uint32_t mbuf_read_size(struct mbuf *);
 uint32_t mbuf_write_size(struct mbuf *);
-size_t mbuf_size(struct context *);
 void mbuf_destroy(struct context *ctx);
 void mbuf_queue_insert(struct mhdr *, struct mbuf *);
 struct mbuf *mbuf_queue_top(struct context *, struct mhdr *);
@@ -58,6 +54,5 @@ void mbuf_inc_ref(struct mbuf *buf);
 void mbuf_dec_ref(struct mbuf *buf);
 void mbuf_dec_ref_by(struct mbuf *buf, int count);
 void mbuf_queue_copy(struct context *ctx, struct mhdr *q, uint8_t *data, int n);
-struct mbuf *mbuf_queue_get(struct context *ctx, struct mhdr *q);
 
 #endif

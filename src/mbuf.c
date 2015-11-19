@@ -1,6 +1,5 @@
 #include <stdlib.h>
 #include <string.h>
-#include "mbuf.h"
 #include "corvus.h"
 #include "logging.h"
 
@@ -26,13 +25,23 @@ static struct mbuf *_mbuf_get(struct context *ctx)
     return mbuf;
 }
 
+static struct mbuf *mbuf_queue_get(struct context *ctx, struct mhdr *q)
+{
+    struct mbuf *buf = mbuf_queue_top(ctx, q);
+    if (mbuf_full(buf)) {
+        buf = mbuf_get(ctx);
+        mbuf_queue_insert(q, buf);
+    }
+    return buf;
+}
+
 void mbuf_init(struct context *ctx)
 {
     ctx->nfree_mbufq = 0;
     STAILQ_INIT(&ctx->free_mbufq);
 
     ctx->mbuf_chunk_size = MBUF_SIZE;
-    ctx->mbuf_offset = ctx->mbuf_chunk_size - MBUF_HSIZE;
+    ctx->mbuf_offset = ctx->mbuf_chunk_size - sizeof(struct mbuf);
 }
 
 static void mbuf_free(struct context *ctx, struct mbuf *mbuf)
@@ -84,11 +93,6 @@ uint32_t mbuf_write_size(struct mbuf *mbuf)
     return (uint32_t)(mbuf->end - mbuf->last);
 }
 
-size_t mbuf_size(struct context *ctx)
-{
-    return ctx->mbuf_offset;
-}
-
 void mbuf_destroy(struct context *ctx)
 {
     struct mbuf *buf;
@@ -118,16 +122,6 @@ struct mbuf *mbuf_queue_top(struct context *ctx, struct mhdr *mhdr)
         return buf;
     }
     return STAILQ_LAST(mhdr, mbuf, next);
-}
-
-struct mbuf *mbuf_queue_get(struct context *ctx, struct mhdr *q)
-{
-    struct mbuf *buf = mbuf_queue_top(ctx, q);
-    if (mbuf_full(buf)) {
-        buf = mbuf_get(ctx);
-        mbuf_queue_insert(q, buf);
-    }
-    return buf;
 }
 
 void mbuf_queue_copy(struct context *ctx, struct mhdr *q, uint8_t *data, int n)

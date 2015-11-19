@@ -335,6 +335,7 @@ static void cmd_apply_range(struct command *cmd, int type)
     struct mbuf *first, *last;
     struct buf_ptr *start, *end;
 
+    if (STAILQ_EMPTY(&cmd->buf_queue) || STAILQ_EMPTY(&cmd->rep_queue)) return;
     switch (type) {
         case CMD_REQ:
             first = STAILQ_FIRST(&cmd->buf_queue);
