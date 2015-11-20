@@ -22,6 +22,29 @@ do {                                      \
     }                                     \
 } while (0)
 
+static int verify_server(struct connection *server, struct address *addr)
+{
+    if (server->status != DISCONNECTED) return 0;
+
+    if (server->fd != -1) close(server->fd);
+    memcpy(&server->addr, addr, sizeof(struct address));
+
+    server->fd = conn_create_fd();
+    if (server->fd == -1) {
+        LOG(ERROR, "fail to create fd");
+        conn_free(server);
+        return -1;
+    }
+
+    if (conn_connect(server) == -1) {
+        LOG(ERROR, "fail to connect %s:%d", server->addr.host, server->addr.port);
+        conn_free(server);
+        return -1;
+    }
+    server->registered = 0;
+    return 0;
+}
+
 void conn_init(struct connection *conn, struct context *ctx)
 {
     conn->ctx = ctx;
@@ -117,17 +140,7 @@ struct connection *conn_get_server_from_pool(struct context *ctx, struct address
     server = hash_get(ctx->server_table, key);
     if (server != NULL) {
         free(key);
-        if (server->status == DISCONNECTED) {
-            if (server->fd != -1) close(server->fd);
-            memcpy(&server->addr, addr, sizeof(struct address));
-            server->fd = conn_create_fd();
-            if (conn_connect(server) == -1) {
-                conn_free(server);
-                LOG(ERROR, "fail to connect %s:%d", server->addr.host, server->addr.port);
-                return NULL;
-            }
-            server->registered = 0;
-        }
+        if (verify_server(server, addr) == -1) return NULL;
         return server;
     }
 
@@ -138,8 +151,8 @@ struct connection *conn_get_server_from_pool(struct context *ctx, struct address
     hash_set(ctx->server_table, key, (void*)server);
 
     if (conn_connect(server) == -1) {
-        conn_free(server);
         LOG(ERROR, "fail to connect %s:%d", server->addr.host, server->addr.port);
+        conn_free(server);
         return NULL;
     }
     return server;
@@ -162,6 +175,7 @@ struct connection *conn_get_raw_server(struct context *ctx)
         server = hash_get(ctx->server_table, key);
         if (server != NULL) {
             free(key);
+            if (verify_server(server, &a) == -1) return NULL;
             break;
         }
 
