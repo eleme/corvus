@@ -200,11 +200,13 @@ struct connection *conn_get_server(struct context *ctx, uint16_t slot)
 
 struct mbuf *conn_get_buf(struct connection *conn)
 {
-    struct mbuf *buf;
-    buf = mbuf_queue_top(conn->ctx, &conn->data);
-    if (buf->pos >= buf->end) {
+    struct mbuf *buf = NULL;
+
+    if (!STAILQ_EMPTY(&conn->data)) buf = STAILQ_LAST(&conn->data, mbuf, next);
+
+    if (buf == NULL || buf->pos >= buf->end) {
         buf = mbuf_get(conn->ctx);
-        mbuf_queue_insert(&conn->data, buf);
+        STAILQ_INSERT_TAIL(&conn->data, buf, next);
     }
     return buf;
 }

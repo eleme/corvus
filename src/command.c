@@ -186,8 +186,8 @@ static void cmd_init(struct context *ctx, struct command *cmd)
     cmd->ctx = ctx;
     reader_init(&cmd->reader);
 
-    mbuf_queue_init(&cmd->buf_queue);
-    mbuf_queue_init(&cmd->rep_queue);
+    STAILQ_INIT(&cmd->buf_queue);
+    STAILQ_INIT(&cmd->rep_queue);
 
     cmd->slot = -1;
     cmd->cmd_type = -1;
@@ -232,17 +232,6 @@ static void cmd_get_map_key(struct pos_array *pos, char *key)
             key[h] = toupper(p->str[j]);
         }
     }
-}
-
-static struct mbuf *cmd_get_buf(struct command *cmd)
-{
-    struct mbuf *buf;
-    buf = mbuf_queue_top(cmd->ctx, &cmd->buf_queue);
-    if (mbuf_full(buf)) {
-        buf = mbuf_get(cmd->ctx);
-        mbuf_queue_insert(&cmd->buf_queue, buf);
-    }
-    return buf;
 }
 
 static int get_buf_count(struct buf_ptr *start, struct buf_ptr *end)
@@ -330,32 +319,35 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             stats->remote_nodes);
 }
 
-static void cmd_apply_range(struct command *cmd, int type)
+static int cmd_apply_range(struct command *cmd, int type)
 {
     struct mbuf *first, *last;
     struct buf_ptr *start, *end;
 
     switch (type) {
         case CMD_REQ:
+            if (STAILQ_EMPTY(&cmd->buf_queue)) return CORVUS_ERR;
             first = STAILQ_FIRST(&cmd->buf_queue);
             last = STAILQ_LAST(&cmd->buf_queue, mbuf, next);
             start = &cmd->req_buf[0];
             end = &cmd->req_buf[1];
             break;
         case CMD_REP:
+            if (STAILQ_EMPTY(&cmd->rep_queue)) return CORVUS_ERR;
             first = STAILQ_FIRST(&cmd->rep_queue);
             last = STAILQ_LAST(&cmd->rep_queue, mbuf, next);
             start = &cmd->rep_buf[0];
             end = &cmd->rep_buf[1];
             break;
         default:
-            return;
+            return CORVUS_ERR;
     }
 
     start->buf = first;
     start->pos = first->pos;
     end->buf = last;
     end->pos = last->last;
+    return CORVUS_OK;
 }
 
 static int cmd_forward_basic(struct command *cmd)
@@ -382,6 +374,7 @@ static int cmd_forward_basic(struct command *cmd)
     return CORVUS_OK;
 }
 
+/* mget, del */
 static int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len)
 {
     struct redis_data *key;
@@ -392,25 +385,27 @@ static int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len
     }
 
     size_t i;
-    uint16_t slot;
     struct command *ncmd;
     for (i = 1; i < data->elements; i++) {
         key = data->element[i];
-        slot = slot_get(key->pos);
 
         ncmd = cmd_create(cmd->ctx);
-        ncmd->slot = slot;
+        ncmd->slot = slot_get(key->pos);
         ncmd->parent = cmd;
         ncmd->client = cmd->client;
-
-        mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, prefix, len);
-        add_fragment(ncmd, key->pos);
-        cmd_apply_range(ncmd, CMD_REQ);
 
         STAILQ_INSERT_TAIL(&cmd->sub_cmds, ncmd, sub_cmd_next);
         cmd->cmd_count++;
 
-        if (cmd_forward_basic(ncmd) == -1) {
+        mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, prefix, len);
+        add_fragment(ncmd, key->pos);
+
+        if (cmd_apply_range(ncmd, CMD_REQ) == CORVUS_ERR) {
+            cmd_mark_fail(ncmd);
+            continue;
+        }
+
+        if (cmd_forward_basic(ncmd) == CORVUS_ERR) {
             cmd_mark_fail(ncmd);
         }
     }
@@ -429,28 +424,30 @@ static int cmd_forward_mset(struct command *cmd)
     LOG(DEBUG, "process mset");
 
     size_t i;
-    uint16_t slot;
     struct command *ncmd;
     struct redis_data *key, *value;
     for (i = 1; i < data->elements; i += 2) {
         key = data->element[i];
         value = data->element[i + 1];
-        slot = slot_get(key->pos);
 
         ncmd = cmd_create(cmd->ctx);
-        ncmd->slot = slot;
+        ncmd->slot = slot_get(key->pos);
         ncmd->parent = cmd;
         ncmd->client = cmd->client;
-
-        mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, (uint8_t*)rep_set, 13);
-        add_fragment(ncmd, key->pos);
-        add_fragment(ncmd, value->pos);
-        cmd_apply_range(ncmd, CMD_REQ);
 
         STAILQ_INSERT_TAIL(&cmd->sub_cmds, ncmd, sub_cmd_next);
         cmd->cmd_count++;
 
-        if (cmd_forward_basic(ncmd) == -1) {
+        mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, (uint8_t*)rep_set, 13);
+        add_fragment(ncmd, key->pos);
+        add_fragment(ncmd, value->pos);
+
+        if (cmd_apply_range(ncmd, CMD_REQ) == CORVUS_ERR) {
+            cmd_mark_fail(ncmd);
+            continue;
+        }
+
+        if (cmd_forward_basic(ncmd) == CORVUS_ERR) {
             LOG(DEBUG, "mark fail");
             cmd_mark_fail(ncmd);
         }
@@ -494,8 +491,11 @@ static int cmd_forward_complex(struct command *cmd)
 static void cmd_proxy_ping(struct command *cmd)
 {
     mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t *)rep_ping, 7);
-    cmd_apply_range(cmd, CMD_REP);
-    cmd_mark_done(cmd);
+    if (cmd_apply_range(cmd, CMD_REP) == CORVUS_ERR) {
+        cmd_mark_fail(cmd);
+    } else {
+        cmd_mark_done(cmd);
+    }
 }
 
 static void cmd_proxy_info(struct command *cmd)
@@ -530,8 +530,11 @@ static void cmd_proxy_info(struct command *cmd)
     mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t*)head, size);
     mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t*)info, n);
     mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t*)"\r\n", 2);
-    cmd_apply_range(cmd, CMD_REP);
-    cmd_mark_done(cmd);
+    if (cmd_apply_range(cmd, CMD_REP) == CORVUS_ERR) {
+        cmd_mark_fail(cmd);
+    } else {
+        cmd_mark_done(cmd);
+    }
 }
 
 static int cmd_proxy(struct command *cmd)
@@ -838,7 +841,7 @@ int cmd_read_request(struct command *cmd, int fd)
 
     while (1) {
         do {
-            buf = cmd_get_buf(cmd);
+            buf = mbuf_queue_get(cmd->ctx, &cmd->buf_queue);
 
             n = socket_read(fd, buf);
             if (n == 0) return CORVUS_EOF;

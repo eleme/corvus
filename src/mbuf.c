@@ -12,7 +12,6 @@ static struct mbuf *_mbuf_get(struct context *ctx)
         mbuf = STAILQ_FIRST(&ctx->free_mbufq);
         STAILQ_REMOVE_HEAD(&ctx->free_mbufq, next);
         ctx->nfree_mbufq--;
-        STAILQ_NEXT(mbuf, next) = NULL;
     } else {
         buf = (uint8_t*)malloc(ctx->mbuf_chunk_size);
         if (buf == NULL) {
@@ -25,14 +24,12 @@ static struct mbuf *_mbuf_get(struct context *ctx)
     return mbuf;
 }
 
-static struct mbuf *mbuf_queue_get(struct context *ctx, struct mhdr *q)
+static void mbuf_free(struct context *ctx, struct mbuf *mbuf)
 {
-    struct mbuf *buf = mbuf_queue_top(ctx, q);
-    if (mbuf_full(buf)) {
-        buf = mbuf_get(ctx);
-        mbuf_queue_insert(q, buf);
-    }
-    return buf;
+    uint8_t *buf;
+
+    buf = (uint8_t *)mbuf - ctx->mbuf_offset;
+    free(buf);
 }
 
 void mbuf_init(struct context *ctx)
@@ -42,14 +39,6 @@ void mbuf_init(struct context *ctx)
 
     ctx->mbuf_chunk_size = MBUF_SIZE;
     ctx->mbuf_offset = ctx->mbuf_chunk_size - sizeof(struct mbuf);
-}
-
-static void mbuf_free(struct context *ctx, struct mbuf *mbuf)
-{
-    uint8_t *buf;
-
-    buf = (uint8_t *)mbuf - ctx->mbuf_offset;
-    free(buf);
 }
 
 struct mbuf *mbuf_get(struct context *ctx)
@@ -69,6 +58,8 @@ struct mbuf *mbuf_get(struct context *ctx)
     mbuf->pos = mbuf->start;
     mbuf->last = mbuf->start;
     mbuf->refcount = 0;
+
+    STAILQ_NEXT(mbuf, next) = NULL;
 
     ctx->stats.buffers++;
     return mbuf;
@@ -104,24 +95,17 @@ void mbuf_destroy(struct context *ctx)
     }
 }
 
-void mbuf_queue_init(struct mhdr *mhdr)
+struct mbuf *mbuf_queue_get(struct context *ctx, struct mhdr *q)
 {
-    STAILQ_INIT(mhdr);
-}
+    struct mbuf *buf = NULL;
 
-void mbuf_queue_insert(struct mhdr *mhdr, struct mbuf *mbuf)
-{
-    STAILQ_INSERT_TAIL(mhdr, mbuf, next);
-}
+    if (!STAILQ_EMPTY(q)) buf = STAILQ_LAST(q, mbuf, next);
 
-struct mbuf *mbuf_queue_top(struct context *ctx, struct mhdr *mhdr)
-{
-    if (STAILQ_EMPTY(mhdr)) {
-        struct mbuf *buf = mbuf_get(ctx);
-        mbuf_queue_insert(mhdr, buf);
-        return buf;
+    if (buf == NULL || mbuf_full(buf)) {
+        buf = mbuf_get(ctx);
+        STAILQ_INSERT_TAIL(q, buf, next);
     }
-    return STAILQ_LAST(mhdr, mbuf, next);
+    return buf;
 }
 
 void mbuf_queue_copy(struct context *ctx, struct mhdr *q, uint8_t *data, int n)
