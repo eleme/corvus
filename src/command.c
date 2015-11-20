@@ -39,13 +39,23 @@ do {                                               \
     HANDLER(EXISTS, BASIC)           \
     HANDLER(EXPIRE, BASIC)           \
     HANDLER(EXPIREAT, BASIC)         \
+    HANDLER(KEYS, UNIMPL)            \
+    HANDLER(MIGRATE, UNIMPL)         \
+    HANDLER(MOVE, UNIMPL)            \
+    HANDLER(OBJECT, UNIMPL)          \
+    HANDLER(PERSIST, BASIC)          \
     HANDLER(PEXPIRE, BASIC)          \
     HANDLER(PEXPIREAT, BASIC)        \
-    HANDLER(PERSIST, BASIC)          \
     HANDLER(PTTL, BASIC)             \
+    HANDLER(RANDOMKEY, UNIMPL)       \
+    HANDLER(RENAME, UNIMPL)          \
+    HANDLER(RENAMENX, UNIMPL)        \
+    HANDLER(RESTORE, BASIC)          \
+    HANDLER(SCAN, UNIMPL)            \
     HANDLER(SORT, BASIC)             \
     HANDLER(TTL, BASIC)              \
     HANDLER(TYPE, BASIC)             \
+    HANDLER(WAIT, UNIMPL)            \
     /* strings command */            \
     HANDLER(APPEND, BASIC)           \
     HANDLER(BITCOUNT, BASIC)         \
@@ -61,8 +71,8 @@ do {                                               \
     HANDLER(INCRBYFLOAT, BASIC)      \
     HANDLER(MGET, COMPLEX)           \
     HANDLER(MSET, COMPLEX)           \
+    HANDLER(MSETNX, UNIMPL)          \
     HANDLER(PSETEX, BASIC)           \
-    HANDLER(RESTORE, BASIC)          \
     HANDLER(SET, BASIC)              \
     HANDLER(SETBIT, BASIC)           \
     HANDLER(SETEX, BASIC)            \
@@ -82,9 +92,13 @@ do {                                               \
     HANDLER(HMSET, BASIC)            \
     HANDLER(HSET, BASIC)             \
     HANDLER(HSETNX, BASIC)           \
+    HANDLER(HSTRLEN, BASIC)          \
     HANDLER(HVALS, BASIC)            \
     HANDLER(HSCAN, BASIC)            \
     /* lists */                      \
+    HANDLER(BLPOP, UNIMPL)           \
+    HANDLER(BRPOP, UNIMPL)           \
+    HANDLER(BRPOPLPUSH, UNIMPL)      \
     HANDLER(LINDEX, BASIC)           \
     HANDLER(LINSERT, BASIC)          \
     HANDLER(LLEN, BASIC)             \
@@ -102,13 +116,13 @@ do {                                               \
     /* sets */                       \
     HANDLER(SADD, BASIC)             \
     HANDLER(SCARD, BASIC)            \
-    HANDLER(SDIFF, UNIMPL)           \
-    HANDLER(SDIFFSTORE, UNIMPL)      \
-    HANDLER(SINTER, UNIMPL)          \
-    HANDLER(SINTERSTORE, UNIMPL)     \
+    HANDLER(SDIFF, BASIC)            \
+    HANDLER(SDIFFSTORE, BASIC)       \
+    HANDLER(SINTER, BASIC)           \
+    HANDLER(SINTERSTORE, BASIC)      \
     HANDLER(SISMEMBER, BASIC)        \
     HANDLER(SMEMBERS, BASIC)         \
-    HANDLER(SMOVE, UNIMPL)           \
+    HANDLER(SMOVE, BASIC)            \
     HANDLER(SPOP, BASIC)             \
     HANDLER(SRANDMEMBER, BASIC)      \
     HANDLER(SREM, BASIC)             \
@@ -120,7 +134,7 @@ do {                                               \
     HANDLER(ZCARD, BASIC)            \
     HANDLER(ZCOUNT, BASIC)           \
     HANDLER(ZINCRBY, BASIC)          \
-    HANDLER(ZINTERSTORE, UNIMPL)     \
+    HANDLER(ZINTERSTORE, BASIC)      \
     HANDLER(ZLEXCOUNT, BASIC)        \
     HANDLER(ZRANGE, BASIC)           \
     HANDLER(ZRANGEBYLEX, BASIC)      \
@@ -131,10 +145,11 @@ do {                                               \
     HANDLER(ZREMRANGEBYRANK, BASIC)  \
     HANDLER(ZREMRANGEBYSCORE, BASIC) \
     HANDLER(ZREVRANGE, BASIC)        \
+    HANDLER(ZREVRANGEBYLEX, BASIC)   \
     HANDLER(ZREVRANGEBYSCORE, BASIC) \
     HANDLER(ZREVRANK, BASIC)         \
     HANDLER(ZSCORE, BASIC)           \
-    HANDLER(ZUNIONSTORE, UNIMPL)     \
+    HANDLER(ZUNIONSTORE, BASIC)      \
     HANDLER(ZSCAN, BASIC)            \
     /* hyperloglog */                \
     HANDLER(PFADD, BASIC)            \
@@ -144,10 +159,11 @@ do {                                               \
     HANDLER(EVAL, COMPLEX)           \
     HANDLER(EVALSHA, UNIMPL)         \
     /* misc */                       \
+    HANDLER(AUTH, UNIMPL)            \
+    HANDLER(ECHO, UNIMPL)            \
     HANDLER(PING, PROXY)             \
     HANDLER(INFO, PROXY)             \
     HANDLER(QUIT, UNIMPL)            \
-    HANDLER(AUTH, UNIMPL)            \
     HANDLER(SELECT, UNIMPL)
 
 enum {
@@ -988,7 +1004,7 @@ int cmd_write_iov(struct command *cmd, int fd)
             count += iov->data[i].iov_len;
             if (count > status) {
                 remain = iov->data[i].iov_len - (count - status);
-                iov->data[i].iov_base += remain;
+                iov->data[i].iov_base = (char*)iov->data[i].iov_base + remain;
                 iov->data[i].iov_len -= remain;
                 break;
             }

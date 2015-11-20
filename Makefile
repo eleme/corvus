@@ -1,8 +1,8 @@
-default: build
+default: corvus
 
-build:
-	@mkdir -p $@
-	cd src && $(MAKE)
+.DEFAULT:
+	@mkdir -p build
+	cd src && $(MAKE) $@
 	@mv src/corvus .
 
 init:

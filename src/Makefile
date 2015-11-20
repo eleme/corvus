@@ -1,5 +1,6 @@
 BUILD=../build
-CFLAGS=-Wall -g -std=c99 -D_GNU_SOURCE -I../deps
+OPTIMIZATION?=-O2
+CFLAGS=-Wall $(OPTIMIZATION) -g -ggdb -std=c99 -D_GNU_SOURCE -I../deps
 LDFLAGS=-pthread
 
 SRC = client.c               \
@@ -26,3 +27,6 @@ $(BUILD)/hashmap.o: ../deps/hashmap/hash.c
 
 $(OBJ): $(BUILD)/%.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
+
+debug:
+	$(MAKE) OPTIMIZATION="-O0"
