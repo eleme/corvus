@@ -29,13 +29,12 @@ static int client_write(struct connection *client)
         cmd_free(cmd);
         return CORVUS_ERR;
     }
-    status = iov_write(cmd->ctx, &cmd->iov, client->fd);
+    status = cmd_iov_write(cmd->ctx, &cmd->iov, client->fd);
 
     if (status == CORVUS_ERR) return CORVUS_ERR;
     if (status == CORVUS_AGAIN) return CORVUS_OK;
 
     if (cmd->iov.len <= 0) {
-        cmd_free_iov(&cmd->iov);
         STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
         cmd_stats(cmd);
         cmd_free(cmd);

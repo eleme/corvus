@@ -246,19 +246,6 @@ static void cmd_get_map_key(struct pos_array *pos, char *key)
     }
 }
 
-static int get_buf_count(struct buf_ptr *start, struct buf_ptr *end)
-{
-    int n = 0;
-    struct mbuf *b = start->buf;
-
-    while (b != end->buf && b != NULL) {
-        b = STAILQ_NEXT(b, next);
-        n++;
-    }
-    if (b == end->buf) n++;
-    return n;
-}
-
 static int cmd_get_type(struct command *cmd, struct pos_array *pos)
 {
     char key[pos->str_len + 1];
@@ -868,34 +855,26 @@ int cmd_read_request(struct command *cmd, int fd)
 
 void cmd_create_iovec(struct buf_ptr *start, struct buf_ptr *end, struct iov_data *iov)
 {
+    uint8_t *data;
+    int len;
     struct mbuf *b = start->buf;
-    int n = get_buf_count(start, end);
-    if (n <= 0) return;
-    LOG(DEBUG, "buf count %d", n);
 
-    int remain = iov->max_size - iov->len;
-    if (n > remain) {
-        iov->max_size += n - remain;
-        iov->data = realloc(iov->data,
-                sizeof(struct iovec) * iov->max_size);
-    }
-
-    struct iovec *d = iov->data;
     while (b != NULL) {
         if (b == start->buf && b == end->buf) {
-            d[iov->len].iov_base = start->pos;
-            d[iov->len].iov_len = end->pos - start->pos;
+            data = start->pos;
+            len = end->pos - start->pos;
         } else if (b == start->buf) {
-            d[iov->len].iov_base = start->pos;
-            d[iov->len].iov_len = start->buf->last - start->pos;
+            data = start->pos;
+            len = start->buf->last - start->pos;
         } else if (b == end->buf) {
-            d[iov->len].iov_base = b->start;
-            d[iov->len].iov_len = end->pos - b->start;
+            data = b->start;
+            len = end->pos - b->start;
         } else {
-            d[iov->len].iov_base = b->start;
-            d[iov->len].iov_len = b->last - b->start;
+            data = b->start;
+            len = b->last - b->start;
         }
-        iov->len++;
+        cmd_iov_add(iov, (void*)data, len);
+
         if (b == end->buf) break;
         b = STAILQ_NEXT(b, next);
     }
@@ -963,15 +942,6 @@ void cmd_mark_fail(struct command *cmd)
     cmd_mark(cmd, 1);
 }
 
-void cmd_iov_add(struct iov_data *iov, void *buf, size_t len)
-{
-    iov->max_size++;
-    iov->data = realloc(iov->data, sizeof(struct iovec) * iov->max_size);
-    iov->data[iov->len].iov_base = buf;
-    iov->data[iov->len].iov_len = len;
-    iov->len++;
-}
-
 void cmd_stats(struct command *cmd)
 {
     struct context *ctx = cmd->ctx;
@@ -990,6 +960,7 @@ void cmd_set_stale(struct command *cmd)
 {
     if (STAILQ_EMPTY(&cmd->sub_cmds)) {
         if (cmd->server != NULL && cmd_in_queue(cmd, cmd->server)) {
+            LOG(DEBUG, "command set stale");
             cmd->stale = 1;
         } else {
             cmd_free(cmd);
@@ -999,17 +970,70 @@ void cmd_set_stale(struct command *cmd)
         while (!STAILQ_EMPTY(&cmd->sub_cmds)) {
             c = STAILQ_FIRST(&cmd->sub_cmds);
             STAILQ_REMOVE_HEAD(&cmd->sub_cmds, sub_cmd_next);
+            STAILQ_NEXT(c, sub_cmd_next) = NULL;
             cmd_set_stale(c);
         }
         cmd_free(cmd);
     }
 }
 
-void cmd_free_iov(struct iov_data *iov)
+void cmd_iov_add(struct iov_data *iov, void *buf, size_t len)
 {
-    if (iov->head != NULL) free(iov->head);
+    if (iov->max_size <= iov->len) {
+        iov->max_size += ARRAY_CHUNK_SIZE;
+        iov->data = realloc(iov->data, sizeof(struct iovec) * iov->max_size);
+    }
+
+    iov->data[iov->len].iov_base = buf;
+    iov->data[iov->len].iov_len = len;
+    iov->len++;
+}
+
+int cmd_iov_write(struct context *ctx, struct iov_data *iov, int fd)
+{
+    LOG(DEBUG, "write iov");
+
+    int i, n = 0;
+    ssize_t remain = 0, status, bytes = 0, count = 0;
+
+    while (n < iov->len) {
+        if (n >= CORVUS_IOV_MAX || bytes >= SSIZE_MAX) break;
+        bytes += iov->data[n++].iov_len;
+    }
+
+    status = socket_write(fd, iov->data, n);
+    if (status == CORVUS_AGAIN || status == CORVUS_ERR) return status;
+
+    ctx->stats.send_bytes += status;
+
+    if (status < bytes) {
+        for (i = 0; i < n; i++) {
+            count += iov->data[i].iov_len;
+            if (count > status) {
+                remain = iov->data[i].iov_len - (count - status);
+                iov->data[i].iov_base = (char*)iov->data[i].iov_base + remain;
+                iov->data[i].iov_len -= remain;
+                break;
+            }
+        }
+        iov->data += i;
+        iov->len -= i;
+    } else {
+        iov->data += n;
+        iov->len -= n;
+    }
+
+    return status;
+}
+
+void cmd_iov_free(struct iov_data *iov)
+{
     if (iov->ptr != NULL) free(iov->ptr);
-    memset(iov, 0, sizeof(struct iov_data));
+    if (iov->head != NULL) iov->data = iov->head;
+    iov->len = 0;
+    iov->size = 0;
+    iov->head = NULL;
+    iov->ptr = NULL;
 }
 
 void cmd_free_reply(struct command *cmd)
@@ -1053,7 +1077,12 @@ void cmd_free(struct command *cmd)
         cmd->rep_data = NULL;
     }
 
-    cmd_free_iov(&cmd->iov);
+    cmd_iov_free(&cmd->iov);
+    if (cmd->iov.data != NULL) {
+        free(cmd->iov.data);
+        cmd->iov.max_size = 0;
+        cmd->iov.data = NULL;
+    }
 
     reader_free(&cmd->reader);
     reader_init(&cmd->reader);
@@ -1080,41 +1109,4 @@ void cmd_free(struct command *cmd)
     cmd->client = NULL;
     cmd->server = NULL;
     cmd_recycle(ctx, cmd);
-}
-
-int iov_write(struct context *ctx, struct iov_data *iov, int fd)
-{
-    LOG(DEBUG, "write iov");
-
-    int i, n = 0;
-    ssize_t remain = 0, status, bytes = 0, count = 0;
-
-    while (n < iov->len) {
-        if (n >= CORVUS_IOV_MAX || bytes >= SSIZE_MAX) break;
-        bytes += iov->data[n++].iov_len;
-    }
-
-    status = socket_write(fd, iov->data, n);
-    if (status == CORVUS_AGAIN || status == CORVUS_ERR) return status;
-
-    ctx->stats.send_bytes += status;
-
-    if (status < bytes) {
-        for (i = 0; i < n; i++) {
-            count += iov->data[i].iov_len;
-            if (count > status) {
-                remain = iov->data[i].iov_len - (count - status);
-                iov->data[i].iov_base = (char*)iov->data[i].iov_base + remain;
-                iov->data[i].iov_len -= remain;
-                break;
-            }
-        }
-        iov->data += i;
-        iov->len -= i;
-    } else {
-        iov->data += n;
-        iov->len -= n;
-    }
-
-    return status;
 }

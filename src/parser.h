@@ -5,8 +5,6 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-#define ARRAY_CHUNK_SIZE 1024
-
 struct mbuf;
 struct mhdr;
 

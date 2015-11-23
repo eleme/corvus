@@ -100,6 +100,13 @@ void conn_free(struct connection *conn)
     conn->registered = 0;
     memset(&conn->addr, 0, sizeof(conn->addr));
 
+    cmd_iov_free(&conn->iov);
+    if (conn->iov.data != NULL) {
+        free(conn->iov.data);
+        conn->iov.max_size = 0;
+        conn->iov.data = NULL;
+    }
+
     EMPTY_CMD_QUEUE(&conn->cmd_queue, cmd_next);
     EMPTY_CMD_QUEUE(&conn->ready_queue, ready_next);
     EMPTY_CMD_QUEUE(&conn->waiting_queue, waiting_next);

@@ -41,6 +41,11 @@ static void server_make_iov(struct connection *server)
         STAILQ_REMOVE_HEAD(&server->ready_queue, ready_next);
         STAILQ_NEXT(cmd, ready_next) = NULL;
 
+        if (cmd->stale) {
+            cmd_free(cmd);
+            continue;
+        }
+
         if (cmd->asking) {
             cmd_iov_add(&server->iov, (void*)req_ask, strlen(req_ask));
         }
@@ -59,15 +64,18 @@ static int server_write(struct connection *server)
     if (server->iov.head == NULL) {
         server_make_iov(server);
     }
-    if (server->iov.len <= 0) return CORVUS_OK;
+    if (server->iov.len <= 0) {
+        cmd_iov_free(&server->iov);
+        return CORVUS_OK;
+    }
 
-    int status = iov_write(server->ctx, &server->iov, server->fd);
+    int status = cmd_iov_write(server->ctx, &server->iov, server->fd);
 
     if (status == CORVUS_ERR) return CORVUS_ERR;
     if (status == CORVUS_AGAIN) return CORVUS_OK;
 
     if (server->iov.len <= 0) {
-        cmd_free_iov(&server->iov);
+        cmd_iov_free(&server->iov);
     }
 
     if (conn_register(server) == CORVUS_ERR) {
@@ -204,7 +212,9 @@ static void server_ready(struct connection *self, uint32_t mask)
         LOG(DEBUG, "server writable");
         if (self->status == CONNECTING) self->status = CONNECTED;
         if (self->status == CONNECTED) {
-            if (server_write(self) == CORVUS_ERR) {
+            if (!STAILQ_EMPTY(&self->ready_queue)
+                    && server_write(self) == CORVUS_ERR)
+            {
                 server_eof(self);
                 return;
             }
@@ -249,7 +259,6 @@ void server_eof(struct connection *server)
         c = STAILQ_FIRST(&server->ready_queue);
         STAILQ_REMOVE_HEAD(&server->ready_queue, ready_next);
         STAILQ_NEXT(c, ready_next) = NULL;
-        cmd_free_iov(&c->iov);
         cmd_mark_fail(c);
     }
 
@@ -257,11 +266,9 @@ void server_eof(struct connection *server)
         c = STAILQ_FIRST(&server->waiting_queue);
         STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
         STAILQ_NEXT(c, waiting_next) = NULL;
-        cmd_free_iov(&c->iov);
         cmd_mark_fail(c);
     }
 
-    cmd_free_iov(&server->iov);
     event_deregister(server->ctx->loop, server);
     conn_free(server);
     slot_create_job(SLOT_UPDATE, NULL);

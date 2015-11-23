@@ -23,6 +23,8 @@
 #define THREAD_STACK_SIZE (1024*1024*4)
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
 
+#define ARRAY_CHUNK_SIZE 1024
+
 #ifndef HOST_NAME_MAX
 #define HOST_NAME_MAX 255
 #endif
