@@ -166,7 +166,7 @@ static int parse_slots_data(struct context *ctx, struct redis_data *data)
         if (node == NULL) return -1;
 
         for (j = d->element[0]->integer; j < d->element[1]->integer + 1; j++) {
-            count += 1;
+            count++;
             slot_map[j] = node;
         }
 
@@ -224,6 +224,7 @@ static int do_update_slot_map(struct connection *server)
         return -1;
     }
 
+    LOG(INFO, "updating slot map using %s:%d", server->addr.host, server->addr.port);
     int count = parse_slots_data(server->ctx, cmd->rep_data);
     cmd_free(cmd);
     return count;

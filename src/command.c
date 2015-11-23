@@ -790,11 +790,6 @@ struct command *cmd_create(struct context *ctx)
     return cmd;
 }
 
-void cmd_queue_init(struct cmd_tqh *cmd_queue)
-{
-    STAILQ_INIT(cmd_queue);
-}
-
 struct command *cmd_get_lastest(struct context *ctx, struct cmd_tqh *q)
 {
     struct command *cmd;
