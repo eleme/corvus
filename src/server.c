@@ -212,9 +212,7 @@ static void server_ready(struct connection *self, uint32_t mask)
         LOG(DEBUG, "server writable");
         if (self->status == CONNECTING) self->status = CONNECTED;
         if (self->status == CONNECTED) {
-            if (!STAILQ_EMPTY(&self->ready_queue)
-                    && server_write(self) == CORVUS_ERR)
-            {
+            if (server_write(self) == CORVUS_ERR) {
                 server_eof(self);
                 return;
             }
