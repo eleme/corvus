@@ -80,6 +80,9 @@ struct context {
     uint32_t nfree_connq;
     struct conn_tqh free_connq;
 
+    uint32_t nfree_redis_dataq;
+    struct redis_data_tqh free_redis_dataq;
+
     struct connection *proxy;
 
     /* logging */

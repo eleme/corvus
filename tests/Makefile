@@ -1,4 +1,4 @@
-CFLAGS=-g -std=c99 -D_GNU_SOURCE -I../src -I../deps -pthread
+CFLAGS=-g -std=c99 -D_GNU_SOURCE -DCORVUS_TEST -I../src -I../deps -pthread
 
 corvus_test: test.c \
 	test.h \
@@ -9,7 +9,7 @@ corvus_test: test.c \
 	../src/hash.c ../src/slot.c ../src/parser.c ../src/socket.c \
 	../src/logging.c ../src/mbuf.c ../src/command.c ../src/connection.c \
 	../src/proxy.c ../src/event.c ../src/client.c ../src/server.c \
-	../deps/hashmap/hash.c
+	../deps/hashmap/hash.c ../src/corvus.c
 	@$(CC) $(CFLAGS) $^ -o $@
 
 test: corvus_test

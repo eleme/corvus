@@ -179,7 +179,7 @@ static void post_case()
 
 
 struct context;
-void context_init(struct context *ctx);
-void context_free(struct context *ctx);
+extern void context_init(struct context *ctx);
+extern void context_free(struct context *ctx);
 
 #endif

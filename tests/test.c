@@ -43,23 +43,6 @@ static void report()
             manager.skipped);
 }
 
-void context_init(struct context *ctx)
-{
-    ctx->syslog = 1;
-    ctx->log_level = ERROR;
-    ctx->server_table = NULL;
-    mbuf_init(ctx);
-    log_init(ctx);
-
-    STAILQ_INIT(&ctx->free_cmdq);
-    ctx->nfree_cmdq = 0;
-}
-
-void context_free(struct context *ctx)
-{
-    mbuf_deinit(ctx);
-}
-
 extern TEST_CASE(test_slot);
 extern TEST_CASE(test_hash);
 extern TEST_CASE(test_parser);

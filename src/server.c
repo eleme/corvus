@@ -100,7 +100,7 @@ static int server_redirect(struct command *cmd, struct redirect_info *info)
     }
 
     server_free_buf(cmd);
-    redis_data_destroy(cmd->rep_data);
+    redis_data_free(cmd->ctx, cmd->rep_data);
     cmd->rep_data = NULL;
 
     port = socket_parse_addr(info->addr, &addr);
@@ -143,7 +143,7 @@ static int read_one_reply(struct connection *server)
         } else {
             LOG(DEBUG, "recv asking");
             server_free_buf(cmd);
-            redis_data_destroy(cmd->rep_data);
+            redis_data_free(cmd->ctx, cmd->rep_data);
             cmd->rep_data = NULL;
             cmd->asking = 0;
             return CORVUS_OK;

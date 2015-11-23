@@ -200,7 +200,7 @@ static void cmd_init(struct context *ctx, struct command *cmd)
     memset(cmd, 0, sizeof(struct command));
 
     cmd->ctx = ctx;
-    reader_init(&cmd->reader);
+    reader_init(cmd->ctx, &cmd->reader);
 
     STAILQ_INIT(&cmd->buf_queue);
     STAILQ_INIT(&cmd->rep_queue);
@@ -1069,11 +1069,11 @@ void cmd_free(struct command *cmd)
     struct command *c;
     struct context *ctx = cmd->ctx;
     if (cmd->req_data != NULL) {
-        redis_data_destroy(cmd->req_data);
+        redis_data_free(ctx, cmd->req_data);
         cmd->req_data = NULL;
     }
     if (cmd->rep_data != NULL) {
-        redis_data_destroy(cmd->rep_data);
+        redis_data_free(ctx, cmd->rep_data);
         cmd->rep_data = NULL;
     }
 
@@ -1085,7 +1085,7 @@ void cmd_free(struct command *cmd)
     }
 
     reader_free(&cmd->reader);
-    reader_init(&cmd->reader);
+    reader_init(cmd->ctx, &cmd->reader);
 
     cmd_free_reply(cmd);
 

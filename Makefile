@@ -11,8 +11,7 @@ init:
 clean:
 	@rm -rf build
 	@find . -name '*.[oa]' -delete
-	@rm -f corvus
-	@rm -f tests/corvus_test
+	@rm -f corvus src/corvus tests/corvus_test
 
 test:
 	cd tests && $(MAKE) test

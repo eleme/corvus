@@ -17,7 +17,7 @@ TEST(test_nested_array) {
     buf->last += len;
 
     struct reader r;
-    reader_init(&r);
+    reader_init(&ctx, &r);
     reader_feed(&r, buf);
 
     if (parse(&r) == -1) {
@@ -74,7 +74,7 @@ TEST(test_partial_parse) {
     buf->last += size;
 
     struct reader reader;
-    reader_init(&reader);
+    reader_init(&ctx, &reader);
     reader_feed(&reader, buf);
 
     if (parse(&reader) == -1) {
@@ -120,6 +120,9 @@ TEST(test_partial_parse) {
 }
 
 TEST(test_process_integer) {
+    struct context ctx;
+    context_init(&ctx);
+
     struct mbuf buf;
 
     char data[] = ":40235\r\n:231\r\n";
@@ -129,7 +132,7 @@ TEST(test_process_integer) {
     buf.last = (uint8_t*)data + len;
 
     struct reader r;
-    reader_init(&r);
+    reader_init(&ctx, &r);
     reader_feed(&r, &buf);
 
     struct redis_data *d;
@@ -143,12 +146,16 @@ TEST(test_process_integer) {
     ASSERT(parse(&r) != -1);
     ASSERT(r.data->integer == 231);
 
-    redis_data_destroy(d);
+    redis_data_free(&ctx, d);
     reader_free(&r);
+    context_free(&ctx);
     PASS(NULL);
 }
 
 TEST(test_empty_array) {
+    struct context ctx;
+    context_init(&ctx);
+
     struct mbuf buf;
 
     char data[] = "*0\r\n$5\r\nhello\r\n";
@@ -159,7 +166,7 @@ TEST(test_empty_array) {
     buf.end = buf.last;
 
     struct reader r;
-    reader_init(&r);
+    reader_init(&ctx, &r);
     reader_feed(&r, &buf);
 
     struct redis_data *d;
@@ -172,12 +179,16 @@ TEST(test_empty_array) {
 
     ASSERT(parse(&r) != -1);
 
-    redis_data_destroy(d);
+    redis_data_free(&ctx, d);
     reader_free(&r);
+    context_free(&ctx);
     PASS(NULL);
 }
 
 TEST(test_parse_simple_string) {
+    struct context ctx;
+    context_init(&ctx);
+
     struct mbuf buf;
 
     char data1[] = "+O";
@@ -191,7 +202,7 @@ TEST(test_parse_simple_string) {
     buf.end = buf.last;
 
     struct reader r;
-    reader_init(&r);
+    reader_init(&ctx, &r);
     reader_feed(&r, &buf);
 
     ASSERT(parse(&r) != -1);
@@ -206,10 +217,14 @@ TEST(test_parse_simple_string) {
     ASSERT(parse(&r) != -1);
 
     reader_free(&r);
+    context_free(&ctx);
     PASS(NULL);
 }
 
 TEST(test_parse_error) {
+    struct context ctx;
+    context_init(&ctx);
+
     struct mbuf buf;
 
     char data1[] = "-MOV";
@@ -223,7 +238,7 @@ TEST(test_parse_error) {
     buf.end = buf.last;
 
     struct reader r;
-    reader_init(&r);
+    reader_init(&ctx, &r);
     reader_feed(&r, &buf);
 
     ASSERT(parse(&r) != -1);
@@ -238,10 +253,14 @@ TEST(test_parse_error) {
     ASSERT(parse(&r) != -1);
 
     reader_free(&r);
+    context_free(&ctx);
     PASS(NULL);
 }
 
 TEST(test_parse_null_string) {
+    struct context ctx;
+    context_init(&ctx);
+
     struct mbuf buf;
 
     char data[] = "$-1\r\n";
@@ -251,15 +270,19 @@ TEST(test_parse_null_string) {
     buf.end = buf.last;
 
     struct reader r;
-    reader_init(&r);
+    reader_init(&ctx, &r);
     reader_feed(&r, &buf);
 
     ASSERT(parse(&r) != -1);
     reader_free(&r);
+    context_free(&ctx);
     PASS(NULL);
 }
 
 TEST(test_parse_null_array) {
+    struct context ctx;
+    context_init(&ctx);
+
     struct mbuf buf;
 
     char data[] = "*-1\r\n";
@@ -269,16 +292,20 @@ TEST(test_parse_null_array) {
     buf.end = buf.last;
 
     struct reader r;
-    reader_init(&r);
+    reader_init(&ctx, &r);
     reader_feed(&r, &buf);
 
     ASSERT(parse(&r) != -1);
 
     reader_free(&r);
+    context_free(&ctx);
     PASS(NULL);
 }
 
 TEST(test_parse_minus_integer) {
+    struct context ctx;
+    context_init(&ctx);
+
     struct mbuf buf;
 
     char data[] = ":-1\r\n";
@@ -288,12 +315,13 @@ TEST(test_parse_minus_integer) {
     buf.end = buf.last;
 
     struct reader r;
-    reader_init(&r);
+    reader_init(&ctx, &r);
     reader_feed(&r, &buf);
 
     ASSERT(parse(&r) != -1);
 
     reader_free(&r);
+    context_free(&ctx);
     PASS(NULL);
 }
 

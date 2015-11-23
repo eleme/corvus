@@ -223,10 +223,8 @@ void context_init(struct context *ctx, bool syslog, int log_level)
     log_init(ctx);
 
     STAILQ_INIT(&ctx->free_cmdq);
-    ctx->nfree_cmdq = 0;
-
     STAILQ_INIT(&ctx->free_connq);
-    ctx->nfree_connq = 0;
+    STAILQ_INIT(&ctx->free_redis_dataq);
 }
 
 void context_free(struct context *ctx)
@@ -260,6 +258,15 @@ void context_free(struct context *ctx)
         STAILQ_REMOVE_HEAD(&ctx->free_connq, next);
         free(conn);
         ctx->nfree_connq--;
+    }
+
+    /* redis data queue */
+    struct redis_data *data;
+    while (!STAILQ_EMPTY(&ctx->free_redis_dataq)) {
+        data = STAILQ_FIRST(&ctx->free_redis_dataq);
+        STAILQ_REMOVE_HEAD(&ctx->free_redis_dataq, next);
+        free(data);
+        ctx->nfree_redis_dataq--;
     }
 
     /* event loop */
@@ -329,6 +336,7 @@ void start_worker(int i)
     ctx->role = THREAD_MAIN_WORKER;
 }
 
+#ifndef CORVUS_TEST
 int main(int argc, const char *argv[])
 {
     int i;
@@ -385,3 +393,4 @@ int main(int argc, const char *argv[])
     if (config.syslog) closelog();
     return EXIT_SUCCESS;
 }
+#endif
