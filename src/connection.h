@@ -27,9 +27,10 @@ struct connection {
     struct cmd_tqh cmd_queue;
     struct cmd_tqh ready_queue;
     struct cmd_tqh waiting_queue;
-    struct cmd_tqh retry_queue;
 
     struct mhdr data;
+    struct iov_data iov;
+
     int status;
     void (*ready)(struct connection *self, uint32_t mask);
 };

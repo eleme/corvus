@@ -56,8 +56,9 @@ void conn_init(struct connection *conn, struct context *ctx)
     STAILQ_INIT(&conn->cmd_queue);
     STAILQ_INIT(&conn->ready_queue);
     STAILQ_INIT(&conn->waiting_queue);
-    STAILQ_INIT(&conn->retry_queue);
     STAILQ_INIT(&conn->data);
+
+    memset(&conn->iov, 0, sizeof(conn->iov));
 }
 
 struct connection *conn_create(struct context *ctx)
@@ -102,7 +103,6 @@ void conn_free(struct connection *conn)
     EMPTY_CMD_QUEUE(&conn->cmd_queue, cmd_next);
     EMPTY_CMD_QUEUE(&conn->ready_queue, ready_next);
     EMPTY_CMD_QUEUE(&conn->waiting_queue, waiting_next);
-    EMPTY_CMD_QUEUE(&conn->retry_queue, retry_next);
 
     struct mbuf *buf;
     while (!STAILQ_EMPTY(&conn->data)) {

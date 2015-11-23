@@ -8,18 +8,6 @@
 
 static const char *req_ask = "*1\r\n$6\r\nASKING\r\n";
 
-static inline void remove_queue_head(struct connection *server,
-        struct command *cmd, int retry)
-{
-    if (retry) {
-        STAILQ_REMOVE_HEAD(&server->retry_queue, retry_next);
-        STAILQ_NEXT(cmd, retry_next) = NULL;
-    } else {
-        STAILQ_REMOVE_HEAD(&server->ready_queue, ready_next);
-        STAILQ_NEXT(cmd, ready_next) = NULL;
-    }
-}
-
 static void server_free_buf(struct command *cmd)
 {
     struct mbuf *b, *buf;
@@ -45,50 +33,48 @@ static void server_free_buf(struct command *cmd)
     memset(&cmd->rep_buf, 0, sizeof(cmd->rep_buf));
 }
 
-static int server_write(struct connection *server, int retry)
+static void server_make_iov(struct connection *server)
 {
-    int status;
     struct command *cmd;
+    while (!STAILQ_EMPTY(&server->ready_queue)) {
+        cmd = STAILQ_FIRST(&server->ready_queue);
+        STAILQ_REMOVE_HEAD(&server->ready_queue, ready_next);
+        STAILQ_NEXT(cmd, ready_next) = NULL;
 
-    cmd = retry ? STAILQ_FIRST(&server->retry_queue) : STAILQ_FIRST(&server->ready_queue);
-    if (cmd->stale) {
-        remove_queue_head(server, cmd, retry);
-        cmd_free(cmd);
-        return CORVUS_OK;
-    }
-
-    if (cmd->iov.head == NULL) {
         if (cmd->asking) {
-            cmd_iov_add(&cmd->iov, (void*)req_ask, strlen(req_ask));
+            cmd_iov_add(&server->iov, (void*)req_ask, strlen(req_ask));
         }
-        /* before write */
         cmd->rep_time[0] = get_time();
 
-        cmd_create_iovec(&cmd->req_buf[0], &cmd->req_buf[1], &cmd->iov);
-        cmd->iov.head = cmd->iov.data;
-        cmd->iov.size = cmd->iov.len;
-    }
+        cmd_create_iovec(&cmd->req_buf[0], &cmd->req_buf[1], &server->iov);
 
-    if (cmd->iov.len <= 0) {
-        LOG(WARN, "no data to write");
-        return CORVUS_ERR;
+        STAILQ_INSERT_TAIL(&server->waiting_queue, cmd, waiting_next);
     }
+    server->iov.head = server->iov.data;
+    server->iov.size = server->iov.len;
+}
 
-    status = cmd_write_iov(cmd, server->fd);
+static int server_write(struct connection *server)
+{
+    if (server->iov.head == NULL) {
+        server_make_iov(server);
+    }
+    if (server->iov.len <= 0) return CORVUS_OK;
+
+    int status = iov_write(server->ctx, &server->iov, server->fd);
 
     if (status == CORVUS_ERR) return CORVUS_ERR;
     if (status == CORVUS_AGAIN) return CORVUS_OK;
 
-    if (cmd->iov.len <= 0) {
-        cmd_free_iov(&cmd->iov);
-        remove_queue_head(server, cmd, retry);
-        STAILQ_INSERT_TAIL(&server->waiting_queue, cmd, waiting_next);
-    } else {
-        if (conn_register(server) == CORVUS_ERR) {
-            LOG(ERROR, "fail to reregister server %d", server->fd);
-            return CORVUS_ERR;
-        }
+    if (server->iov.len <= 0) {
+        cmd_free_iov(&server->iov);
     }
+
+    if (conn_register(server) == CORVUS_ERR) {
+        LOG(ERROR, "fail to reregister server %d", server->fd);
+        return CORVUS_ERR;
+    }
+
     return CORVUS_OK;
 }
 
@@ -124,7 +110,7 @@ static int server_redirect(struct command *cmd, struct redirect_info *info)
     }
 
     cmd->server = server;
-    STAILQ_INSERT_TAIL(&server->retry_queue, cmd, retry_next);
+    STAILQ_INSERT_TAIL(&server->ready_queue, cmd, ready_next);
 
     switch (conn_register(server)) {
         case CORVUS_ERR: return CORVUS_ERR;
@@ -209,8 +195,6 @@ static int server_read(struct connection *server)
 
 static void server_ready(struct connection *self, uint32_t mask)
 {
-    int retry = -1;
-
     if (mask & E_ERROR) {
         LOG(DEBUG, "error");
         server_eof(self);
@@ -220,13 +204,7 @@ static void server_ready(struct connection *self, uint32_t mask)
         LOG(DEBUG, "server writable");
         if (self->status == CONNECTING) self->status = CONNECTED;
         if (self->status == CONNECTED) {
-            if (!STAILQ_EMPTY(&self->retry_queue)) {
-                retry = 1;
-            } else if (!STAILQ_EMPTY(&self->ready_queue)) {
-                retry = 0;
-            }
-
-            if (retry != -1 && server_write(self, retry) == CORVUS_ERR) {
+            if (server_write(self) == CORVUS_ERR) {
                 server_eof(self);
                 return;
             }
@@ -283,14 +261,7 @@ void server_eof(struct connection *server)
         cmd_mark_fail(c);
     }
 
-    while (!STAILQ_EMPTY(&server->retry_queue)) {
-        c = STAILQ_FIRST(&server->retry_queue);
-        STAILQ_REMOVE_HEAD(&server->retry_queue, retry_next);
-        STAILQ_NEXT(c, retry_next) = NULL;
-        cmd_free_iov(&c->iov);
-        cmd_mark_fail(c);
-    }
-
+    cmd_free_iov(&server->iov);
     event_deregister(server->ctx->loop, server);
     conn_free(server);
     slot_create_job(SLOT_UPDATE, NULL);

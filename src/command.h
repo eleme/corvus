@@ -35,7 +35,6 @@ struct command {
     STAILQ_ENTRY(command) cmd_next;
     STAILQ_ENTRY(command) ready_next;
     STAILQ_ENTRY(command) waiting_next;
-    STAILQ_ENTRY(command) retry_next;
     STAILQ_ENTRY(command) sub_cmd_next;
     struct mhdr buf_queue;
     struct mhdr rep_queue;
@@ -97,11 +96,11 @@ void cmd_make_iovec(struct command *cmd, struct iov_data *iov);
 void cmd_parse_redirect(struct command *cmd, struct redirect_info *info);
 void cmd_mark_done(struct command *cmd);
 void cmd_mark_fail(struct command *cmd);
-int cmd_write_iov(struct command *cmd, int fd);
 void cmd_stats(struct command *cmd);
 void cmd_set_stale(struct command *cmd);
 void cmd_free_iov(struct iov_data *iov);
 void cmd_free_reply(struct command *cmd);
 void cmd_free(struct command *cmd);
+int iov_write(struct context *ctx, struct iov_data *iov, int fd);
 
 #endif /* end of include guard: __COMMAND_H */

@@ -218,7 +218,6 @@ static void cmd_recycle(struct context *ctx, struct command *cmd)
     STAILQ_NEXT(cmd, cmd_next) = NULL;
     STAILQ_NEXT(cmd, ready_next) = NULL;
     STAILQ_NEXT(cmd, waiting_next) = NULL;
-    STAILQ_NEXT(cmd, retry_next) = NULL;
     STAILQ_NEXT(cmd, sub_cmd_next) = NULL;
     STAILQ_INSERT_HEAD(&ctx->free_cmdq, cmd, cmd_next);
     ctx->nfree_cmdq++;
@@ -227,14 +226,11 @@ static void cmd_recycle(struct context *ctx, struct command *cmd)
 static int cmd_in_queue(struct command *cmd, struct connection *server)
 {
     struct command *ready = STAILQ_LAST(&server->ready_queue, command, ready_next),
-                   *retry = STAILQ_LAST(&server->retry_queue, command, retry_next),
                    *wait = STAILQ_LAST(&server->waiting_queue, command, waiting_next);
 
     return STAILQ_NEXT(cmd, ready_next) != NULL
-        || STAILQ_NEXT(cmd, retry_next) != NULL
         || STAILQ_NEXT(cmd, waiting_next) != NULL
         || ready == cmd
-        || retry == cmd
         || wait == cmd;
 }
 
@@ -981,44 +977,6 @@ void cmd_iov_add(struct iov_data *iov, void *buf, size_t len)
     iov->len++;
 }
 
-int cmd_write_iov(struct command *cmd, int fd)
-{
-    LOG(DEBUG, "write iov");
-
-    struct iov_data *iov = &cmd->iov;
-    int i, n = 0;
-    ssize_t remain = 0, status, bytes = 0, count = 0;
-
-    while (n < iov->len) {
-        if (n >= CORVUS_IOV_MAX || bytes >= SSIZE_MAX) break;
-        bytes += iov->data[n++].iov_len;
-    }
-
-    status = socket_write(fd, iov->data, n);
-    if (status == CORVUS_AGAIN || status == CORVUS_ERR) return status;
-
-    cmd->ctx->stats.send_bytes += status;
-
-    if (status < bytes) {
-        for (i = 0; i < n; i++) {
-            count += iov->data[i].iov_len;
-            if (count > status) {
-                remain = iov->data[i].iov_len - (count - status);
-                iov->data[i].iov_base = (char*)iov->data[i].iov_base + remain;
-                iov->data[i].iov_len -= remain;
-                break;
-            }
-        }
-        iov->data += i;
-        iov->len -= i;
-    } else {
-        iov->data += n;
-        iov->len -= n;
-    }
-
-    return status;
-}
-
 void cmd_stats(struct command *cmd)
 {
     struct context *ctx = cmd->ctx;
@@ -1127,4 +1085,41 @@ void cmd_free(struct command *cmd)
     cmd->client = NULL;
     cmd->server = NULL;
     cmd_recycle(ctx, cmd);
+}
+
+int iov_write(struct context *ctx, struct iov_data *iov, int fd)
+{
+    LOG(DEBUG, "write iov");
+
+    int i, n = 0;
+    ssize_t remain = 0, status, bytes = 0, count = 0;
+
+    while (n < iov->len) {
+        if (n >= CORVUS_IOV_MAX || bytes >= SSIZE_MAX) break;
+        bytes += iov->data[n++].iov_len;
+    }
+
+    status = socket_write(fd, iov->data, n);
+    if (status == CORVUS_AGAIN || status == CORVUS_ERR) return status;
+
+    ctx->stats.send_bytes += status;
+
+    if (status < bytes) {
+        for (i = 0; i < n; i++) {
+            count += iov->data[i].iov_len;
+            if (count > status) {
+                remain = iov->data[i].iov_len - (count - status);
+                iov->data[i].iov_base = (char*)iov->data[i].iov_base + remain;
+                iov->data[i].iov_len -= remain;
+                break;
+            }
+        }
+        iov->data += i;
+        iov->len -= i;
+    } else {
+        iov->data += n;
+        iov->len -= n;
+    }
+
+    return status;
 }
