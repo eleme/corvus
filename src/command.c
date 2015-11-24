@@ -262,6 +262,9 @@ static int cmd_get_slot(struct command *cmd)
 {
     uint16_t slot;
     struct redis_data *data = cmd->req_data;
+
+    if (data->elements < 2) return -1;
+
     struct redis_data *cmd_key = data->element[1];
     struct pos_array *pos = cmd_key->pos;
 
