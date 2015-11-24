@@ -41,6 +41,7 @@ void conn_init(struct connection *conn, struct context *ctx);
 struct connection *conn_create(struct context *ctx);
 int conn_connect(struct connection *conn);
 void conn_free(struct connection *conn);
+void conn_buf_free(struct connection *conn);
 void conn_recycle(struct context *ctx, struct connection *conn);
 struct connection *conn_get_server_from_pool(struct context *ctx, struct address *addr);
 struct connection *conn_get_server(struct context *ctx, uint16_t slot);

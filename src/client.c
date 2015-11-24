@@ -107,5 +107,6 @@ void client_eof(struct connection *client)
 
     event_deregister(client->ctx->loop, client);
     conn_free(client);
+    conn_buf_free(client);
     conn_recycle(client->ctx, client);
 }

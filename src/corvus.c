@@ -264,6 +264,7 @@ void context_free(struct context *ctx)
         free((void*)key);
         conn = (struct connection*)val;
         conn_free(conn);
+        conn_buf_free(conn);
         free(conn);
     })
     hash_clear(ctx->server_table);

@@ -110,7 +110,10 @@ void conn_free(struct connection *conn)
     EMPTY_CMD_QUEUE(&conn->cmd_queue, cmd_next);
     EMPTY_CMD_QUEUE(&conn->ready_queue, ready_next);
     EMPTY_CMD_QUEUE(&conn->waiting_queue, waiting_next);
+}
 
+void conn_buf_free(struct connection *conn)
+{
     struct mbuf *buf;
     while (!STAILQ_EMPTY(&conn->data)) {
         buf = STAILQ_FIRST(&conn->data);
@@ -121,6 +124,10 @@ void conn_free(struct connection *conn)
 
 void conn_recycle(struct context *ctx, struct connection *conn)
 {
+    if (!STAILQ_EMPTY(&conn->data)) {
+        LOG(WARN, "connection recycle, data buffer not empty");
+    }
+
     STAILQ_NEXT(conn, next) = NULL;
     STAILQ_INSERT_HEAD(&ctx->free_connq, conn, next);
     ctx->nfree_connq++;

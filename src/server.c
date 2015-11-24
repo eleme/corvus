@@ -270,6 +270,7 @@ void server_eof(struct connection *server)
     }
 
     event_deregister(server->ctx->loop, server);
+    /* not free connection buffer */
     conn_free(server);
     slot_create_job(SLOT_UPDATE, NULL);
 }
