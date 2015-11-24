@@ -257,7 +257,6 @@ void server_eof(struct connection *server)
         c = STAILQ_FIRST(&server->ready_queue);
         STAILQ_REMOVE_HEAD(&server->ready_queue, ready_next);
         STAILQ_NEXT(c, ready_next) = NULL;
-        memset(c->rep_buf, 0, sizeof(c->rep_buf));
         cmd_mark_fail(c);
     }
 
@@ -265,7 +264,6 @@ void server_eof(struct connection *server)
         c = STAILQ_FIRST(&server->waiting_queue);
         STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
         STAILQ_NEXT(c, waiting_next) = NULL;
-        memset(c->rep_buf, 0, sizeof(c->rep_buf));
         cmd_mark_fail(c);
     }
 
