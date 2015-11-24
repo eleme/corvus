@@ -608,7 +608,9 @@ static void cmd_gen_mget_iovec(struct command *cmd, struct iov_data *iov)
 
     struct command *c;
     STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
-        if (c->cmd_fail) {
+        if (c->cmd_fail || (c->server != NULL
+                    && STAILQ_EMPTY(&c->server->data)))
+        {
             cmd_iov_add(iov, (void*)rep_err, strlen(rep_err));
             continue;
         }
@@ -623,7 +625,9 @@ static void cmd_gen_mset_iovec(struct command *cmd, struct iov_data *iov)
     int fail = 0;
     STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
         rep = c->rep_data;
-        if (c->cmd_fail || rep->type == REP_ERROR) {
+        if (c->cmd_fail || rep->type == REP_ERROR || (c->server != NULL
+                    && STAILQ_EMPTY(&c->server->data)))
+        {
             fail = 1;
             break;
         }
@@ -893,7 +897,9 @@ void cmd_make_iovec(struct command *cmd, struct iov_data *iov)
     LOG(DEBUG, "cmd count %d", cmd->cmd_count);
     struct command *c;
     STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
-        if (c->cmd_fail) {
+        if (c->cmd_fail || (c->server != NULL
+                    && STAILQ_EMPTY(&c->server->data)))
+        {
             cmd_iov_add(iov, (void*)rep_err, strlen(rep_err));
             continue;
         }
@@ -1047,6 +1053,11 @@ void cmd_free_reply(struct command *cmd)
 {
     if (cmd->server == NULL) return;
     if (cmd->rep_buf[0].buf == NULL) return;
+
+    if (cmd->server != NULL && STAILQ_EMPTY(&cmd->server->data)) {
+        memset(&cmd->rep_buf, 0, sizeof(cmd->rep_buf));
+        return;
+    }
 
     struct mbuf *b, *buf;
     b = cmd->rep_buf[0].buf;

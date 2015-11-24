@@ -1,7 +1,7 @@
 BUILD=../build
 OPTIMIZATION?=-O2
 CFLAGS=-Wall $(OPTIMIZATION) -g -ggdb -std=c99 -D_GNU_SOURCE -I../deps
-LDFLAGS=-pthread
+LDFLAGS=-pthread -rdynamic
 
 SRC = client.c               \
 	  command.c              \

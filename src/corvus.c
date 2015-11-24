@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <sys/eventfd.h>
 #include <sys/resource.h>
+#include <execinfo.h>
 #include "corvus.h"
 #include "mbuf.h"
 #include "slot.h"
@@ -108,7 +109,7 @@ static int read_conf(const char *filename)
     return 0;
 }
 
-static void do_quit()
+static void quit()
 {
     int status, i;
     uint64_t data = 1;
@@ -131,10 +132,37 @@ static void do_quit()
     }
 }
 
+static void log_traceback()
+{
+    void *stack[64];
+    char **symbols;
+    int size, i, j;
+
+    LOG(ERROR, "segmentation fault:");
+
+    size = backtrace(stack, 64);
+    symbols = backtrace_symbols(stack, size);
+    if (symbols == NULL) exit(EXIT_FAILURE);
+
+    for (i = 0, j = 0; i < size; i++, j++) {
+        LOG(ERROR, "[%d] %s", j, symbols[i]);
+    }
+    free(symbols);
+
+    exit(EXIT_FAILURE);
+}
+
 static void sig_handler(int sig)
 {
-    if (sig != SIGINT && sig != SIGTERM) return;
-    do_quit();
+    switch (sig) {
+        case SIGINT:
+        case SIGTERM:
+            quit();
+            break;
+        case SIGSEGV:
+            log_traceback();
+            break;
+    }
 }
 
 static void setup_signal()
@@ -145,6 +173,7 @@ static void setup_signal()
     act.sa_handler = sig_handler;
     sigaction(SIGINT, &act, NULL);
     sigaction(SIGTERM, &act, NULL);
+    sigaction(SIGSEGV, &act, NULL);
 }
 
 static void notify_ready(struct connection *conn, uint32_t mask)
