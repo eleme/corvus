@@ -8,7 +8,7 @@
 
 static const char *req_ask = "*1\r\n$6\r\nASKING\r\n";
 
-static void server_free_buf(struct command *cmd)
+void server_free_buf(struct command *cmd)
 {
     struct mbuf *b, *buf;
     b = cmd->rep_buf[0].buf;
@@ -33,7 +33,7 @@ static void server_free_buf(struct command *cmd)
     memset(&cmd->rep_buf, 0, sizeof(cmd->rep_buf));
 }
 
-static void server_make_iov(struct connection *server)
+void server_make_iov(struct connection *server)
 {
     struct command *cmd;
     while (!STAILQ_EMPTY(&server->ready_queue)) {
@@ -59,7 +59,7 @@ static void server_make_iov(struct connection *server)
     server->iov.size = server->iov.len;
 }
 
-static int server_write(struct connection *server)
+int server_write(struct connection *server)
 {
     if (server->iov.head == NULL) {
         server_make_iov(server);
@@ -88,7 +88,7 @@ static int server_write(struct connection *server)
     return CORVUS_OK;
 }
 
-static int server_redirect(struct command *cmd, struct redirect_info *info)
+int server_redirect(struct command *cmd, struct redirect_info *info)
 {
     int port;
     struct address addr;
@@ -129,7 +129,7 @@ static int server_redirect(struct command *cmd, struct redirect_info *info)
     return CORVUS_OK;
 }
 
-static int read_one_reply(struct connection *server)
+int read_one_reply(struct connection *server)
 {
     if (STAILQ_EMPTY(&server->waiting_queue)) return CORVUS_AGAIN;
 
@@ -169,32 +169,29 @@ static int read_one_reply(struct connection *server)
         return CORVUS_OK;
     }
 
-    struct redirect_info info = {.addr = NULL, .type = CMD_ERR, .slot = -1};
+    struct redirect_info info;
+    info.type = CMD_ERR;
+    info.slot = -1;
+    memset(info.addr, 0, sizeof(info.addr));
+
     cmd_parse_redirect(cmd, &info);
     switch (info.type) {
         case CMD_ERR_MOVED:
-            if (server_redirect(cmd, &info) == CORVUS_ERR) {
-                if (info.addr != NULL) free(info.addr);
-                return CORVUS_ERR;
-            }
+            if (server_redirect(cmd, &info) == CORVUS_ERR) return CORVUS_ERR;
             slot_create_job(SLOT_UPDATE, NULL);
             break;
         case CMD_ERR_ASK:
-            if (server_redirect(cmd, &info) == CORVUS_ERR) {
-                if (info.addr != NULL) free(info.addr);
-                return CORVUS_ERR;
-            }
+            if (server_redirect(cmd, &info) == CORVUS_ERR) return CORVUS_ERR;
             cmd->asking = 1;
             break;
         default:
             cmd_mark_done(cmd);
             break;
     }
-    if (info.addr != NULL) free(info.addr);
     return CORVUS_OK;
 }
 
-static int server_read(struct connection *server)
+int server_read(struct connection *server)
 {
     int status;
     do {
@@ -203,7 +200,7 @@ static int server_read(struct connection *server)
     return status;
 }
 
-static void server_ready(struct connection *self, uint32_t mask)
+void server_ready(struct connection *self, uint32_t mask)
 {
     if (mask & E_ERROR) {
         LOG(DEBUG, "error");

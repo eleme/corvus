@@ -7,7 +7,7 @@
 #include "logging.h"
 #include "event.h"
 
-static int client_write(struct connection *client)
+int client_write(struct connection *client)
 {
     int status;
     struct command *cmd = STAILQ_FIRST(&client->cmd_queue);
@@ -52,7 +52,7 @@ static int client_write(struct connection *client)
     return CORVUS_OK;
 }
 
-static void client_ready(struct connection *self, uint32_t mask)
+void client_ready(struct connection *self, uint32_t mask)
 {
     if (mask & E_ERROR) {
         LOG(DEBUG, "error");

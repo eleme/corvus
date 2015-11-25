@@ -259,39 +259,6 @@ static int cmd_get_type(struct command *cmd, struct pos_array *pos)
     return item->type;
 }
 
-static int cmd_get_slot(struct command *cmd)
-{
-    uint16_t slot;
-    struct redis_data *data = cmd->req_data;
-
-    if (data->elements < 2) return -1;
-
-    struct redis_data *cmd_key = data->element[1];
-    struct pos_array *pos = cmd_key->pos;
-
-    slot = slot_get(pos);
-    cmd->slot = slot;
-    return slot;
-}
-
-static void add_fragment(struct command *cmd, struct pos_array *data)
-{
-    const char *fmt = "$%ld\r\n";
-    int n = snprintf(NULL, 0, fmt, data->str_len);
-    char buf[n + 1];
-    snprintf(buf, sizeof(buf), fmt, data->str_len);
-
-    mbuf_queue_copy(cmd->ctx, &cmd->buf_queue, (uint8_t*)buf, n);
-
-    int i;
-    struct pos *p;
-    for (i = 0; i < data->pos_len; i++) {
-        p = &data->items[i];
-        mbuf_queue_copy(cmd->ctx, &cmd->buf_queue, p->str, p->len);
-    }
-    mbuf_queue_copy(cmd->ctx, &cmd->buf_queue, (uint8_t*)"\r\n", 2);
-}
-
 static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *latency)
 {
     return snprintf(dest, n,
@@ -353,7 +320,40 @@ static int cmd_apply_range(struct command *cmd, int type)
     return CORVUS_OK;
 }
 
-static int cmd_forward_basic(struct command *cmd)
+void cmd_add_fragment(struct command *cmd, struct pos_array *data)
+{
+    const char *fmt = "$%ld\r\n";
+    int n = snprintf(NULL, 0, fmt, data->str_len);
+    char buf[n + 1];
+    snprintf(buf, sizeof(buf), fmt, data->str_len);
+
+    mbuf_queue_copy(cmd->ctx, &cmd->buf_queue, (uint8_t*)buf, n);
+
+    int i;
+    struct pos *p;
+    for (i = 0; i < data->pos_len; i++) {
+        p = &data->items[i];
+        mbuf_queue_copy(cmd->ctx, &cmd->buf_queue, p->str, p->len);
+    }
+    mbuf_queue_copy(cmd->ctx, &cmd->buf_queue, (uint8_t*)"\r\n", 2);
+}
+
+int cmd_get_slot(struct command *cmd)
+{
+    uint16_t slot;
+    struct redis_data *data = cmd->req_data;
+
+    if (data->elements < 2) return -1;
+
+    struct redis_data *cmd_key = data->element[1];
+    struct pos_array *pos = cmd_key->pos;
+
+    slot = slot_get(pos);
+    cmd->slot = slot;
+    return slot;
+}
+
+int cmd_forward_basic(struct command *cmd)
 {
     int slot;
     struct connection *server = NULL;
@@ -378,7 +378,7 @@ static int cmd_forward_basic(struct command *cmd)
 }
 
 /* mget, del */
-static int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len)
+int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len)
 {
     struct redis_data *key;
     struct redis_data *data = cmd->req_data;
@@ -401,7 +401,7 @@ static int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len
         cmd->cmd_count++;
 
         mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, prefix, len);
-        add_fragment(ncmd, key->pos);
+        cmd_add_fragment(ncmd, key->pos);
 
         if (cmd_apply_range(ncmd, CMD_REQ) == CORVUS_ERR) {
             cmd_mark_fail(ncmd);
@@ -416,7 +416,7 @@ static int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len
     return 0;
 }
 
-static int cmd_forward_mset(struct command *cmd)
+int cmd_forward_mset(struct command *cmd)
 {
     struct redis_data *data = cmd->req_data;
     LOG(DEBUG, "elements %d", data->elements);
@@ -442,8 +442,8 @@ static int cmd_forward_mset(struct command *cmd)
         cmd->cmd_count++;
 
         mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, (uint8_t*)rep_set, 13);
-        add_fragment(ncmd, key->pos);
-        add_fragment(ncmd, value->pos);
+        cmd_add_fragment(ncmd, key->pos);
+        cmd_add_fragment(ncmd, value->pos);
 
         if (cmd_apply_range(ncmd, CMD_REQ) == CORVUS_ERR) {
             cmd_mark_fail(ncmd);
@@ -459,7 +459,7 @@ static int cmd_forward_mset(struct command *cmd)
     return 0;
 }
 
-static int cmd_forward_eval(struct command *cmd)
+int cmd_forward_eval(struct command *cmd)
 {
     struct redis_data *data = cmd->req_data;
     if (data->elements < 4) return -1;
@@ -468,7 +468,7 @@ static int cmd_forward_eval(struct command *cmd)
     return cmd_forward_basic(cmd);
 }
 
-static int cmd_forward_complex(struct command *cmd)
+int cmd_forward_complex(struct command *cmd)
 {
     switch (cmd->cmd_type) {
         case CMD_MGET:
@@ -491,7 +491,7 @@ static int cmd_forward_complex(struct command *cmd)
     return 0;
 }
 
-static void cmd_proxy_ping(struct command *cmd)
+void cmd_proxy_ping(struct command *cmd)
 {
     mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t *)rep_ping, 7);
     if (cmd_apply_range(cmd, CMD_REP) == CORVUS_ERR) {
@@ -501,7 +501,7 @@ static void cmd_proxy_ping(struct command *cmd)
     }
 }
 
-static void cmd_proxy_info(struct command *cmd)
+void cmd_proxy_info(struct command *cmd)
 {
     int i, n = 0, size = 0;
     struct stats stats;
@@ -540,7 +540,7 @@ static void cmd_proxy_info(struct command *cmd)
     }
 }
 
-static int cmd_proxy(struct command *cmd)
+int cmd_proxy(struct command *cmd)
 {
     switch (cmd->cmd_type) {
         case CMD_PING:
@@ -555,7 +555,7 @@ static int cmd_proxy(struct command *cmd)
     return 0;
 }
 
-static int cmd_forward(struct command *cmd)
+int cmd_forward(struct command *cmd)
 {
     switch (cmd->request_type) {
         case CMD_BASIC:
@@ -573,7 +573,7 @@ static int cmd_forward(struct command *cmd)
     return 0;
 }
 
-static int cmd_parse_token(struct command *cmd)
+int cmd_parse_token(struct command *cmd)
 {
     if (cmd->req_data == NULL) return -1;
 
@@ -596,7 +596,7 @@ static int cmd_parse_token(struct command *cmd)
     return 0;
 }
 
-static void cmd_gen_mget_iovec(struct command *cmd, struct iov_data *iov)
+void cmd_gen_mget_iovec(struct command *cmd, struct iov_data *iov)
 {
     const char *fmt = "*%ld\r\n";
     int keys = cmd->req_data->elements - 1;
@@ -619,7 +619,7 @@ static void cmd_gen_mget_iovec(struct command *cmd, struct iov_data *iov)
     }
 }
 
-static void cmd_gen_mset_iovec(struct command *cmd, struct iov_data *iov)
+void cmd_gen_mset_iovec(struct command *cmd, struct iov_data *iov)
 {
     struct command *c;
     struct redis_data *rep;
@@ -649,7 +649,7 @@ static void cmd_gen_mset_iovec(struct command *cmd, struct iov_data *iov)
     cmd_iov_add(iov, (void*)rep_ok, strlen(rep_ok));
 }
 
-static void cmd_gen_del_iovec(struct command *cmd, struct iov_data *iov)
+void cmd_gen_del_iovec(struct command *cmd, struct iov_data *iov)
 {
     struct command *c;
     int one = 0, fail = 0;
@@ -675,7 +675,7 @@ static void cmd_gen_del_iovec(struct command *cmd, struct iov_data *iov)
     cmd_iov_add(iov, (void*)rep_zero, 4);
 }
 
-static int cmd_parse_req(struct command *cmd, struct mbuf *buf)
+int cmd_parse_req(struct command *cmd, struct mbuf *buf)
 {
     struct command *ncmd;
     struct reader *r = &cmd->reader;
@@ -711,7 +711,7 @@ static int cmd_parse_req(struct command *cmd, struct mbuf *buf)
     return CORVUS_OK;
 }
 
-static int cmd_parse_rep(struct command *cmd, struct mbuf *buf)
+int cmd_parse_rep(struct command *cmd, struct mbuf *buf)
 {
     struct reader *r = &cmd->reader;
     reader_feed(r, buf);
@@ -734,7 +734,7 @@ static int cmd_parse_rep(struct command *cmd, struct mbuf *buf)
     return CORVUS_OK;
 }
 
-static void cmd_mark(struct command *cmd, int fail)
+void cmd_mark(struct command *cmd, int fail)
 {
     struct command *parent = cmd->parent, *root = NULL;
     if (fail) cmd->cmd_fail = 1;
@@ -936,12 +936,10 @@ void cmd_parse_redirect(struct command *cmd, struct redirect_info *info)
 
     if (strncmp(err, "MOVED", 5) == 0) {
         /* MOVED 16383 127.0.0.1:8001 */
-        info->addr = malloc(sizeof(char) * (pos->str_len));
         info->type = CMD_ERR_MOVED;
         sscanf(err, "%s%d%s", name, (int*)&info->slot, info->addr);
     } else if (strncmp(err, "ASK", 3) == 0) {
         /* ASK 16383 127.0.0.1:8001 */
-        info->addr = malloc(sizeof(char) * (pos->str_len));
         info->type = CMD_ERR_ASK;
         sscanf(err, "%s%d%s", name, (int*)&info->slot, info->addr);
     }

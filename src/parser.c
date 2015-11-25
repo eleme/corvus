@@ -16,7 +16,7 @@ do {                                                           \
     v += c - '0';                                              \
 } while (0);
 
-static int stack_pop(struct reader *r)
+int stack_pop(struct reader *r)
 {
     struct reader_task *cur, *top;
 
@@ -44,7 +44,7 @@ static int stack_pop(struct reader *r)
 }
 
 
-static int stack_push(struct reader *r)
+int stack_push(struct reader *r)
 {
     if (r->sidx > 8) return -1;
     struct reader_task *task = &r->rstack[++r->sidx];
@@ -58,7 +58,7 @@ static int stack_push(struct reader *r)
     return 0;
 }
 
-static struct pos_array *pos_array_create()
+struct pos_array *pos_array_create()
 {
     struct pos_array *arr = malloc(sizeof(struct pos_array));
     arr->pos_len = 0;
@@ -68,7 +68,7 @@ static struct pos_array *pos_array_create()
     return arr;
 }
 
-static void pos_array_push(struct pos_array *arr, int len, uint8_t *p)
+void pos_array_push(struct pos_array *arr, int len, uint8_t *p)
 {
     struct pos *pos;
     if (arr->items == NULL ) {
@@ -86,7 +86,7 @@ static void pos_array_push(struct pos_array *arr, int len, uint8_t *p)
     arr->str_len += len;
 }
 
-static struct redis_data *redis_data_create(struct context *ctx, int type)
+struct redis_data *redis_data_create(struct context *ctx, int type)
 {
     struct redis_data *data;
     if (!STAILQ_EMPTY(&ctx->free_redis_dataq)) {
@@ -103,7 +103,7 @@ static struct redis_data *redis_data_create(struct context *ctx, int type)
     return data;
 }
 
-static struct redis_data *redis_data_get(struct reader_task *task, int type)
+struct redis_data *redis_data_get(struct reader_task *task, int type)
 {
     struct redis_data *data;
     switch (task->type) {
@@ -126,7 +126,7 @@ static struct redis_data *redis_data_get(struct reader_task *task, int type)
     return NULL;
 }
 
-static int process_type(struct reader *r)
+int process_type(struct reader *r)
 {
     switch (*r->buf->pos) {
         case '*':
@@ -159,7 +159,7 @@ static int process_type(struct reader *r)
     return 0;
 }
 
-static int process_array(struct reader *r)
+int process_array(struct reader *r)
 {
     uint8_t *p;
     long long v;
@@ -212,7 +212,7 @@ static int process_array(struct reader *r)
     return 0;
 }
 
-static int process_string(struct reader *r)
+int process_string(struct reader *r)
 {
     char c;
     uint8_t *p;

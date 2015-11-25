@@ -49,7 +49,7 @@ static struct {
     int max_size;
 } addr_list = {NULL, 0, 0};
 
-static void addr_add(char *host, uint16_t port)
+void addr_add(char *host, uint16_t port)
 {
     int n;
     pthread_rwlock_wrlock(&addr_list_lock);
@@ -65,7 +65,7 @@ static void addr_add(char *host, uint16_t port)
     pthread_rwlock_unlock(&addr_list_lock);
 }
 
-static void addr_list_clear()
+void addr_list_clear()
 {
     pthread_rwlock_wrlock(&addr_list_lock);
     if (addr_list.addrs != NULL) {
@@ -75,7 +75,7 @@ static void addr_list_clear()
     pthread_rwlock_unlock(&addr_list_lock);
 }
 
-static void node_list_free()
+void node_list_free()
 {
     struct node_info *node;
     while(!LIST_EMPTY(&node_list)) {
@@ -86,7 +86,7 @@ static void node_list_free()
     }
 }
 
-static struct node_info *node_info_create(struct address *addr)
+struct node_info *node_info_create(struct address *addr)
 {
     struct node_info *node = malloc(sizeof(struct node_info));
     node->id = -1;
@@ -99,7 +99,7 @@ static struct node_info *node_info_create(struct address *addr)
     return node;
 }
 
-static struct node_info *node_info_find(struct context *ctx, struct redis_data *data)
+struct node_info *node_info_find(struct context *ctx, struct redis_data *data)
 {
     struct node_info *node;
     char *key;
@@ -128,7 +128,7 @@ static struct node_info *node_info_find(struct context *ctx, struct redis_data *
     return node;
 }
 
-static int node_info_add_slave(struct node_info *node, struct redis_data *data)
+int node_info_add_slave(struct node_info *node, struct redis_data *data)
 {
     struct address *addr = &node->slaves[node->slave_count++];
 
@@ -147,7 +147,7 @@ static int node_info_add_slave(struct node_info *node, struct redis_data *data)
     return 0;
 }
 
-static int parse_slots_data(struct context *ctx, struct redis_data *data)
+int parse_slots_data(struct context *ctx, struct redis_data *data)
 {
     size_t i, h;
     long long j;
@@ -181,7 +181,7 @@ static int parse_slots_data(struct context *ctx, struct redis_data *data)
     return count;
 }
 
-static void slot_map_clear(struct context *ctx)
+void slot_map_clear(struct context *ctx)
 {
     pthread_rwlock_wrlock(&slot_map_lock);
     memset(slot_map, 0, sizeof(slot_map));
@@ -199,7 +199,7 @@ static void slot_map_clear(struct context *ctx)
     hash_clear(ctx->server_table);
 }
 
-static int do_update_slot_map(struct connection *server)
+int do_update_slot_map(struct connection *server)
 {
     if (conn_connect(server) == CORVUS_ERR) return CORVUS_ERR;
     if (server->status != CONNECTED) {
@@ -230,7 +230,7 @@ static int do_update_slot_map(struct connection *server)
     return count;
 }
 
-static void slot_map_init(struct context *ctx)
+void slot_map_init(struct context *ctx)
 {
     int i, port, count = 0;
     char *addr;
@@ -270,7 +270,7 @@ static void slot_map_init(struct context *ctx)
     }
 }
 
-static void slot_map_update(struct context *ctx)
+void slot_map_update(struct context *ctx)
 {
     int count = 0;
     struct node_info *node;
@@ -309,7 +309,7 @@ static void slot_map_update(struct context *ctx)
     }
 }
 
-static void do_update(struct context *ctx, struct job *job)
+void do_update(struct context *ctx, struct job *job)
 {
     slot_map_clear(ctx);
 

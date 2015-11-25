@@ -220,7 +220,10 @@ static int setup_notifier(struct context *ctx)
         return CORVUS_ERR;
     }
     ctx->notifier = notifier;
-    event_register(ctx->loop, notifier);
+    if (event_register(ctx->loop, notifier) == -1) {
+        LOG(ERROR, "thread quit, fail to register notifier");
+        return CORVUS_ERR;
+    }
     return CORVUS_OK;
 }
 

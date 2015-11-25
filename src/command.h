@@ -1,7 +1,7 @@
 #ifndef __COMMAND_H
 #define __COMMAND_H
 
-#include "mbuf.h"
+#include "socket.h"
 #include "parser.h"
 
 struct context;
@@ -77,7 +77,7 @@ struct command {
 
 struct redirect_info {
     uint16_t slot;
-    char *addr;
+    char addr[HOST_NAME_MAX + 8];
     int type;
 };
 
