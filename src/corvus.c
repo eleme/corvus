@@ -11,6 +11,7 @@
 #include "logging.h"
 #include "event.h"
 #include "proxy.h"
+#include "stats.h"
 
 static struct {
     uint16_t bind;
@@ -18,6 +19,9 @@ static struct {
     int thread;
     int loglevel;
     int syslog;
+    char statsd_addr[HOST_NAME_MAX + 8];
+    int metric_interval;
+    int stats;
 } config;
 
 static struct context *contexts;
@@ -29,6 +33,10 @@ static void config_init()
     config.thread = 4;
     config.loglevel = INFO;
     config.syslog = 0;
+    config.stats = 0;
+
+    memset(config.statsd_addr, 0, sizeof(config.statsd_addr));
+    config.metric_interval = 10;
 }
 
 static int config_add(char *name, char *value)
@@ -45,7 +53,12 @@ static int config_add(char *name, char *value)
         config.syslog = strtoul(value, &end, 0);
     } else if (strncmp(name, "thread", MIN(6, name_len)) == 0) {
         config.thread = strtoul(value, &end, 0);
-        if (config.thread < 0) config.thread = 4;
+        if (config.thread <= 0) config.thread = 4;
+    } else if (strncmp(name, "statsd", MIN(6, name_len)) == 0) {
+        strcpy(config.statsd_addr, value);
+    } else if (strncmp(name, "metric_interval", MIN(15, name_len)) == 0) {
+        config.metric_interval = strtoul(value, &end, 0);
+        if (config.metric_interval <= 0) config.metric_interval = 10;
     } else if (strncmp(name, "loglevel", MIN(8, name_len)) == 0) {
         if (strncmp(value, "debug", MIN(5, value_len)) == 0) {
             config.loglevel = DEBUG;
@@ -112,6 +125,9 @@ static int read_conf(const char *filename)
 static void quit()
 {
     int status, i;
+
+    if (config.stats) stats_kill();
+
     uint64_t data = 1;
     for (i = 0; i <= config.thread; i++) {
         if (!contexts[i].started) continue;
@@ -138,17 +154,27 @@ static void log_traceback()
     char **symbols;
     int size, i, j;
 
-    LOG(ERROR, "segmentation fault:");
-
     size = backtrace(stack, 64);
     symbols = backtrace_symbols(stack, size);
-    if (symbols == NULL) exit(EXIT_FAILURE);
+    if (symbols == NULL || size <= 5) {
+        LOG(ERROR, "segmentation fault");
+        exit(EXIT_FAILURE);
+    }
 
-    for (i = 0, j = 0; i < size; i++, j++) {
-        LOG(ERROR, "[%d] %s", j, symbols[i]);
+    const int msg_len = 2048;
+    char msg[(size - 5) * msg_len];
+    int n, len = 0;
+
+    for (i = 3, j = 0; i < size - 2; i++, j++) {
+        n = snprintf(msg + len, msg_len, "  [%d] %s", j, symbols[i]);
+        len += n;
+        if (i < size - 3) {
+            msg[len++] = '\n';
+        }
     }
     free(symbols);
 
+    LOG(ERROR, "segmentation fault: \n%s", msg);
     exit(EXIT_FAILURE);
 }
 
@@ -210,33 +236,14 @@ double get_time()
     return ms;
 }
 
-void get_stats(struct stats *stats)
+int get_thread_num()
 {
-    struct rusage ru;
-    memset(&ru, 0, sizeof(ru));
-    getrusage(RUSAGE_SELF, &ru);
+    return config.thread;
+}
 
-    stats->pid = getpid();
-    stats->threads = config.thread;
-
-    stats->used_cpu_sys = ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1000000.0;
-    stats->used_cpu_user = ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1000000.0;
-    stats->last_command_latency = calloc(config.thread, sizeof(double));
-
-    slot_get_addr_list(&stats->remote_nodes);
-
-    int i;
-    for (i = 0; i < config.thread; i++) {
-        stats->basic_stats.connected_clients += contexts[i].stats.connected_clients;
-        stats->basic_stats.completed_commands += contexts[i].stats.completed_commands;
-        stats->basic_stats.remote_latency += contexts[i].stats.remote_latency;
-        stats->basic_stats.total_latency += contexts[i].stats.total_latency;
-        stats->basic_stats.recv_bytes += contexts[i].stats.recv_bytes;
-        stats->basic_stats.send_bytes += contexts[i].stats.send_bytes;
-        stats->basic_stats.buffers += contexts[i].stats.buffers;
-        stats->free_buffers += contexts[i].nfree_mbufq;
-        stats->last_command_latency[i] = contexts[i].last_command_latency;
-    }
+struct context *get_contexts()
+{
+    return contexts;
 }
 
 void context_init(struct context *ctx, bool syslog, int log_level)
@@ -254,6 +261,7 @@ void context_init(struct context *ctx, bool syslog, int log_level)
     STAILQ_INIT(&ctx->free_cmdq);
     STAILQ_INIT(&ctx->free_connq);
     STAILQ_INIT(&ctx->free_redis_dataq);
+    STAILQ_INIT(&ctx->servers);
 }
 
 void context_free(struct context *ctx)
@@ -407,6 +415,16 @@ int main(int argc, const char *argv[])
     setup_signal();
 
     LOG(INFO, "serve at 0.0.0.0:%d", config.bind);
+
+    if (strlen(config.statsd_addr) > 0) {
+        if (stats_resolve_addr(config.statsd_addr) == -1) {
+            LOG(WARN, "fail to resolve statsd address");
+        } else {
+            config.stats = 1;
+        }
+    }
+
+    if (config.stats) stats_init(config.metric_interval);
 
     for (i = 0; i <= config.thread; i++) {
         if (!contexts[i].started) continue;

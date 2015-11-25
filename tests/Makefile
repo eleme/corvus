@@ -9,7 +9,7 @@ corvus_test: test.c \
 	../src/hash.c ../src/slot.c ../src/parser.c ../src/socket.c \
 	../src/logging.c ../src/mbuf.c ../src/command.c ../src/connection.c \
 	../src/proxy.c ../src/event.c ../src/client.c ../src/server.c \
-	../deps/hashmap/hash.c ../src/corvus.c
+	../deps/hashmap/hash.c ../src/corvus.c ../src/stats.c
 	@$(CC) $(CFLAGS) $^ -o $@
 
 test: corvus_test

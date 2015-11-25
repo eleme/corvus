@@ -45,6 +45,26 @@ static int verify_server(struct connection *server, struct address *addr)
     return 0;
 }
 
+static struct connection *conn_create_server(struct context *ctx, struct address *addr, char *key)
+{
+    int fd = conn_create_fd();
+    if (fd == -1) return NULL;
+    struct connection *server = server_create(ctx, fd);
+    memcpy(&server->addr, addr, sizeof(server->addr));
+
+    if (conn_connect(server) == -1) {
+        LOG(ERROR, "fail to connect %s:%d", server->addr.host, server->addr.port);
+        conn_free(server);
+        conn_buf_free(server);
+        conn_recycle(ctx, server);
+        return NULL;
+    }
+
+    hash_set(ctx->server_table, key, (void*)server);
+    STAILQ_INSERT_TAIL(&ctx->servers, server, next);
+    return server;
+}
+
 void conn_init(struct connection *conn, struct context *ctx)
 {
     conn->ctx = ctx;
@@ -52,6 +72,7 @@ void conn_init(struct connection *conn, struct context *ctx)
     conn->status = DISCONNECTED;
     conn->ready = NULL;
     conn->registered = 0;
+    conn->send_bytes = conn->recv_bytes = 0;
     memset(&conn->addr, 0, sizeof(conn->addr));
     STAILQ_INIT(&conn->cmd_queue);
     STAILQ_INIT(&conn->ready_queue);
@@ -146,7 +167,6 @@ int conn_create_fd()
 
 struct connection *conn_get_server_from_pool(struct context *ctx, struct address *addr)
 {
-    int fd;
     struct connection *server;
     char *key;
 
@@ -158,25 +178,15 @@ struct connection *conn_get_server_from_pool(struct context *ctx, struct address
         return server;
     }
 
-    fd = conn_create_fd();
-    server = server_create(ctx, fd);
-    memcpy(&server->addr, addr, sizeof(struct address));
-
-    hash_set(ctx->server_table, key, (void*)server);
-
-    if (conn_connect(server) == -1) {
-        LOG(ERROR, "fail to connect %s:%d", server->addr.host, server->addr.port);
-        conn_free(server);
-        return NULL;
-    }
+    server = conn_create_server(ctx, addr, key);
+    if (server == NULL) free(key);
     return server;
 }
 
 struct connection *conn_get_raw_server(struct context *ctx)
 {
-    int i;
-    int fd, port;
-    char *addr, *key;
+    int i, port;
+    char *addr;
     struct connection *server = NULL;
     struct address a;
 
@@ -185,27 +195,8 @@ struct connection *conn_get_raw_server(struct context *ctx)
         port = socket_parse_addr(addr, &a);
         if (port == -1) continue;
 
-        key = socket_get_key(&a);
-        server = hash_get(ctx->server_table, key);
-        if (server != NULL) {
-            free(key);
-            if (verify_server(server, &a) == -1) return NULL;
-            break;
-        }
-
-        fd = conn_create_fd();
-        if (fd == -1) {
-            free(key);
-            continue;
-        }
-        server = server_create(ctx, fd);
-        memcpy(&server->addr, &a, sizeof(a));
-        if (conn_connect(server) == -1) {
-            free(key);
-            conn_free(server);
-            continue;
-        };
-        hash_set(ctx->server_table, key, (void*)server);
+        server = conn_get_server_from_pool(ctx, &a);
+        if (server == NULL) continue;
         break;
     }
     if (i >= ctx->node_conf->len) {

@@ -1,5 +1,5 @@
-#ifndef __MAIN_H
-#define __MAIN_H
+#ifndef __CORVUS_H
+#define __CORVUS_H
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,10 +24,6 @@
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
 
 #define ARRAY_CHUNK_SIZE 1024
-
-#ifndef HOST_NAME_MAX
-#define HOST_NAME_MAX 255
-#endif
 
 enum thread_role {
     THREAD_UNKNOWN,
@@ -62,7 +58,7 @@ struct stats {
     double *last_command_latency;
     char *remote_nodes;
 
-    struct basic_stats basic_stats;
+    struct basic_stats basic;
 
     long long free_buffers;
 };
@@ -91,6 +87,8 @@ struct context {
 
     /* connection pool */
     hash_t *server_table;
+
+    struct conn_tqh servers;
     struct node_conf *node_conf;
 
     /* event */
@@ -109,6 +107,7 @@ struct context {
 };
 
 double get_time();
-void get_stats(struct stats *stats);
+int get_thread_num();
+struct context *get_contexts();
 
-#endif /* end of include guard: __MAIN_H */
+#endif /* end of include guard: __CORVUS_H */

@@ -31,6 +31,9 @@ struct connection {
     struct mhdr data;
     struct iov_data iov;
 
+    long long send_bytes;
+    long long recv_bytes;
+
     int status;
     void (*ready)(struct connection *self, uint32_t mask);
 };

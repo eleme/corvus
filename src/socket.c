@@ -1,12 +1,11 @@
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <sys/uio.h>
-#include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
 
@@ -90,7 +89,7 @@ static int _connect(int fd, const struct sockaddr *addr, socklen_t addrlen)
     return CORVUS_OK;
 }
 
-static int _getaddrinfo(const char *addr, int port, struct addrinfo **servinfo)
+static int _getaddrinfo(const char *addr, int port, struct addrinfo **servinfo, int socktype)
 {
     int err;
     char _port[6];
@@ -99,7 +98,7 @@ static int _getaddrinfo(const char *addr, int port, struct addrinfo **servinfo)
     snprintf(_port, 6, "%d", port);
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_socktype = socktype;
 
     if ((err = getaddrinfo(addr, _port, &hints, servinfo)) != 0) {
         LOG(ERROR, "getaddrinfo: %s", gai_strerror(err));
@@ -143,7 +142,7 @@ int socket_create_server(char *bindaddr, int port)
     int s = -1;
     struct addrinfo *p, *servinfo;
 
-    if (_getaddrinfo(bindaddr, port, &servinfo) == CORVUS_ERR) {
+    if (_getaddrinfo(bindaddr, port, &servinfo, SOCK_STREAM) == CORVUS_ERR) {
         return CORVUS_ERR;
     }
 
@@ -196,6 +195,15 @@ int socket_create_stream()
     return s;
 }
 
+int socket_create_udp_client()
+{
+    int s;
+    if ((s = _socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
+        return -1;
+    }
+    return s;
+}
+
 int socket_accept(int fd, char *ip, size_t ip_len, int *port)
 {
     int s;
@@ -222,7 +230,7 @@ int socket_connect(int fd, char *addr, int port)
     int retval = 0;
     struct addrinfo *p, *addrs;
 
-    if (_getaddrinfo(addr, port, &addrs) == CORVUS_ERR) {
+    if (_getaddrinfo(addr, port, &addrs, SOCK_STREAM) == CORVUS_ERR) {
         return CORVUS_ERR;
     }
 
@@ -276,6 +284,18 @@ int socket_write(int fd, struct iovec *iov, int invcnt)
         return n;
     }
     return CORVUS_ERR;
+}
+
+int socket_get_sockaddr(char *addr, int port, struct sockaddr_in *dest, int socktype)
+{
+    struct addrinfo *addrs;
+    if (_getaddrinfo(addr, port, &addrs, socktype) == CORVUS_ERR) {
+        return CORVUS_ERR;
+    }
+    if (addrs == NULL) return CORVUS_ERR;
+    memcpy(dest, addrs->ai_addr, addrs->ai_addrlen);
+    freeaddrinfo(addrs);
+    return CORVUS_OK;
 }
 
 void socket_get_addr(char *host, int host_len, int port, struct address *addr)

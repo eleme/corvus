@@ -16,6 +16,7 @@ SRC = client.c               \
 	  server.c               \
 	  slot.c                 \
 	  socket.c               \
+	  stats.c                \
 
 OBJ = $(SRC:%.c=$(BUILD)/%.o)
 

@@ -13,6 +13,7 @@
 #include "event.h"
 #include "server.h"
 #include "client.h"
+#include "stats.h"
 
 #if (IOV_MAX > 128)
 #define CORVUS_IOV_MAX 128
@@ -311,12 +312,12 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             "remotes:%s\r\n",
             VERSION, stats->pid, stats->threads,
             stats->used_cpu_sys, stats->used_cpu_user,
-            stats->basic_stats.connected_clients,
-            stats->basic_stats.completed_commands,
-            stats->basic_stats.recv_bytes, stats->basic_stats.send_bytes,
-            stats->basic_stats.remote_latency,
-            stats->basic_stats.total_latency, latency,
-            stats->basic_stats.buffers,
+            stats->basic.connected_clients,
+            stats->basic.completed_commands,
+            stats->basic.recv_bytes, stats->basic.send_bytes,
+            stats->basic.remote_latency,
+            stats->basic.total_latency, latency,
+            stats->basic.buffers,
             stats->free_buffers,
             stats->remote_nodes);
 }
@@ -505,7 +506,7 @@ static void cmd_proxy_info(struct command *cmd)
     int i, n = 0, size = 0;
     struct stats stats;
     memset(&stats, 0, sizeof(stats));
-    get_stats(&stats);
+    stats_get(&stats);
 
     char latency[16 * stats.threads];
     memset(latency, 0, sizeof(latency));
@@ -830,6 +831,7 @@ int cmd_read_reply(struct command *cmd, struct connection *server)
         if (n == CORVUS_AGAIN) return CORVUS_AGAIN;
 
         cmd->ctx->stats.recv_bytes += n;
+        server->recv_bytes += n;
 
         if (cmd_parse_rep(cmd, buf) == -1) {
             return CORVUS_ERR;

@@ -256,11 +256,13 @@ static void slot_map_init(struct context *ctx)
         count = do_update_slot_map(&server);
         if (count < REDIS_CLUSTER_SLOTS) {
             conn_free(&server);
+            conn_buf_free(&server);
             continue;
         }
         break;
     }
     conn_free(&server);
+    conn_buf_free(&server);
     if (count == CORVUS_ERR) {
         LOG(WARN, "can not init slot map");
     } else {
@@ -290,6 +292,7 @@ static void slot_map_update(struct context *ctx)
         count = do_update_slot_map(&server);
         if (count < REDIS_CLUSTER_SLOTS) {
             conn_free(&server);
+            conn_buf_free(&server);
             continue;
         }
         break;
@@ -297,6 +300,7 @@ static void slot_map_update(struct context *ctx)
 
     node_list_free();
     conn_free(&server);
+    conn_buf_free(&server);
 
     if (count == CORVUS_ERR) {
         LOG(WARN, "can not update slot map");

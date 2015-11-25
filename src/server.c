@@ -74,6 +74,8 @@ static int server_write(struct connection *server)
     if (status == CORVUS_ERR) return CORVUS_ERR;
     if (status == CORVUS_AGAIN) return CORVUS_OK;
 
+    server->send_bytes += status;
+
     if (server->iov.len <= 0) {
         cmd_iov_free(&server->iov);
     }

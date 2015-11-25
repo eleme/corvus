@@ -1,8 +1,6 @@
 #ifndef __COMMAND_H
 #define __COMMAND_H
 
-#define ARRAY_CHUNK_SIZE 1024
-
 #include "mbuf.h"
 #include "parser.h"
 
