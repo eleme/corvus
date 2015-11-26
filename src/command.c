@@ -189,7 +189,6 @@ static const char *rep_get = "*2\r\n$3\r\nGET\r\n";
 static const char *rep_set = "*3\r\n$3\r\nSET\r\n";
 static const char *rep_del = "*2\r\n$3\r\nDEL\r\n";
 static const char *rep_ok = "+OK\r\n";
-static const char *rep_one = ":1\r\n";
 static const char *rep_zero = ":0\r\n";
 static const char *rep_ping = "+PONG\r\n";
 
@@ -638,15 +637,17 @@ void cmd_gen_mset_iovec(struct command *cmd, struct iov_data *iov)
 void cmd_gen_del_iovec(struct command *cmd, struct iov_data *iov)
 {
     struct command *c;
-    int one = 0, fail = 0;
+    const char *fmt = ":%ld\r\n";
+    char *buf;
+    int n = 0;
+    int count = 0, fail = 0;
     STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
         if (c->cmd_fail || c->rep_data->type == REP_ERROR) {
             fail = 1;
             break;
         }
         if (c->rep_data->integer == 1) {
-            one = 1;
-            break;
+            count++;
         }
     }
 
@@ -654,8 +655,12 @@ void cmd_gen_del_iovec(struct command *cmd, struct iov_data *iov)
         cmd_iov_add(iov, (void*)rep_err, strlen(rep_err));
         return;
     }
-    if (one) {
-        cmd_iov_add(iov, (void*)rep_one, 4);
+    if (count) {
+        n = snprintf(NULL, 0, fmt, count);
+        buf = malloc(sizeof(char) * (n + 1));
+        memset(buf, '\0', n + 1);
+        snprintf(buf, n + 1, fmt, count);
+        cmd_iov_add(iov, buf, n);
         return;
     }
     cmd_iov_add(iov, (void*)rep_zero, 4);
