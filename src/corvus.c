@@ -1,9 +1,10 @@
+#include <sys/eventfd.h>
+#include <sys/resource.h>
+#include <sys/time.h>
 #include <errno.h>
 #include <signal.h>
 #include <pthread.h>
 #include <unistd.h>
-#include <sys/eventfd.h>
-#include <sys/resource.h>
 #include <execinfo.h>
 #include "corvus.h"
 #include "mbuf.h"
@@ -229,13 +230,12 @@ static int setup_notifier(struct context *ctx)
 
 double get_time()
 {
-    double ms = 0;
-    struct timespec spec;
-    memset(&spec, 0, sizeof(struct timespec));
+    struct timeval tv;
+    double ms;
 
-    clock_gettime(CLOCK_REALTIME, &spec);
-    ms = spec.tv_sec * 1000;
-    ms += spec.tv_nsec / 1.0e6;
+    gettimeofday(&tv, NULL);
+    ms = tv.tv_sec * 1000;
+    ms += tv.tv_usec / 1000.0;
     return ms;
 }
 

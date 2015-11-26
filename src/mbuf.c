@@ -19,7 +19,6 @@ static struct mbuf *_mbuf_get(struct context *ctx)
         }
 
         mbuf = (struct mbuf *)(buf + ctx->mbuf_offset);
-        mbuf->magic = MBUF_MAGIC;
     }
     return mbuf;
 }

@@ -1,7 +1,8 @@
 BUILD=../build
 OPTIMIZATION?=-O2
-CFLAGS=-Wall $(OPTIMIZATION) -g -ggdb -std=c99 -D_GNU_SOURCE -I../deps
-LDFLAGS=-pthread -rdynamic
+PROFILE?=
+CFLAGS=-Wall $(OPTIMIZATION) $(PROFILE) -g -ggdb -std=c99 -D_GNU_SOURCE -I../deps
+LDFLAGS=-pthread -rdynamic $(PROFILE)
 
 SRC = client.c               \
 	  command.c              \
@@ -31,3 +32,6 @@ $(OBJ): $(BUILD)/%.o: %.c
 
 debug:
 	$(MAKE) OPTIMIZATION="-O0"
+
+profile:
+	$(MAKE) OPTIMIZATION="-O0" PROFILE="-pg"

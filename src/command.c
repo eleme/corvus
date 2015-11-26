@@ -322,11 +322,8 @@ static int cmd_apply_range(struct command *cmd, int type)
 
 void cmd_add_fragment(struct command *cmd, struct pos_array *data)
 {
-    const char *fmt = "$%ld\r\n";
-    int n = snprintf(NULL, 0, fmt, data->str_len);
-    char buf[n + 1];
-    snprintf(buf, sizeof(buf), fmt, data->str_len);
-
+    char buf[32];
+    int n = snprintf(buf, sizeof(buf), "$%d\r\n", data->str_len);
     mbuf_queue_copy(cmd->ctx, &cmd->buf_queue, (uint8_t*)buf, n);
 
     int i;
@@ -626,18 +623,7 @@ void cmd_gen_mset_iovec(struct command *cmd, struct iov_data *iov)
     int fail = 0;
     STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
         rep = c->rep_data;
-        if (c->cmd_fail || rep->type == REP_ERROR || (c->server != NULL
-                    && STAILQ_EMPTY(&c->server->data)))
-        {
-            fail = 1;
-            break;
-        }
-
-        if (rep->pos == NULL) {
-            fail = 1;
-            break;
-        }
-        if (pos_array_compare(rep->pos, "OK", 2) != 0) {
+        if (c->cmd_fail || rep->type == REP_ERROR) {
             fail = 1;
             break;
         }
@@ -960,7 +946,7 @@ void cmd_stats(struct command *cmd)
     struct context *ctx = cmd->ctx;
     struct command *c;
     STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
-        ctx->stats.completed_commands += 1;
+        ctx->stats.completed_commands++;
         ctx->stats.remote_latency += c->rep_time[1] - c->rep_time[0];
         ctx->stats.total_latency += cmd->req_time[1] - c->req_time[0];
         if (STAILQ_NEXT(c, sub_cmd_next) == NULL) {

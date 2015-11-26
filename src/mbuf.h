@@ -6,6 +6,8 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+#define MBUF_SIZE 16384
+
 #ifndef STAILQ_LAST
 #define STAILQ_LAST(head, type, field)                       \
     (STAILQ_EMPTY((head))                                    \
@@ -17,19 +19,15 @@
 struct context;
 
 struct mbuf {
-    uint32_t           magic;   /* mbuf magic (const) */
-    STAILQ_ENTRY(mbuf) next;    /* next mbuf */
-    uint8_t            *pos;    /* read marker */
-    uint8_t            *last;   /* write marker */
-    uint8_t            *start;  /* start of buffer (const) */
-    uint8_t            *end;    /* end of buffer (const) */
-    int                refcount;
+    STAILQ_ENTRY(mbuf) next;
+    uint8_t *pos;
+    uint8_t *last;
+    uint8_t *start;
+    uint8_t *end;
+    int refcount;
 };
 
 STAILQ_HEAD(mhdr, mbuf);
-
-#define MBUF_MAGIC      0xdeadbeef
-#define MBUF_SIZE       16384
 
 static inline bool mbuf_empty(struct mbuf *mbuf)
 {

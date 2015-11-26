@@ -36,6 +36,8 @@ void server_free_buf(struct command *cmd)
 void server_make_iov(struct connection *server)
 {
     struct command *cmd;
+    double t = get_time();
+
     while (!STAILQ_EMPTY(&server->ready_queue)) {
         cmd = STAILQ_FIRST(&server->ready_queue);
         STAILQ_REMOVE_HEAD(&server->ready_queue, ready_next);
@@ -49,7 +51,7 @@ void server_make_iov(struct connection *server)
         if (cmd->asking) {
             cmd_iov_add(&server->iov, (void*)req_ask, strlen(req_ask));
         }
-        cmd->rep_time[0] = get_time();
+        cmd->rep_time[0] = t;
 
         cmd_create_iovec(&cmd->req_buf[0], &cmd->req_buf[1], &server->iov);
 
