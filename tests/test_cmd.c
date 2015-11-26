@@ -22,10 +22,12 @@ TEST(test_parse_redirect) {
     struct redis_data data = {.type = REP_ERROR, .pos = &pos};
     struct command cmd = {.rep_data = &data};
 
-    struct redirect_info info = {.addr = NULL, .type = CMD_ERR, .slot = -1};
+    struct redirect_info info;
+    info.type = CMD_ERR;
+    info.slot = -1;
+
     cmd_parse_redirect(&cmd, &info);
     ASSERT(strncmp(info.addr, "127.0.0.1:8001", 14) == 0);
-    free(info.addr);
     ASSERT(info.slot == 866);
     ASSERT(info.type == CMD_ERR_MOVED);
     PASS(NULL);
