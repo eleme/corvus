@@ -37,7 +37,7 @@ do {                                               \
     /* keys command */               \
     HANDLER(DEL, COMPLEX)            \
     HANDLER(DUMP, BASIC)             \
-    HANDLER(EXISTS, BASIC)           \
+    HANDLER(EXISTS, COMPLEX)         \
     HANDLER(EXPIRE, BASIC)           \
     HANDLER(EXPIREAT, BASIC)         \
     HANDLER(KEYS, UNIMPL)            \
@@ -188,6 +188,7 @@ static const char *rep_err = "-ERR server error\r\n";
 static const char *rep_get = "*2\r\n$3\r\nGET\r\n";
 static const char *rep_set = "*3\r\n$3\r\nSET\r\n";
 static const char *rep_del = "*2\r\n$3\r\nDEL\r\n";
+static const char *rep_exists = "*2\r\n$6\r\nEXISTS\r\n";
 static const char *rep_ok = "+OK\r\n";
 static const char *rep_zero = ":0\r\n";
 static const char *rep_ping = "+PONG\r\n";
@@ -373,7 +374,7 @@ int cmd_forward_basic(struct command *cmd)
     return CORVUS_OK;
 }
 
-/* mget, del */
+/* mget, del exists */
 int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len)
 {
     struct redis_data *key;
@@ -476,6 +477,10 @@ int cmd_forward_complex(struct command *cmd)
             break;
         case CMD_DEL:
             if (cmd_forward_multikey(cmd, (uint8_t*)rep_del, 13) == -1)
+                return -1;
+            break;
+        case CMD_EXISTS:
+            if (cmd_forward_multikey(cmd, (uint8_t*)rep_exists, 16) == -1)
                 return -1;
             break;
         case CMD_EVAL:
@@ -634,7 +639,7 @@ void cmd_gen_mset_iovec(struct command *cmd, struct iov_data *iov)
     cmd_iov_add(iov, (void*)rep_ok, strlen(rep_ok));
 }
 
-void cmd_gen_del_iovec(struct command *cmd, struct iov_data *iov)
+void cmd_gen_multikey_iovec(struct command *cmd, struct iov_data *iov)
 {
     struct command *c;
     const char *fmt = ":%ld\r\n";
@@ -658,7 +663,6 @@ void cmd_gen_del_iovec(struct command *cmd, struct iov_data *iov)
     if (count) {
         n = snprintf(NULL, 0, fmt, count);
         buf = malloc(sizeof(char) * (n + 1));
-        memset(buf, '\0', n + 1);
         snprintf(buf, n + 1, fmt, count);
         cmd_iov_add(iov, buf, n);
         iov->ptr = buf;
@@ -905,7 +909,8 @@ void cmd_make_iovec(struct command *cmd, struct iov_data *iov)
                 cmd_gen_mset_iovec(c, iov);
                 break;
             case CMD_DEL:
-                cmd_gen_del_iovec(c, iov);
+            case CMD_EXISTS:
+                cmd_gen_multikey_iovec(c, iov);
                 break;
             default:
                 cmd_create_iovec(&c->rep_buf[0], &c->rep_buf[1], iov);
