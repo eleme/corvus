@@ -385,11 +385,13 @@ void *slot_map_updater(void *data)
 
 uint16_t slot_get(struct pos_array *pos)
 {
-    uint32_t s, len, orig_len = 0;
-    uint8_t *str, *orig_str = NULL;
+    uint32_t s, len;
+    uint8_t *str;
     uint16_t hash;
     int h, found = 0, found_s = 0, pos_len = pos->pos_len;
-    struct pos *changed_pos = NULL, *start = pos->items, *items = pos->items, *end, *p;
+    int tag_start = -1, tag_end = -1;
+    struct pos start_pos, end_pos;
+    struct pos *p, *end = NULL, *start = pos->items, *items = pos->items;
 
     for (h = 0; h < pos->pos_len; h++) {
         p = &pos->items[h];
@@ -398,8 +400,12 @@ uint16_t slot_get(struct pos_array *pos)
 
         for (s = 0; s < len; s++) {
             if (str[s] == '}' && found_s) {
+                tag_end = h;
+                memcpy(&end_pos, p, sizeof(end_pos));
+
                 p->len -= len - s;
                 found = 1;
+                end = p;
                 break;
             }
 
@@ -411,9 +417,10 @@ uint16_t slot_get(struct pos_array *pos)
                     found_s = 1;
                 } else {
                     start = p;
-                    changed_pos = p;
-                    orig_len = p->len;
-                    orig_str = p->str;
+
+                    tag_start = h;
+                    memcpy(&start_pos, p, sizeof(start_pos));
+
                     p->str += s + 1;
                     p->len -= s + 1;
                     if (p->str[0] == '}') goto end;
@@ -425,19 +432,30 @@ uint16_t slot_get(struct pos_array *pos)
     }
 end:
     if (found) {
-        end = &pos->items[pos_len - 1];
         pos->items = start;
         pos->pos_len = end - start + 1;
-        hash = crc16(pos) & 0x3FFF;
+    } else if (tag_start != -1) {
+        memcpy(&pos->items[tag_start], &start_pos, sizeof(start_pos));
+        tag_start = -1;
+    }
+
+    hash = crc16(pos) & 0x3FFF;
+
+    if (found) {
         pos->items = items;
         pos->pos_len = pos_len;
-        return hash;
+
+        if (tag_end == tag_start) tag_end = -1;
+        if (tag_end != -1) {
+            memcpy(&pos->items[tag_end], &end_pos, sizeof(end_pos));
+            tag_end = -1;
+        }
+        if (tag_start != -1) {
+            memcpy(&pos->items[tag_start], &start_pos, sizeof(start_pos));
+            tag_start = -1;
+        }
     }
-    if (changed_pos != NULL) {
-        changed_pos->len = orig_len;
-        changed_pos->str = orig_str;
-    }
-    return crc16(pos) & 0x3FFF;
+    return hash;
 }
 
 int slot_get_node_addr(uint16_t slot, struct address *addr)
