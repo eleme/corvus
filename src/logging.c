@@ -47,7 +47,7 @@ void logger(const char *file, int line, int level, const char *fmt, ...)
         int n = strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S,",
                         localtime(&now.tv_sec));
         snprintf(timestamp + n, sizeof(timestamp) - n, "%03d", (int)now.tv_usec/1000);
-        printf("%s %s [%d]: %s (%s:%d)\n", timestamp, LEVEL_MAP[level],
+        fprintf(stderr, "%s %s [%d]: %s (%s:%d)\n", timestamp, LEVEL_MAP[level],
                 (int)pid, msg, file, line);
     }
 }
