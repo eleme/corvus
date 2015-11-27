@@ -661,6 +661,7 @@ void cmd_gen_del_iovec(struct command *cmd, struct iov_data *iov)
         memset(buf, '\0', n + 1);
         snprintf(buf, n + 1, fmt, count);
         cmd_iov_add(iov, buf, n);
+        iov->ptr = buf;
         return;
     }
     cmd_iov_add(iov, (void*)rep_zero, 4);
