@@ -16,7 +16,6 @@ TEST(test_slot_get1) {
     };
     struct pos_array arr = {.str_len = 12, .items = p, .pos_len = 2};
     uint16_t slot = slot_get(&arr);
-    LOG(ERROR, "%d", slot);
 
     ASSERT(slot == 11694);
     ASSERT(strncmp((char*)p[0].str, "world{", 6) == 0);
@@ -29,17 +28,16 @@ TEST(test_slot_get1) {
 
 TEST(test_slot_get2) {
     struct pos p[] = {
-        {.len = 6, .str = (uint8_t*)"wo{rld}"},
+        {.len = 7, .str = (uint8_t*)"wo{rld}"},
         {.len = 6, .str = (uint8_t*)"hiello"}
     };
     struct pos_array arr = {.str_len = 12, .items = p, .pos_len = 2};
     uint16_t slot = slot_get(&arr);
-    LOG(ERROR, "%d", slot);
 
-    ASSERT(slot == 13668);
-    ASSERT(strncmp((char*)p[0].str, "wo{rld}", 6) == 0);
+    ASSERT(slot == 5133);
+    ASSERT(strncmp((char*)p[0].str, "wo{rld}", 7) == 0);
     ASSERT(strncmp((char*)p[1].str, "hiello", 6) == 0);
-    ASSERT(p[0].len == 6);
+    ASSERT(p[0].len == 7);
     ASSERT(p[1].len == 6);
 
     PASS(NULL);
