@@ -60,6 +60,7 @@ do {                                               \
     /* strings command */            \
     HANDLER(APPEND, BASIC)           \
     HANDLER(BITCOUNT, BASIC)         \
+    HANDLER(BITOP, UNIMPL)           \
     HANDLER(BITPOS, BASIC)           \
     HANDLER(DECR, BASIC)             \
     HANDLER(DECRBY, BASIC)           \

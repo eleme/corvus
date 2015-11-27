@@ -62,6 +62,7 @@ the keys all belong to the same node.
 - `MGET`: split to multiple `GET`
 - `MSET`: split to multiple `SET`
 - `DEL`: split to multiple single key `DEL`
+- `EXISTS`: split to multiple single key `EXISTS`
 - `PING`: not forward to redis server
 - `INFO`: not forward to redis server, return information collected in proxy
 
@@ -74,6 +75,12 @@ the keys all belong to the same node.
 #### All keys should belong to the same node
 
 ```
+# key
+SORT(with STORE)
+
+# list
+RPOPLPUSH
+
 # set
 SDIFF SDIFFSTORE SINTER SINTERSTORE SMOVE SUNION SUNIONSTORE
 
@@ -90,7 +97,7 @@ PFCOUNT PFMERGE
 KEYS MIGRATE MOVE OBJECT RANDOMKEY RENAME RENAMENX SCAN WAIT
 
 # string
-MSETNX
+BITOP MSETNX
 
 # list
 BLPOP BRPOP BRPOPLPUSH
