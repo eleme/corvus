@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-import random
 import inspect
 import redis
 
@@ -31,8 +30,8 @@ class Redis(redis.Redis):
         return self.execute_command('EXISTS', *names)
 
 
-#r = Redis(port=12345)
-r = Redis(port=6379)
+r = Redis(port=12345)
+#r = Redis(port=6379)
 
 
 
@@ -1736,7 +1735,7 @@ def test_scard():
     assert r.scard("myset") == 2
 
 
-@delete_keys("key1", "key2")
+@delete_keys("{tag}key1", "{tag}key2")
 def test_sdiff():
     """ SDIFF key [key ...]
             Available since 1.0.0.
@@ -1760,16 +1759,16 @@ def test_sdiff():
     2) "b"
     redis>
     """
-    assert r.sadd("key1", "a") == 1
-    assert r.sadd("key1", "b") == 1
-    assert r.sadd("key1", "c") == 1
-    assert r.sadd("key2", "c") == 1
-    assert r.sadd("key2", "d") == 1
-    assert r.sadd("key2", "e") == 1
-    assert r.sdiff("key1", "key2") == {"a", "b"}
+    assert r.sadd("{tag}key1", "a") == 1
+    assert r.sadd("{tag}key1", "b") == 1
+    assert r.sadd("{tag}key1", "c") == 1
+    assert r.sadd("{tag}key2", "c") == 1
+    assert r.sadd("{tag}key2", "d") == 1
+    assert r.sadd("{tag}key2", "e") == 1
+    assert r.sdiff("{tag}key1", "{tag}key2") == {"a", "b"}
 
 
-@delete_keys("key1", "key2", "key")
+@delete_keys("{tag}key1", "{tag}key2", "{tag}key")
 def test_sdiffstore():
     """ SDIFFSTORE destination key [key ...]
             Available since 1.0.0.
@@ -1795,17 +1794,17 @@ def test_sdiffstore():
     2) "b"
     redis>
     """
-    assert r.sadd("key1", "a") == 1
-    assert r.sadd("key1", "b") == 1
-    assert r.sadd("key1", "c") == 1
-    assert r.sadd("key2", "c") == 1
-    assert r.sadd("key2", "d") == 1
-    assert r.sadd("key2", "e") == 1
-    assert r.sdiffstore("key", "key1", "key2") == 2
-    assert r.smembers("key") == {"a", "b"}
+    assert r.sadd("{tag}key1", "a") == 1
+    assert r.sadd("{tag}key1", "b") == 1
+    assert r.sadd("{tag}key1", "c") == 1
+    assert r.sadd("{tag}key2", "c") == 1
+    assert r.sadd("{tag}key2", "d") == 1
+    assert r.sadd("{tag}key2", "e") == 1
+    assert r.sdiffstore("{tag}key", "{tag}key1", "{tag}key2") == 2
+    assert r.smembers("{tag}key") == {"a", "b"}
 
 
-@delete_keys("key1", "key2")
+@delete_keys("{tag}key1", "{tag}key2")
 def test_sinter():
     """ SINTER key [key ...]
             Available since 1.0.0.
@@ -1828,16 +1827,16 @@ def test_sinter():
     1) "c"
     redis>
     """
-    assert r.sadd("key1", "a") == 1
-    assert r.sadd("key1", "b") == 1
-    assert r.sadd("key1", "c") == 1
-    assert r.sadd("key2", "c") == 1
-    assert r.sadd("key2", "d") == 1
-    assert r.sadd("key2", "e") == 1
-    assert r.sinter("key1", "key2") == {"c"}
+    assert r.sadd("{tag}key1", "a") == 1
+    assert r.sadd("{tag}key1", "b") == 1
+    assert r.sadd("{tag}key1", "c") == 1
+    assert r.sadd("{tag}key2", "c") == 1
+    assert r.sadd("{tag}key2", "d") == 1
+    assert r.sadd("{tag}key2", "e") == 1
+    assert r.sinter("{tag}key1", "{tag}key2") == {"c"}
 
 
-@delete_keys("key1", "key2")
+@delete_keys("{tag}key1", "{tag}key2")
 def test_sinterstore():
     """ SINTERSTORE destination key [key ...]
             Available since 1.0.0.
@@ -1862,14 +1861,14 @@ def test_sinterstore():
     1) "c"
     redis>
     """
-    assert r.sadd("key1", "a") == 1
-    assert r.sadd("key1", "b") == 1
-    assert r.sadd("key1", "c") == 1
-    assert r.sadd("key2", "c") == 1
-    assert r.sadd("key2", "d") == 1
-    assert r.sadd("key2", "e") == 1
-    assert r.sinterstore("key", "key1", "key2") == 1
-    assert r.smembers("key") == {"c"}
+    assert r.sadd("{tag}key1", "a") == 1
+    assert r.sadd("{tag}key1", "b") == 1
+    assert r.sadd("{tag}key1", "c") == 1
+    assert r.sadd("{tag}key2", "c") == 1
+    assert r.sadd("{tag}key2", "d") == 1
+    assert r.sadd("{tag}key2", "e") == 1
+    assert r.sinterstore("{tag}key", "{tag}key1", "{tag}key2") == 1
+    assert r.smembers("{tag}key") == {"c"}
 
 
 @delete_keys("myset")
@@ -1911,7 +1910,7 @@ def test_smembers():
     assert r.smembers("myset") == {"World", "Hello"}
 
 
-@delete_keys("myset", "myotherset")
+@delete_keys("{tag}myset", "{tag}myotherset")
 def test_smove():
     """ SMOVE source destination member
             Available since 1.0.0.
@@ -1932,12 +1931,12 @@ def test_smove():
     2) "two"
     redis>
     """
-    assert r.sadd("myset", "one") == 1
-    assert r.sadd("myset", "two") == 1
-    assert r.sadd("myotherset", "three") == 1
-    assert r.smove("myset", "myotherset", "two") == 1
-    assert r.smembers("myset") == {"one"}
-    assert r.smembers("myotherset") == {"three", "two"}
+    assert r.sadd("{tag}myset", "one") == 1
+    assert r.sadd("{tag}myset", "two") == 1
+    assert r.sadd("{tag}myotherset", "three") == 1
+    assert r.smove("{tag}myset", "{tag}myotherset", "two") == 1
+    assert r.smembers("{tag}myset") == {"one"}
+    assert r.smembers("{tag}myotherset") == {"three", "two"}
 
 
 @delete_keys("myset")
@@ -2040,7 +2039,7 @@ def test_srem():
     assert r.smembers("myset") == {"three", "two"}
 
 
-@delete_keys("key1", "key2")
+@delete_keys("{tag}key1", "{tag}key2")
 def test_sunion():
     """ SUNION key [key ...]
             Available since 1.0.0.
@@ -2067,16 +2066,16 @@ def test_sunion():
     5) "e"
     redis>
     """
-    assert r.sadd("key1", "a") == 1
-    assert r.sadd("key1", "b") == 1
-    assert r.sadd("key1", "c") == 1
-    assert r.sadd("key2", "c") == 1
-    assert r.sadd("key2", "d") == 1
-    assert r.sadd("key2", "e") == 1
-    assert r.sunion("key1", "key2") == {"a", "b", "c", "d", "e"}
+    assert r.sadd("{tag}key1", "a") == 1
+    assert r.sadd("{tag}key1", "b") == 1
+    assert r.sadd("{tag}key1", "c") == 1
+    assert r.sadd("{tag}key2", "c") == 1
+    assert r.sadd("{tag}key2", "d") == 1
+    assert r.sadd("{tag}key2", "e") == 1
+    assert r.sunion("{tag}key1", "{tag}key2") == {"a", "b", "c", "d", "e"}
 
 
-@delete_keys("key1", "key2", "key")
+@delete_keys("{tag}key1", "{tag}key2", "{tag}key")
 def test_sunionstore():
     """ SUNIONSTORE destination key [key ...]
             Available since 1.0.0.
@@ -2105,14 +2104,14 @@ def test_sunionstore():
     5) "e"
     redis>
     """
-    assert r.sadd("key1", "a") == 1
-    assert r.sadd("key1", "b") == 1
-    assert r.sadd("key1", "c") == 1
-    assert r.sadd("key2", "c") == 1
-    assert r.sadd("key2", "d") == 1
-    assert r.sadd("key2", "e") == 1
-    assert r.sunionstore("key", "key1", "key2") == 5
-    assert r.smembers("key") == {"a", "b", "c", "d", "e"}
+    assert r.sadd("{tag}key1", "a") == 1
+    assert r.sadd("{tag}key1", "b") == 1
+    assert r.sadd("{tag}key1", "c") == 1
+    assert r.sadd("{tag}key2", "c") == 1
+    assert r.sadd("{tag}key2", "d") == 1
+    assert r.sadd("{tag}key2", "e") == 1
+    assert r.sunionstore("{tag}key", "{tag}key1", "{tag}key2") == 5
+    assert r.smembers("{tag}key") == {"a", "b", "c", "d", "e"}
 
 
 @delete_keys("myset")
@@ -2245,7 +2244,7 @@ def test_zincrby():
     assert r.zrange("myzset", 0, -1, withscores=True) == [("two", 2), ("one", 3)]
 
 
-@delete_keys("zset1", "zset2", "out")
+@delete_keys("{tag}zset1", "{tag}zset2", "{tag}out")
 def test_zinterstore():
     """ ZINTERSTORE destination numkeys key [key ...]
         [WEIGHTS weight [weight ...]] [AGGREGATE SUM|MIN|MAX]
@@ -2273,13 +2272,13 @@ def test_zinterstore():
     4) "10"
     redis>
     """
-    assert r.zadd("zset1", "one", 1) == 1
-    assert r.zadd("zset1", "two", 2) == 1
-    assert r.zadd("zset2", "one", 1) == 1
-    assert r.zadd("zset2", "two", 2) == 1
-    assert r.zadd("zset2", "three", 3) == 1
-    assert r.zinterstore("out", {"zset1": 2, "zset2": 3}) == 2
-    assert r.zrange("out", 0, -1, withscores=True) == [("one", 5), ("two", 10)]
+    assert r.zadd("{tag}zset1", "one", 1) == 1
+    assert r.zadd("{tag}zset1", "two", 2) == 1
+    assert r.zadd("{tag}zset2", "one", 1) == 1
+    assert r.zadd("{tag}zset2", "two", 2) == 1
+    assert r.zadd("{tag}zset2", "three", 3) == 1
+    assert r.zinterstore("{tag}out", {"{tag}zset1": 2, "{tag}zset2": 3}) == 2
+    assert r.zrange("{tag}out", 0, -1, withscores=True) == [("one", 5), ("two", 10)]
 
 
 @delete_keys("myzset")
@@ -2708,7 +2707,7 @@ def test_zscore():
     assert r.zscore("myzset", "one") == 1
 
 
-@delete_keys("zset1", "zset2", "out")
+@delete_keys("{tag}zset1", "{tag}zset2", "{tag}out")
 def test_zunionstore():
     """ ZUNIONSTORE destination numkeys key [key ...]
         [WEIGHTS weight [weight ...]] [AGGREGATE SUM|MIN|MAX]
@@ -2738,13 +2737,13 @@ def test_zunionstore():
     6) "10"
     redis>
     """
-    assert r.zadd("zset1", "one", 1) == 1
-    assert r.zadd("zset1", "two", 2) == 1
-    assert r.zadd("zset2", "one", 1) == 1
-    assert r.zadd("zset2", "two", 2) == 1
-    assert r.zadd("zset2", "three", 3) == 1
-    assert r.zunionstore("out", {"zset1": 2, "zset2": 3}) == 3
-    assert r.zrange("out", 0, -1, withscores=True) == [("one", 5), ("three", 9), ("two", 10)]
+    assert r.zadd("{tag}zset1", "one", 1) == 1
+    assert r.zadd("{tag}zset1", "two", 2) == 1
+    assert r.zadd("{tag}zset2", "one", 1) == 1
+    assert r.zadd("{tag}zset2", "two", 2) == 1
+    assert r.zadd("{tag}zset2", "three", 3) == 1
+    assert r.zunionstore("{tag}out", {"{tag}zset1": 2, "{tag}zset2": 3}) == 3
+    assert r.zrange("{tag}out", 0, -1, withscores=True) == [("one", 5), ("three", 9), ("two", 10)]
 
 
 @delete_keys("zset1")
@@ -2791,7 +2790,7 @@ def test_pfadd():
     assert r.pfcount("hll") == 7
 
 
-@delete_keys("hll", "some-other-hll")
+@delete_keys("{tag}hll", "{tag}some-other-hll")
 def test_pfcount():
     """ PFCOUNT key [key ...]
             Available since 2.8.9.
@@ -2813,15 +2812,15 @@ def test_pfcount():
     (integer) 6
     redis>
     """
-    assert r.pfadd("hll", "foo", "bar", "zap") == 1
-    assert r.pfadd("hll", "zap", "zap", "zap") == 0
-    assert r.pfadd("hll", "foo", "bar") == 0
-    assert r.pfcount("hll") == 3
-    assert r.pfadd("some-other-hll", 1, 2, 3) == 1
-    assert r.pfcount("hll", "some-other-hll") == 6
+    assert r.pfadd("{tag}hll", "foo", "bar", "zap") == 1
+    assert r.pfadd("{tag}hll", "zap", "zap", "zap") == 0
+    assert r.pfadd("{tag}hll", "foo", "bar") == 0
+    assert r.pfcount("{tag}hll") == 3
+    assert r.pfadd("{tag}some-other-hll", 1, 2, 3) == 1
+    assert r.pfcount("{tag}hll", "{tag}some-other-hll") == 6
 
 
-@delete_keys("hll1", "hll2", "hll3")
+@delete_keys("{tag}hll1", "{tag}hll2", "{tag}hll3")
 def test_pfmerge():
     """ PFMERGE destkey sourcekey [sourcekey ...]
             Available since 2.8.9.
@@ -2838,13 +2837,14 @@ def test_pfmerge():
     (integer) 6
     redis>
     """
-    assert r.pfadd("hll1", "foo", "bar", "zap", "a") == 1
-    assert r.pfadd("hll2", "a", "b", "c", "foo") == 1
-    assert r.pfmerge("hll3", "hll1", "hll2") is True
-    assert r.pfcount("hll3") == 6
+    assert r.pfadd("{tag}hll1", "foo", "bar", "zap", "a") == 1
+    assert r.pfadd("{tag}hll2", "a", "b", "c", "foo") == 1
+    assert r.pfmerge("{tag}hll3", "{tag}hll1", "{tag}hll2") is True
+    assert r.pfcount("{tag}hll3") == 6
 
 
 ###script
+@delete_keys("key1")
 def test_eval():
     """ EVAL script numkeys key [key ...] arg [arg ...]
             Available since 2.6.0.
@@ -2852,9 +2852,9 @@ def test_eval():
 
     http://redis.io/commands/eval
     """
-    lua = "return {KEYS[1],KEYS[2],ARGV[1],ARGV[2]}"
-    keys_and_args = ["key1", "key2", "first", "second"]
-    assert r.eval(lua, 2, *keys_and_args) == keys_and_args
+    lua = "return {KEYS[1],ARGV[1]}"
+    keys_and_args = ["key1","first"]
+    assert r.eval(lua, 1, *keys_and_args) == keys_and_args
 
 
 #def test_evalsha():
@@ -2944,17 +2944,13 @@ def call(func):
 
 def main():
     d = globals()
-    funcs = []
     for k in d.keys():
         if not k.startswith("test_"):
             continue
         func = d[k]
         if not inspect.isfunction(func):
             continue
-        funcs.append(func)
-
-    while True:
-        call(random.choice(funcs))
+        call(func)
 
 
 if __name__ == "__main__":
