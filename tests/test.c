@@ -7,13 +7,15 @@ static void usage(const char *name)
     printf("Usage: %s [-h] [-s TEST_CASE] [-t TEST_FUNC]\n"
             "  -h            print this Help\n"
             "  -s TEST_CASE  only run suite named SUITE\n"
-            "  -t TEST_FUNC  only run test named TEST\n", name);
+            "  -t TEST_FUNC  only run test named TEST\n"
+            "  --silent      do not print result\n", name);
 }
 
 static int setup_cli(int argc, const char *argv[])
 {
     int i = 0;
     manager.test_func_filter[0] = manager.case_filter[0] = 0;
+    manager.silent = 0;
 
     for (i = 1; i < argc; i++) {
         if (0 == strcmp("-t", argv[i])) {
@@ -26,6 +28,8 @@ static int setup_cli(int argc, const char *argv[])
             i++;
         } else if (0 == strcmp("-h", argv[i])) {
             return -1;
+        } else if (0 == strcmp("--silent", argv[i])) {
+            manager.silent = 1;
         } else {
             fprintf(stdout,
                 "Unknown argument '%s'\n", argv[i]);
@@ -37,9 +41,9 @@ static int setup_cli(int argc, const char *argv[])
 
 static void report()
 {
-    printf("\nTotal: %u tests, %u assertions\n", manager.tests_run,
+    print(1, "\nTotal: %u tests, %u assertions\n", manager.tests_run,
             manager.assertions);
-    printf("Pass: %u, fail: %u, skip: %u\n", manager.passed, manager.failed,
+    print(1, "Pass: %u, fail: %u, skip: %u\n", manager.passed, manager.failed,
             manager.skipped);
 }
 

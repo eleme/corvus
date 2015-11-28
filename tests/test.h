@@ -4,11 +4,13 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdarg.h>
+#include <stdbool.h>
 
 #define MSG_LEN 1024
 
 #define TEST_CASE(NAME) void NAME(void)
-#define TEST(name) static enum test_result name(void)
+#define TEST(name) static enum test_result name(struct context *ctx)
 #define RUN_CASE(test_case)                                             \
     do {                                                                \
         if (!filter(#test_case, manager.case_filter)) {                 \
@@ -16,7 +18,7 @@
         }                                                               \
         memset(&manager.current_case, 0, sizeof(struct case_info));     \
                                                                         \
-        PRINT("\n\033[1m%s\033[m: ", #test_case);                       \
+        print(0, "\n\033[1m%s\033[m: ", #test_case);                    \
         test_case();                                                    \
         post_case();                                                    \
         manager.passed += manager.current_case.passed;                  \
@@ -28,7 +30,10 @@
 #define RUN_TEST(test_func)                                             \
     do {                                                                \
         if (filter(#test_func, manager.test_func_filter)) {             \
-            enum test_result res = test_func();                         \
+            struct context ctx;                                         \
+            context_init(&ctx, 0, ERROR);                               \
+            enum test_result res = test_func(&ctx);                     \
+            context_free(&ctx);                                         \
             post_test(#test_func, res);                                 \
         }                                                               \
     } while (0)
@@ -61,13 +66,6 @@
         return TEST_FAIL;                                               \
     } while (0)
 
-#define PRINT(...)                                                      \
-    do {                                                                \
-        if (manager.test_func_filter[0] == 0) {                         \
-            printf(__VA_ARGS__);                                        \
-        }                                                               \
-    } while (0)
-
 /* Info for the current running suite. */
 struct case_info {
     unsigned int tests_run;
@@ -98,6 +96,8 @@ struct {
     /* only run a specific suite or test */
     char case_filter[1024];
     char test_func_filter[1024];
+
+    int silent;
 } manager;
 
 enum test_result {
@@ -105,6 +105,18 @@ enum test_result {
     TEST_FAIL = -1,
     TEST_SKIP = 1
 };
+
+static void print(int force, const char *fmt, ...)
+{
+    if (manager.silent) return;
+
+    va_list args;
+    va_start(args, fmt);
+    if (force || strlen(manager.test_func_filter) == 0) {
+        vprintf(fmt, args);
+    }
+    va_end(args);
+}
 
 static int filter(const char *name, const char *filter)
 {
@@ -125,7 +137,7 @@ static int filter(const char *name, const char *filter)
 
 static void pass(const char *name)
 {
-    PRINT(".");
+    print(0, ".");
     struct case_info *c = &manager.current_case;
     snprintf(c->msgs[c->msg_idx++], MSG_LEN, "\033[32mPASS\033[m %s", name);
     manager.current_case.passed++;
@@ -133,7 +145,7 @@ static void pass(const char *name)
 
 static void fail(const char *name)
 {
-    PRINT("F");
+    print(0, "F");
     struct case_info *c = &manager.current_case;
     snprintf(c->msgs[c->msg_idx++], MSG_LEN, "\033[31mFAIL\033[m %s: %s (%s:%u)", name,
             manager.msg ? manager.msg : "",
@@ -144,7 +156,7 @@ static void fail(const char *name)
 
 static void skip(const char *name)
 {
-    PRINT("s");
+    print(0, "s");
     struct case_info *c = &manager.current_case;
     snprintf(c->msgs[c->msg_idx++], MSG_LEN, "SKIP %s", name);
     manager.current_case.skipped++;
@@ -168,18 +180,18 @@ static void post_case()
     struct case_info *c = &manager.current_case;
     if (c->msg_idx <= 0) return;
 
-    PRINT("\n");
+    print(0, "\n");
     for (i = 0; i < c->msg_idx; i++) {
-        printf("%s\n", c->msgs[i]);
+        print(1, "%s\n", c->msgs[i]);
     }
 
-    PRINT("%u tests - %u pass, %u fail, %u skipped\n", c->tests_run,
-          c->passed, c->failed, c->skipped);
+    print(0, "%u tests - %u pass, %u fail, %u skipped\n", c->tests_run,
+            c->passed, c->failed, c->skipped);
 }
 
 
 struct context;
-extern void context_init(struct context *ctx);
+extern void context_init(struct context *ctx, bool syslog, int log_level);
 extern void context_free(struct context *ctx);
 
 #endif
