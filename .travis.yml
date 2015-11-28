@@ -36,7 +36,7 @@ before_script:
 
 script:
   - make test
-  - valgrind --leak-check=full ./tests/corvus_test
+  - valgrind --leak-check=full ./tests/corvus_test --silent
 
   - redis-cli -p 12345 set hello 123
   - redis-cli -p 12345 get hello

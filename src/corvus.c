@@ -42,35 +42,31 @@ static void config_init()
 
 static int config_add(char *name, char *value)
 {
-    int name_len = strlen(name),
-        value_len = strlen(value);
-    if (name_len <= 0 || value_len <= 0) return -1;
-
     char *end;
-    if (strncmp(name, "bind", MIN(4, name_len)) == 0) {
+    if (strcmp(name, "bind") == 0) {
         config.bind = strtoul(value, &end, 0);
         if (config.bind > 0xFFFF) return -1;
-    } else if (strncmp(name, "syslog", MIN(6, name_len)) == 0) {
+    } else if (strcmp(name, "syslog") == 0) {
         config.syslog = strtoul(value, &end, 0);
-    } else if (strncmp(name, "thread", MIN(6, name_len)) == 0) {
+    } else if (strcmp(name, "thread") == 0) {
         config.thread = strtoul(value, &end, 0);
         if (config.thread <= 0) config.thread = 4;
-    } else if (strncmp(name, "statsd", MIN(6, name_len)) == 0) {
+    } else if (strcmp(name, "statsd") == 0) {
         strcpy(config.statsd_addr, value);
-    } else if (strncmp(name, "metric_interval", MIN(15, name_len)) == 0) {
+    } else if (strcmp(name, "metric_interval") == 0) {
         config.metric_interval = strtoul(value, &end, 0);
         if (config.metric_interval <= 0) config.metric_interval = 10;
-    } else if (strncmp(name, "loglevel", MIN(8, name_len)) == 0) {
-        if (strncmp(value, "debug", MIN(5, value_len)) == 0) {
+    } else if (strcmp(name, "loglevel") == 0) {
+        if (strcmp(value, "debug") == 0) {
             config.loglevel = DEBUG;
-        } else if (strncmp(value, "warn", MIN(4, value_len)) == 0) {
+        } else if (strcmp(value, "warn") == 0) {
             config.loglevel = WARN;
-        } else if (strncmp(value, "error", MIN(4, value_len)) == 0) {
+        } else if (strcmp(value, "error") == 0) {
             config.loglevel = ERROR;
         } else {
             config.loglevel = INFO;
         }
-    } else if (strncmp(name, "node", MIN(4, name_len)) == 0) {
+    } else if (strcmp(name, "node") == 0) {
         int i;
         if (config.node.nodes != NULL) {
             for (i = 0; i < config.node.len; i++) {
@@ -107,6 +103,9 @@ static int read_conf(const char *filename)
     char *line = NULL;
     while ((r = getline(&line, &len, fp)) != -1) {
         char name[r], value[r];
+        memset(name, 0, sizeof(name));
+        memset(value, 0, sizeof(value));
+
         for (i = 0; i < r && (line[i] == ' ' || line[i] == '\r'
                     || line[i] == '\t' || line[i] == '\n'); i++);
         if (i == r || line[i] == '#') continue;
