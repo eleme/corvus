@@ -25,11 +25,26 @@ static void stats_send(char *metric, double value)
     if (statsd_fd == -1) {
         statsd_fd = socket_create_udp_client();
     }
-    int n;
-    const char *fmt = "corvus.%s:%f|g";
-    n = snprintf(NULL, 0, fmt, metric, value);
+
+    int n, i, len;
+    char hostname[HOST_NAME_MAX + 1];
+    uint16_t port = get_bind();
+
+    gethostname(hostname, HOST_NAME_MAX + 1);
+    len = strlen(hostname);
+    if (len > HOST_NAME_MAX) {
+        hostname[HOST_NAME_MAX] = '\0';
+        len--;
+    }
+
+    for (i = 0; i < len; i++) {
+        if (hostname[i] == '.') hostname[i] = '-';
+    }
+
+    const char *fmt = "corvus.%s-%d.%s:%f|g";
+    n = snprintf(NULL, 0, fmt, hostname, port, metric, value);
     char buf[n + 1];
-    snprintf(buf, sizeof(buf), fmt, metric, value);
+    snprintf(buf, sizeof(buf), fmt, hostname, port, metric, value);
     if (sendto(statsd_fd, buf, n, 0, (struct sockaddr*)&dest, sizeof(dest)) == -1) {
         LOG(WARN, "fail to send metrics data: %s", strerror(errno));
     }

@@ -109,5 +109,6 @@ struct context {
 double get_time();
 int get_thread_num();
 struct context *get_contexts();
+int get_bind();
 
 #endif /* end of include guard: __CORVUS_H */

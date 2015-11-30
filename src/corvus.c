@@ -243,6 +243,11 @@ int get_thread_num()
     return config.thread;
 }
 
+int get_bind()
+{
+    return config.bind;
+}
+
 struct context *get_contexts()
 {
     return contexts;
