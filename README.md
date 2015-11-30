@@ -1,5 +1,7 @@
 # Corvus
 
+[![Build Status](https://travis-ci.org/eleme/corvus.svg)](https://travis-ci.org/eleme/corvus)
+
 A fast and lightweight Redis Cluster Proxy for Redis 3.0 with cluster mode enabled
 focused on Linux >= 3.9. Clients designed for normal mode Redis can still be used
 through the proxy. Redirection errors are handled and slot map is cached in proxy.
