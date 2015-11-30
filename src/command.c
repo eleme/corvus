@@ -37,7 +37,7 @@ do {                                               \
     /* keys command */               \
     HANDLER(DEL, COMPLEX)            \
     HANDLER(DUMP, BASIC)             \
-    HANDLER(EXISTS, BASIC)           \
+    HANDLER(EXISTS, COMPLEX)         \
     HANDLER(EXPIRE, BASIC)           \
     HANDLER(EXPIREAT, BASIC)         \
     HANDLER(KEYS, UNIMPL)            \
@@ -60,6 +60,7 @@ do {                                               \
     /* strings command */            \
     HANDLER(APPEND, BASIC)           \
     HANDLER(BITCOUNT, BASIC)         \
+    HANDLER(BITOP, UNIMPL)           \
     HANDLER(BITPOS, BASIC)           \
     HANDLER(DECR, BASIC)             \
     HANDLER(DECRBY, BASIC)           \
@@ -188,8 +189,8 @@ static const char *rep_err = "-ERR server error\r\n";
 static const char *rep_get = "*2\r\n$3\r\nGET\r\n";
 static const char *rep_set = "*3\r\n$3\r\nSET\r\n";
 static const char *rep_del = "*2\r\n$3\r\nDEL\r\n";
+static const char *rep_exists = "*2\r\n$6\r\nEXISTS\r\n";
 static const char *rep_ok = "+OK\r\n";
-static const char *rep_one = ":1\r\n";
 static const char *rep_zero = ":0\r\n";
 static const char *rep_ping = "+PONG\r\n";
 
@@ -374,7 +375,7 @@ int cmd_forward_basic(struct command *cmd)
     return CORVUS_OK;
 }
 
-/* mget, del */
+/* mget, del exists */
 int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len)
 {
     struct redis_data *key;
@@ -477,6 +478,10 @@ int cmd_forward_complex(struct command *cmd)
             break;
         case CMD_DEL:
             if (cmd_forward_multikey(cmd, (uint8_t*)rep_del, 13) == -1)
+                return -1;
+            break;
+        case CMD_EXISTS:
+            if (cmd_forward_multikey(cmd, (uint8_t*)rep_exists, 16) == -1)
                 return -1;
             break;
         case CMD_EVAL:
@@ -635,18 +640,20 @@ void cmd_gen_mset_iovec(struct command *cmd, struct iov_data *iov)
     cmd_iov_add(iov, (void*)rep_ok, strlen(rep_ok));
 }
 
-void cmd_gen_del_iovec(struct command *cmd, struct iov_data *iov)
+void cmd_gen_multikey_iovec(struct command *cmd, struct iov_data *iov)
 {
     struct command *c;
-    int one = 0, fail = 0;
+    const char *fmt = ":%ld\r\n";
+    char *buf;
+    int n = 0;
+    int count = 0, fail = 0;
     STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
         if (c->cmd_fail || c->rep_data->type == REP_ERROR) {
             fail = 1;
             break;
         }
         if (c->rep_data->integer == 1) {
-            one = 1;
-            break;
+            count++;
         }
     }
 
@@ -654,8 +661,12 @@ void cmd_gen_del_iovec(struct command *cmd, struct iov_data *iov)
         cmd_iov_add(iov, (void*)rep_err, strlen(rep_err));
         return;
     }
-    if (one) {
-        cmd_iov_add(iov, (void*)rep_one, 4);
+    if (count) {
+        n = snprintf(NULL, 0, fmt, count);
+        buf = malloc(sizeof(char) * (n + 1));
+        snprintf(buf, n + 1, fmt, count);
+        cmd_iov_add(iov, buf, n);
+        iov->ptr = buf;
         return;
     }
     cmd_iov_add(iov, (void*)rep_zero, 4);
@@ -899,7 +910,8 @@ void cmd_make_iovec(struct command *cmd, struct iov_data *iov)
                 cmd_gen_mset_iovec(c, iov);
                 break;
             case CMD_DEL:
-                cmd_gen_del_iovec(c, iov);
+            case CMD_EXISTS:
+                cmd_gen_multikey_iovec(c, iov);
                 break;
             default:
                 cmd_create_iovec(&c->rep_buf[0], &c->rep_buf[1], iov);
