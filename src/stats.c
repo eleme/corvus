@@ -19,6 +19,9 @@ static struct sockaddr_in dest;
 static pthread_t stats_thread;
 static int metric_interval = 10;
 static hash_t *bytes_map;
+static char hostname[HOST_NAME_MAX + 1];
+static uint16_t port;
+
 
 static void stats_send(char *metric, double value)
 {
@@ -26,21 +29,7 @@ static void stats_send(char *metric, double value)
         statsd_fd = socket_create_udp_client();
     }
 
-    int n, i, len;
-    char hostname[HOST_NAME_MAX + 1];
-    uint16_t port = get_bind();
-
-    gethostname(hostname, HOST_NAME_MAX + 1);
-    len = strlen(hostname);
-    if (len > HOST_NAME_MAX) {
-        hostname[HOST_NAME_MAX] = '\0';
-        len--;
-    }
-
-    for (i = 0; i < len; i++) {
-        if (hostname[i] == '.') hostname[i] = '-';
-    }
-
+    int n;
     const char *fmt = "corvus.%s-%d.%s:%f|g";
     n = snprintf(NULL, 0, fmt, hostname, port, metric, value);
     char buf[n + 1];
@@ -176,8 +165,21 @@ int stats_init(int interval)
 {
     size_t stacksize;
     pthread_attr_t attr;
-
+    int len;
     bytes_map = hash_new();
+
+    gethostname(hostname, HOST_NAME_MAX + 1);
+    len = strlen(hostname);
+    if (len > HOST_NAME_MAX) {
+        hostname[HOST_NAME_MAX] = '\0';
+        len--;
+    }
+
+    for (int i = 0; i < len; i++) {
+        if (hostname[i] == '.') hostname[i] = '-';
+    }
+
+    port = get_bind();
 
     metric_interval = interval;
 
