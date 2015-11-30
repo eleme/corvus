@@ -38,8 +38,7 @@ script:
   - make test
   - valgrind --leak-check=full ./tests/corvus_test --silent
 
-  - redis-cli -p 12345 set hello 123
-  - redis-cli -p 12345 get hello
+  - sudo python tests/test_corvus.py
 
 after_script:
   - kill -INT `pgrep -f corvus` && sleep 0.1

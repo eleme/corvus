@@ -29,6 +29,12 @@ class Redis(redis.Redis):
     def exists(self, *names):
         return self.execute_command('EXISTS', *names)
 
+    def zrevrangebylex(self, key, *args):
+        return self.execute_command('ZREVRANGEBYLEX', key, *args)
+
+    def pfcount(self, *args):
+        return self.execute_command('PFCOUNT', *args)
+
 
 r = Redis(port=12345)
 #r = Redis(port=6379)
