@@ -85,16 +85,19 @@ void client_ready(struct connection *self, uint32_t mask)
 struct connection *client_create(struct context *ctx, int fd)
 {
     struct connection *client = conn_create(ctx);
-    if (socket_set_nonblocking(fd) == -1) {
+    client->fd = fd;
+
+    if (socket_set_nonblocking(client->fd) == -1) {
+        conn_free(client);
         conn_recycle(ctx, client);
         return NULL;
     }
-    if (socket_set_tcpnodelay(fd) == -1) {
+    if (socket_set_tcpnodelay(client->fd) == -1) {
+        conn_free(client);
         conn_recycle(ctx, client);
         return NULL;
     }
 
-    client->fd = fd;
     client->ready = client_ready;
     return client;
 }
