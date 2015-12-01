@@ -1,5 +1,6 @@
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <netinet/tcp.h>
 #include <sys/uio.h>
 #include <netdb.h>
 #include <stdio.h>
@@ -116,6 +117,16 @@ int socket_set_nonblocking(int fd)
     }
     if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
         LOG(ERROR, "Fail to set nonblock for fd %d: %s", fd, strerror(errno));
+        return -1;
+    }
+    return 0;
+}
+
+int socket_set_tcpnodelay(int fd)
+{
+    int optval = 1;
+    if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(int)) == -1) {
+        LOG(ERROR, "setsockopt TCP_NODELAY: %s", strerror(errno));
         return -1;
     }
     return 0;

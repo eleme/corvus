@@ -162,6 +162,10 @@ int conn_create_fd()
         LOG(ERROR, "fail to set nonblocking");
         return -1;
     }
+    if (socket_set_tcpnodelay(fd) == -1) {
+        LOG(ERROR, "fail to set tcpnodelay");
+        return -1;
+    }
     return fd;
 }
 
