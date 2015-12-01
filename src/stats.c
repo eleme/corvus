@@ -90,13 +90,11 @@ void stats_node_info_agg(struct bytes *bytes)
             if (b == NULL) {
                 b = &bytes[m++];
                 strncpy(b->key, host, sizeof(b->key));
-                b->send = server->send_bytes;
-                b->recv = server->recv_bytes;
+                b->send = b->recv = 0;
                 hash_set(bytes_map, b->key, (void*)b);
-            } else {
-                bytes->send += server->send_bytes;
-                bytes->recv += server->recv_bytes;
             }
+            b->send += server->send_bytes;
+            b->recv += server->recv_bytes;
         }
     }
 }
