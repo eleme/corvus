@@ -386,7 +386,7 @@ int main(int argc, const char *argv[])
 {
     int i;
     if (argc != 2) {
-        fprintf(stderr, "Usage: corvus corvus.conf\n");
+        fprintf(stderr, "Usage: %s corvus.conf\n", argv[0]);
         return EXIT_FAILURE;
     }
 

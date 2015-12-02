@@ -73,6 +73,7 @@ void conn_init(struct connection *conn, struct context *ctx)
     conn->ready = NULL;
     conn->registered = 0;
     conn->send_bytes = conn->recv_bytes = 0;
+    conn->completed_commands = 0;
     memset(&conn->addr, 0, sizeof(conn->addr));
     STAILQ_INIT(&conn->cmd_queue);
     STAILQ_INIT(&conn->ready_queue);

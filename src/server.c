@@ -167,6 +167,7 @@ int read_one_reply(struct connection *server)
     }
 
     if (cmd->rep_data->type != REP_ERROR) {
+        cmd->server->completed_commands++;
         cmd_mark_done(cmd);
         return CORVUS_OK;
     }

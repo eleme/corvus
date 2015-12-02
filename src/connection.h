@@ -33,6 +33,7 @@ struct connection {
 
     long long send_bytes;
     long long recv_bytes;
+    long long completed_commands;
 
     int status;
     void (*ready)(struct connection *self, uint32_t mask);

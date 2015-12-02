@@ -12,6 +12,7 @@ struct bytes {
     char key[HOST_NAME_MAX + 8];
     long long recv;
     long long send;
+    long long completed;
 };
 
 static int statsd_fd = -1;
@@ -90,11 +91,14 @@ void stats_node_info_agg(struct bytes *bytes)
             if (b == NULL) {
                 b = &bytes[m++];
                 strncpy(b->key, host, sizeof(b->key));
-                b->send = b->recv = 0;
+                b->send = 0;
+                b->recv = 0;
+                b->completed = 0;
                 hash_set(bytes_map, b->key, (void*)b);
             }
             b->send += server->send_bytes;
             b->recv += server->recv_bytes;
+            b->completed += server->completed_commands;
         }
     }
 }
@@ -116,7 +120,7 @@ void stats_send_node_info()
     struct bytes *value;
 
     /* redis-node.127-0-0-1:8000.bytes.{send,recv} */
-    int len = HOST_NAME_MAX + 32;
+    int len = HOST_NAME_MAX + 64;
     char name[len];
 
     struct bytes bytes[REDIS_CLUSTER_SLOTS];
@@ -128,8 +132,11 @@ void stats_send_node_info()
         stats_send(name, value->send);
         snprintf(name, len, "redis-node.%s.bytes.recv", key);
         stats_send(name, value->recv);
+        snprintf(name, len, "redis-node.%s.commands.completed", key);
+        stats_send(name, value->completed);
         value->send = 0;
         value->recv = 0;
+        value->completed = 0;
     });
     hash_clear(bytes_map);
 }
