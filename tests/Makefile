@@ -1,19 +1,19 @@
-CFLAGS=-g -std=c99 -D_GNU_SOURCE -DCORVUS_TEST -I../src -I../deps -pthread
+default: test
+NAME=corvus_test
+CC=gcc -std=c99
+CFLAGS=-g -D_GNU_SOURCE -DCORVUS_TEST -I../deps -I ../src
+LDFLAGS=-pthread
+BIN:=$(NAME)
+SRC:=$(wildcard *.c)\
+	 $(wildcard ../src/*.c)\
+	 $(wildcard ../deps/*/*.c)
+INC:=$(wildcard ../src/*.h)
+OBJ:=$(SRC:.c=.o)
+GCH:=$(INC:.h=.h.gch)
 
-corvus_test: test.c \
-	test.h \
-	test_parser.c \
-	test_hash.c \
-	test_slot.c \
-	test_cmd.c \
-	../src/hash.c ../src/slot.c ../src/parser.c ../src/socket.c \
-	../src/logging.c ../src/mbuf.c ../src/command.c ../src/connection.c \
-	../src/proxy.c ../src/event.c ../src/client.c ../src/server.c \
-	../deps/hashmap/hash.c ../src/corvus.c ../src/stats.c
-	@$(CC) $(CFLAGS) $^ -o $@
-
-test: corvus_test
-	@./corvus_test
-
+$(BIN): $(OBJ)
+test: $(BIN)
+	./$(BIN)
 clean:
-	@rm -f corvus_test
+	@rm -f $(BIN) $(OBJ) $(GCH)
+# vim:set noet:
