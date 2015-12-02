@@ -10,6 +10,7 @@
 #include "slot.h"
 #include "socket.h"
 #include "logging.h"
+#include "dict.h"
 
 #define ADDR_LIST_CHUNK 128
 #define ADDR_NAME_LEN (HOST_NAME_MAX + 8)
@@ -118,12 +119,12 @@ struct node_info *node_info_find(struct context *ctx, struct redis_data *data)
     socket_get_addr(hostname, p->str_len, port, &addr);
 
     key = socket_get_key(&addr);
-    node = hash_get(ctx->server_table, key);
+    node = dict_get(ctx->server_table, key);
     if (node != NULL) {
         free(key);
     } else {
         node = node_info_create(&addr);
-        hash_set(ctx->server_table, key, (void*)node);
+        dict_set(ctx->server_table, key, (void*)node);
     }
     return node;
 }
@@ -190,13 +191,16 @@ void slot_map_clear(struct context *ctx)
     addr_list_clear();
 
     struct node_info *node;
-    hash_each(ctx->server_table, {
-        free((void *)key);
-        node = (struct node_info *)val;
-        LIST_INSERT_HEAD(&node_list, node, next);
-    });
+    struct dict_iter *iter = dict_iter(ctx->server_table);
+    struct dict_node *dict_node = NULL;
 
-    hash_clear(ctx->server_table);
+    while ((dict_node = dict_iter_next(iter)) != NULL) {
+        free((void *)(dict_node->key));
+        node = (struct node_info *)(dict_node->val);
+        LIST_INSERT_HEAD(&node_list, node, next);
+    }
+    dict_iter_free(iter);
+    dict_clear(ctx->server_table);
 }
 
 int do_update_slot_map(struct connection *server)

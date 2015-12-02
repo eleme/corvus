@@ -1,3 +1,0 @@
-[submodule "deps/hashmap"]
-	path = deps/hashmap
-	url = https://github.com/clibs/hash.git

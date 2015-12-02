@@ -1,3 +1,5 @@
+#include <stdlib.h>
+#include <string.h>
 #include <sys/eventfd.h>
 #include <sys/resource.h>
 #include <sys/time.h>
@@ -13,6 +15,7 @@
 #include "event.h"
 #include "proxy.h"
 #include "stats.h"
+#include "dict.h"
 
 static struct {
     uint16_t bind;
@@ -259,7 +262,7 @@ void context_init(struct context *ctx, bool syslog, int log_level)
 
     ctx->syslog = syslog;
     ctx->log_level = log_level;
-    ctx->server_table = hash_new();
+    ctx->server_table = dict();
     ctx->started = false;
     ctx->role = THREAD_UNKNOWN;
     mbuf_init(ctx);
@@ -275,15 +278,17 @@ void context_free(struct context *ctx)
 {
     /* server pool */
     struct connection *conn;
-    hash_each(ctx->server_table, {
-        free((void*)key);
-        conn = (struct connection*)val;
+    struct dict_iter *iter = dict_iter(ctx->server_table);
+    struct dict_node *node = NULL;
+    while ((node = dict_iter_next(iter)) != NULL) {
+        free((void*)(node->key));
+        conn = (struct connection*)(node->val);
         conn_free(conn);
         conn_buf_free(conn);
         free(conn);
-    })
-    hash_clear(ctx->server_table);
-    hash_free(ctx->server_table);
+    }
+    dict_iter_free(iter);
+    dict_free(ctx->server_table);
 
     /* mbuf queue */
     mbuf_destroy(ctx);

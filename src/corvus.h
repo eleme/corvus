@@ -11,8 +11,6 @@
 #include "connection.h"
 #include "stats.h"
 
-#include "hashmap/hash.h"
-
 #define VERSION "0.0.1"
 
 #define CORVUS_OK 0
@@ -60,7 +58,7 @@ struct context {
     int log_level;
 
     /* connection pool */
-    hash_t *server_table;
+    struct dict *server_table;
 
     struct conn_tqh servers;
     struct node_conf *node_conf;
