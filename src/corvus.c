@@ -278,16 +278,13 @@ void context_free(struct context *ctx)
 {
     /* server pool */
     struct connection *conn;
-    struct dict_iter *iter = dict_iter(ctx->server_table);
-    struct dict_node *node = NULL;
-    while ((node = dict_iter_next(iter)) != NULL) {
+    dict_each(ctx->server_table, {
         free((void*)(node->key));
         conn = (struct connection*)(node->val);
         conn_free(conn);
         conn_buf_free(conn);
         free(conn);
-    }
-    dict_iter_free(iter);
+    });
     dict_free(ctx->server_table);
 
     /* mbuf queue */

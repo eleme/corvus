@@ -190,16 +190,12 @@ void slot_map_clear(struct context *ctx)
 
     addr_list_clear();
 
-    struct node_info *node;
-    struct dict_iter *iter = dict_iter(ctx->server_table);
-    struct dict_node *dict_node = NULL;
-
-    while ((dict_node = dict_iter_next(iter)) != NULL) {
-        free((void *)(dict_node->key));
-        node = (struct node_info *)(dict_node->val);
-        LIST_INSERT_HEAD(&node_list, node, next);
-    }
-    dict_iter_free(iter);
+    struct node_info *node_info;
+    dict_each(ctx->server_table, {
+        free((void *)(node->key));
+        node_info = (struct node_info *)(node->val);
+        LIST_INSERT_HEAD(&node_list, node_info, next);
+    });
     dict_clear(ctx->server_table);
 }
 

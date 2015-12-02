@@ -128,22 +128,19 @@ void stats_send_node_info()
     struct bytes bytes[REDIS_CLUSTER_SLOTS];
     stats_node_info_agg(bytes);
 
-    struct dict_iter *iter = dict_iter(bytes_map);
-    struct dict_node *node = NULL;
-
-    while ((node = dict_iter_next(iter)) != NULL) {
+    dict_each(bytes_map, {
         value = (struct bytes*)(node->val);
         snprintf(name, len, "redis-node.%s.bytes.send", node->key);
         stats_send(name, value->send);
         snprintf(name, len, "redis-node.%s.bytes.recv", node->key);
         stats_send(name, value->recv);
-        snprintf(name, len, "redis-node.%s.commands.completed", key);
+        snprintf(name, len, "redis-node.%s.commands.completed", node->key);
         stats_send(name, value->completed);
         value->send = 0;
         value->recv = 0;
         value->completed = 0;
-    }
-    dict_iter_free(iter);
+    });
+
     dict_clear(bytes_map);
 }
 

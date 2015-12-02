@@ -16,9 +16,15 @@ extern "C" {
 #endif
 
 #define DICT_LOAD_LIMIT         0.72 /* load factor */
-
 #define dict()                  dict_new()
 #define dict_iter(dict)         dict_iter_new(dict)
+#define dict_each(dict, block)  {                    \
+    struct dict_node *node = NULL;                   \
+    struct dict_iter iter = {dict, 0, NULL};         \
+    while ((node = dict_iter_next(&iter)) != NULL) { \
+      block;                                         \
+    }                                                \
+}
 
 enum {
     DICT_OK = 0,               /* operation is ok */
@@ -57,6 +63,10 @@ struct dict_iter *dict_iter_new(struct dict *dict);
 void dict_iter_free(struct dict_iter *iter);
 struct dict_node *dict_iter_next(struct dict_iter *iter);
 void dict_iter_rewind(struct dict_iter *iter);
+int dict_iset(struct dict *dict, char *key, size_t len, void *val); /* O(1) */
+void *dict_iget(struct dict *dict, char *key, size_t len); /* O(1) */
+void *dict_ipop(struct dict *dict, char *key, size_t len); /* O(1) */
+int dict_ihas(struct dict *dict, char *key, size_t len); /* O(1) */
 
 #if defined(__cplusplus)
 }
