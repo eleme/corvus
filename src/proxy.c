@@ -19,7 +19,10 @@ void proxy_ready(struct connection *self, uint32_t mask)
             case CORVUS_ERR: close(fd); break;
             case CORVUS_AGAIN: break;
             default:
-                client = client_create(self->ctx, fd);
+                if ((client = client_create(self->ctx, fd)) == NULL) {
+                    LOG(ERROR, "fail to create client");
+                    break;
+                }
                 if (conn_register(client) == CORVUS_ERR) {
                     LOG(ERROR, "fail to register client");
                     conn_free(client);
