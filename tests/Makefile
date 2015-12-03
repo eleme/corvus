@@ -1,19 +1,18 @@
-CFLAGS=-g -std=c99 -D_GNU_SOURCE -DCORVUS_TEST -I../src -I../deps -pthread
+default: test
 
-corvus_test: test.c \
-	test.h \
-	test_parser.c \
-	test_hash.c \
-	test_slot.c \
-	test_cmd.c \
-	../src/hash.c ../src/slot.c ../src/parser.c ../src/socket.c \
-	../src/logging.c ../src/mbuf.c ../src/command.c ../src/connection.c \
-	../src/proxy.c ../src/event.c ../src/client.c ../src/server.c \
-	../deps/hashmap/hash.c ../src/corvus.c ../src/stats.c
-	@$(CC) $(CFLAGS) $^ -o $@
+NAME=corvus_test
+CC=gcc
+CFLAGS=-std=c99 -pedantic -g -D_GNU_SOURCE -DCORVUS_TEST -I../src
+LDFLAGS=-pthread
 
-test: corvus_test
-	@./corvus_test
+BIN:=$(NAME)
+SRC:=$(wildcard *.c) $(wildcard ../src/*.c)
+INC:=$(wildcard ../src/*.h)
+
+$(BIN): $(SRC) $(INC)
+
+test: $(BIN)
+	@./$(BIN)
 
 clean:
-	@rm -f corvus_test
+	rm -f $(BIN) $(OBJ)

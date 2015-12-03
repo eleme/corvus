@@ -32,9 +32,10 @@ install:
 before_script:
   - make
   - sed -i 's/loglevel debug/loglevel info/' corvus.conf
-  - ./corvus ./corvus.conf > corvus.log 2>&1 &
+  - ./src/corvus ./corvus.conf > corvus.log 2>&1 &
 
 script:
+  - make clean || true
   - make test
   - valgrind --leak-check=full ./tests/corvus_test --silent
 

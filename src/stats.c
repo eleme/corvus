@@ -1,3 +1,4 @@
+#include <string.h>
 #include <sys/resource.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -7,6 +8,7 @@
 #include "socket.h"
 #include "logging.h"
 #include "slot.h"
+#include "dict.h"
 
 struct bytes {
     char key[HOST_NAME_MAX + 8];
@@ -19,7 +21,7 @@ static int statsd_fd = -1;
 static struct sockaddr_in dest;
 static pthread_t stats_thread;
 static int metric_interval = 10;
-static hash_t *bytes_map;
+static struct dict *bytes_map;
 static char hostname[HOST_NAME_MAX + 1];
 static uint16_t port;
 
@@ -87,14 +89,14 @@ void stats_node_info_agg(struct bytes *bytes)
             }
             sprintf(host + j, "-%d", server->addr.port);
 
-            b = hash_get(bytes_map, host);
+            b = dict_get(bytes_map, host);
             if (b == NULL) {
                 b = &bytes[m++];
                 strncpy(b->key, host, sizeof(b->key));
                 b->send = 0;
                 b->recv = 0;
                 b->completed = 0;
-                hash_set(bytes_map, b->key, (void*)b);
+                dict_set(bytes_map, b->key, (void*)b);
             }
             b->send += server->send_bytes;
             b->recv += server->recv_bytes;
@@ -126,19 +128,20 @@ void stats_send_node_info()
     struct bytes bytes[REDIS_CLUSTER_SLOTS];
     stats_node_info_agg(bytes);
 
-    hash_each(bytes_map, {
-        value = (struct bytes*)val;
-        snprintf(name, len, "redis-node.%s.bytes.send", key);
+    struct dict_iter iter = DICT_ITER_INITIALIZER(bytes_map);
+    dict_each(&iter) {
+        value = (struct bytes*)iter.val;
+        snprintf(name, len, "redis-node.%s.bytes.send", iter.key);
         stats_send(name, value->send);
-        snprintf(name, len, "redis-node.%s.bytes.recv", key);
+        snprintf(name, len, "redis-node.%s.bytes.recv", iter.key);
         stats_send(name, value->recv);
-        snprintf(name, len, "redis-node.%s.commands.completed", key);
+        snprintf(name, len, "redis-node.%s.commands.completed", iter.key);
         stats_send(name, value->completed);
         value->send = 0;
         value->recv = 0;
         value->completed = 0;
-    });
-    hash_clear(bytes_map);
+    }
+    dict_clear(bytes_map);
 }
 
 void stats_get(struct stats *stats)
@@ -171,7 +174,7 @@ int stats_init(int interval)
     size_t stacksize;
     pthread_attr_t attr;
     int len;
-    bytes_map = hash_new();
+    bytes_map = dict();
 
     gethostname(hostname, HOST_NAME_MAX + 1);
     len = strlen(hostname);
@@ -212,7 +215,7 @@ void stats_kill()
 {
     int err;
 
-    hash_free(bytes_map);
+    dict_free(bytes_map);
 
     if (pthread_cancel(stats_thread) == 0) {
         if ((err = pthread_join(stats_thread, NULL)) != 0) {

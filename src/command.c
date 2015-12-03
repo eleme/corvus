@@ -14,6 +14,7 @@
 #include "server.h"
 #include "client.h"
 #include "stats.h"
+#include "dict.h"
 
 #ifndef IOV_MAX
 #define CORVUS_IOV_MAX 128
@@ -195,7 +196,7 @@ static const char *rep_zero = ":0\r\n";
 static const char *rep_ping = "+PONG\r\n";
 
 static struct cmd_item cmds[] = {CMD_DO(CMD_BUILD_MAP)};
-static hash_t *command_map;
+static struct dict *command_map;
 
 static void cmd_init(struct context *ctx, struct command *cmd)
 {
@@ -254,7 +255,7 @@ static int cmd_get_type(struct command *cmd, struct pos_array *pos)
     cmd_get_map_key(pos, key);
     key[pos->str_len] = '\0';
 
-    struct cmd_item *item = hash_get(command_map, key);
+    struct cmd_item *item = dict_get(command_map, key);
     if (item == NULL) return -1;
     cmd->cmd_type = item->value;
     return item->type;
@@ -756,18 +757,18 @@ void cmd_mark(struct command *cmd, int fail)
 
 void cmd_map_init()
 {
-    command_map = hash_new();
+    command_map = dict();
 
     size_t i, cmds_len = sizeof(cmds) / sizeof(struct cmd_item);
 
     for (i = 0; i < cmds_len; i++) {
-        hash_set(command_map, cmds[i].cmd, &cmds[i]);
+        dict_set(command_map, cmds[i].cmd, &cmds[i]);
     }
 }
 
 void cmd_map_destroy()
 {
-    hash_free(command_map);
+        dict_free(command_map);
 }
 
 struct command *cmd_create(struct context *ctx)

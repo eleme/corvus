@@ -8,6 +8,7 @@
 #include "logging.h"
 #include "event.h"
 #include "server.h"
+#include "dict.h"
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -60,7 +61,7 @@ static struct connection *conn_create_server(struct context *ctx, struct address
         return NULL;
     }
 
-    hash_set(ctx->server_table, key, (void*)server);
+    dict_set(ctx->server_table, key, (void*)server);
     STAILQ_INSERT_TAIL(&ctx->servers, server, next);
     return server;
 }
@@ -175,7 +176,7 @@ struct connection *conn_get_server_from_pool(struct context *ctx, struct address
     char *key;
 
     key = socket_get_key(addr);
-    server = hash_get(ctx->server_table, key);
+    server = dict_get(ctx->server_table, key);
     if (server != NULL) {
         free(key);
         if (verify_server(server, addr) == -1) return NULL;

@@ -1,5 +1,6 @@
 *.o
 *.a
+*.gch
 
 corvus
 corvus_test
@@ -9,3 +10,5 @@ corvus_test
 *.pyc
 
 .DS_Store
+
+.*.sw[pon]

@@ -12,14 +12,12 @@ through the proxy. Redirection errors are handled and slot map is cached in prox
 Build from source:
 
 ```bash
-$ make init
 $ make
 ```
 
 Build in debug mode:
 
 ```bash
-$ make init
 $ make debug
 ```
 
@@ -50,7 +48,7 @@ syslog 0
 Run proxy:
 
 ```bash
-./corvus corvus.conf
+./src/corvus corvus.conf
 ```
 
 ## Commands
