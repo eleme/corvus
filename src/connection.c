@@ -120,7 +120,6 @@ void conn_free(struct connection *conn)
     }
     conn->status = DISCONNECTED;
     conn->registered = 0;
-    memset(&conn->addr, 0, sizeof(conn->addr));
 
     cmd_iov_free(&conn->iov);
     if (conn->iov.data != NULL) {
