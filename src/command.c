@@ -15,7 +15,7 @@
 #include "client.h"
 #include "stats.h"
 
-#if (IOV_MAX > 128)
+#ifndef IOV_MAX
 #define CORVUS_IOV_MAX 128
 #else
 #define CORVUS_IOV_MAX IOV_MAX
@@ -990,6 +990,12 @@ void cmd_set_stale(struct command *cmd)
 
 void cmd_iov_add(struct iov_data *iov, void *buf, size_t len)
 {
+    if (iov->cursor > ARRAY_CHUNK_SIZE * 16) {
+        iov->len -= iov->cursor;
+        memmove(iov->data, iov->data + iov->cursor, iov->len * sizeof(struct iovec));
+        iov->cursor = 0;
+    }
+
     if (iov->max_size <= iov->len) {
         iov->max_size += ARRAY_CHUNK_SIZE;
         iov->data = realloc(iov->data, sizeof(struct iovec) * iov->max_size);
@@ -1002,36 +1008,34 @@ void cmd_iov_add(struct iov_data *iov, void *buf, size_t len)
 
 int cmd_iov_write(struct context *ctx, struct iov_data *iov, int fd)
 {
-    LOG(DEBUG, "write iov");
-
-    int i, n = 0;
     ssize_t remain = 0, status, bytes = 0, count = 0;
 
-    while (n < iov->len) {
+    int i, n = 0;
+    struct iovec *vec = iov->data + iov->cursor;
+
+    while (n < iov->len - iov->cursor) {
         if (n >= CORVUS_IOV_MAX || bytes >= SSIZE_MAX) break;
-        bytes += iov->data[n++].iov_len;
+        bytes += vec[n++].iov_len;
     }
 
-    status = socket_write(fd, iov->data, n);
+    status = socket_write(fd, vec, n);
     if (status == CORVUS_AGAIN || status == CORVUS_ERR) return status;
 
     ctx->stats.send_bytes += status;
 
     if (status < bytes) {
         for (i = 0; i < n; i++) {
-            count += iov->data[i].iov_len;
+            count += vec[i].iov_len;
             if (count > status) {
-                remain = iov->data[i].iov_len - (count - status);
-                iov->data[i].iov_base = (char*)iov->data[i].iov_base + remain;
-                iov->data[i].iov_len -= remain;
+                remain = vec[i].iov_len - (count - status);
+                vec[i].iov_base = (char*)vec[i].iov_base + remain;
+                vec[i].iov_len -= remain;
                 break;
             }
         }
-        iov->data += i;
-        iov->len -= i;
+        iov->cursor += i;
     } else {
-        iov->data += n;
-        iov->len -= n;
+        iov->cursor += n;
     }
 
     return status;
@@ -1040,10 +1044,8 @@ int cmd_iov_write(struct context *ctx, struct iov_data *iov, int fd)
 void cmd_iov_free(struct iov_data *iov)
 {
     if (iov->ptr != NULL) free(iov->ptr);
-    if (iov->head != NULL) iov->data = iov->head;
+    iov->cursor = 0;
     iov->len = 0;
-    iov->size = 0;
-    iov->head = NULL;
     iov->ptr = NULL;
 }
 

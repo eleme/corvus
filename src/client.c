@@ -15,12 +15,10 @@ int client_write(struct connection *client)
     if (cmd->cmd_count <= 0 || cmd->cmd_count != cmd->cmd_done_count)
         return CORVUS_OK;
 
-    if (cmd->iov.head == NULL) {
+    if (cmd->iov.len <= 0) {
         /* before write */
         cmd->req_time[1] = get_time();
         cmd_make_iovec(cmd, &cmd->iov);
-        cmd->iov.head = cmd->iov.data;
-        cmd->iov.size = cmd->iov.len;
     }
 
     if (cmd->iov.len <= 0) {
@@ -34,7 +32,7 @@ int client_write(struct connection *client)
     if (status == CORVUS_ERR) return CORVUS_ERR;
     if (status == CORVUS_AGAIN) return CORVUS_OK;
 
-    if (cmd->iov.len <= 0) {
+    if (cmd->iov.cursor >= cmd->iov.len) {
         STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
         cmd_stats(cmd);
         cmd_free(cmd);

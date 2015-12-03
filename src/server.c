@@ -57,13 +57,11 @@ void server_make_iov(struct connection *server)
 
         STAILQ_INSERT_TAIL(&server->waiting_queue, cmd, waiting_next);
     }
-    server->iov.head = server->iov.data;
-    server->iov.size = server->iov.len;
 }
 
 int server_write(struct connection *server)
 {
-    if (server->iov.head == NULL) {
+    if (!STAILQ_EMPTY(&server->ready_queue)) {
         server_make_iov(server);
     }
     if (server->iov.len <= 0) {
@@ -78,13 +76,13 @@ int server_write(struct connection *server)
 
     server->send_bytes += status;
 
-    if (server->iov.len <= 0) {
+    if (server->iov.cursor >= server->iov.len) {
         cmd_iov_free(&server->iov);
-    }
-
-    if (conn_register(server) == CORVUS_ERR) {
-        LOG(ERROR, "fail to reregister server %d", server->fd);
-        return CORVUS_ERR;
+    } else {
+        if (conn_register(server) == CORVUS_ERR) {
+            LOG(ERROR, "fail to reregister server %d", server->fd);
+            return CORVUS_ERR;
+        }
     }
 
     return CORVUS_OK;

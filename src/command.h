@@ -18,11 +18,7 @@ enum {
 STAILQ_HEAD(cmd_tqh, command);
 
 struct iov_data {
-    /* first element of data */
-    struct iovec *head;
-    /* total size */
-    int size;
-
+    int cursor;
     struct iovec *data;
     void *ptr;
     int len;
