@@ -9,6 +9,7 @@
 #include "mbuf.h"
 #include "command.h"
 #include "connection.h"
+#include "stats.h"
 
 #include "hashmap/hash.h"
 
@@ -34,33 +35,6 @@ enum thread_role {
 struct node_conf {
     char **nodes;
     int len;
-};
-
-struct basic_stats {
-    long long connected_clients;
-    long long completed_commands;
-    long long recv_bytes;
-    long long send_bytes;
-
-    double remote_latency;
-    double total_latency;
-
-    long long buffers;
-};
-
-struct stats {
-    pid_t pid;
-    int threads;
-
-    double used_cpu_sys;
-    double used_cpu_user;
-
-    double *last_command_latency;
-    char *remote_nodes;
-
-    struct basic_stats basic;
-
-    long long free_buffers;
 };
 
 struct context {
