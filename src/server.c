@@ -141,6 +141,7 @@ int read_one_reply(struct connection *server)
     /* after read */
     cmd->rep_time[1] = get_time();
     if (status == CORVUS_OK) {
+        server->completed_commands++;
         if (!cmd->asking) {
             STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
             STAILQ_NEXT(cmd, waiting_next) = NULL;
@@ -167,7 +168,6 @@ int read_one_reply(struct connection *server)
     }
 
     if (cmd->rep_data->type != REP_ERROR) {
-        server->completed_commands++;
         cmd_mark_done(cmd);
         return CORVUS_OK;
     }
