@@ -191,11 +191,13 @@ void slot_map_clear(struct context *ctx)
     addr_list_clear();
 
     struct node_info *node_info;
-    dict_each(ctx->server_table, {
-        free((void *)(node->key));
-        node_info = (struct node_info *)(node->val);
+
+    struct dict_iter iter = DICT_ITER_INITIALIZER(ctx->server_table);
+    dict_each(&iter) {
+        free((void *)(iter.key));
+        node_info = (struct node_info *)(iter.val);
         LIST_INSERT_HEAD(&node_list, node_info, next);
-    });
+    }
     dict_clear(ctx->server_table);
 }
 

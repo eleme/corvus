@@ -366,10 +366,11 @@ void *dict_pop(struct dict *dict, char *key)
  *
  * Or using the macro `dict_each`:
  *
- *   dict_each(dict, {
- *      node->key..
- *      node->val..
- *   });
+ *   struct dict_iter iter = DICT_ITER_INITIALIZER(dict);
+ *   dict_each(&iter) {
+ *      iter.key..
+ *      iter.val..
+ *   };
  * */
 struct dict_iter *dict_iter_new(struct dict *dict)
 {
@@ -411,15 +412,19 @@ struct dict_node *dict_iter_next(struct dict_iter *iter)
     if (iter->index >= table_size)
         return NULL;
 
+    if (iter->node != NULL) iter->node = iter->node->next;
+
     while (iter->node == NULL) {
         if (iter->index >= table_size)
             return NULL;
         iter->node = (dict->table)[iter->index++];
     }
 
-    struct dict_node *node = iter->node;
-    iter->node = node->next;
-    return node;
+    if (iter->node != NULL) {
+        iter->val = iter->node->val;
+        iter->key = iter->node->key;
+    }
+    return iter->node;
 }
 
 /* Rewind dict iter. */

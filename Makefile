@@ -1,13 +1,13 @@
 default: corvus
 
 .DEFAULT:
-	$(MAKE) $@ -C src
+	@$(MAKE) $@ -C src
 
 clean:
-	$(MAKE) $@ -C src
-	$(MAKE) $@ -C tests
+	@$(MAKE) $@ -C src
+	@$(MAKE) $@ -C tests
 
 test:
-	$(MAKE) $@ -C tests
+	@$(MAKE) $@ -C tests
 
 .PHONY: clean init test

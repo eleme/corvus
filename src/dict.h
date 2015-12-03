@@ -18,13 +18,11 @@ extern "C" {
 #define DICT_LOAD_LIMIT         0.72 /* load factor */
 #define dict()                  dict_new()
 #define dict_iter(dict)         dict_iter_new(dict)
-#define dict_each(dict, block)  {                    \
-    struct dict_node *node = NULL;                   \
-    struct dict_iter iter = {dict, 0, NULL};         \
-    while ((node = dict_iter_next(&iter)) != NULL) { \
-      block;                                         \
-    }                                                \
-}
+
+#define dict_each(iter) \
+    while (dict_iter_next(iter) != NULL)
+
+#define DICT_ITER_INITIALIZER(dict) {dict, 0, NULL, NULL, NULL}
 
 enum {
     DICT_OK = 0,               /* operation is ok */
@@ -48,6 +46,8 @@ struct dict_iter {
     struct dict *dict;         /* dict to iterate */
     size_t index;              /* current table index */
     struct dict_node *node;    /* current dict node */
+    void *val;                 /* current val */
+    char *key;                 /* current key */
 };
 
 struct dict *dict_new(void);
