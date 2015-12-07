@@ -14,7 +14,7 @@ TEST(test_nested_array) {
     buf->last += len;
 
     struct reader r;
-    reader_init(ctx, &r);
+    reader_init(&r);
     reader_feed(&r, buf);
 
     if (parse(&r) == -1) {
@@ -67,7 +67,7 @@ TEST(test_partial_parse) {
     buf->last += size;
 
     struct reader reader;
-    reader_init(ctx, &reader);
+    reader_init(&reader);
     reader_feed(&reader, buf);
 
     if (parse(&reader) == -1) {
@@ -121,7 +121,7 @@ TEST(test_process_integer) {
     buf.last = (uint8_t*)data + len;
 
     struct reader r;
-    reader_init(ctx, &r);
+    reader_init(&r);
     reader_feed(&r, &buf);
 
     struct redis_data *d;
@@ -135,7 +135,7 @@ TEST(test_process_integer) {
     ASSERT(parse(&r) != -1);
     ASSERT(r.data->integer == 231);
 
-    redis_data_free(ctx, d);
+    redis_data_free(d);
     reader_free(&r);
     PASS(NULL);
 }
@@ -151,7 +151,7 @@ TEST(test_empty_array) {
     buf.end = buf.last;
 
     struct reader r;
-    reader_init(ctx, &r);
+    reader_init(&r);
     reader_feed(&r, &buf);
 
     struct redis_data *d;
@@ -164,7 +164,7 @@ TEST(test_empty_array) {
 
     ASSERT(parse(&r) != -1);
 
-    redis_data_free(ctx, d);
+    redis_data_free(d);
     reader_free(&r);
     PASS(NULL);
 }
@@ -183,7 +183,7 @@ TEST(test_parse_simple_string) {
     buf.end = buf.last;
 
     struct reader r;
-    reader_init(ctx, &r);
+    reader_init(&r);
     reader_feed(&r, &buf);
 
     ASSERT(parse(&r) != -1);
@@ -215,7 +215,7 @@ TEST(test_parse_error) {
     buf.end = buf.last;
 
     struct reader r;
-    reader_init(ctx, &r);
+    reader_init(&r);
     reader_feed(&r, &buf);
 
     ASSERT(parse(&r) != -1);
@@ -243,7 +243,7 @@ TEST(test_parse_null_string) {
     buf.end = buf.last;
 
     struct reader r;
-    reader_init(ctx, &r);
+    reader_init(&r);
     reader_feed(&r, &buf);
 
     ASSERT(parse(&r) != -1);
@@ -261,7 +261,7 @@ TEST(test_parse_null_array) {
     buf.end = buf.last;
 
     struct reader r;
-    reader_init(ctx, &r);
+    reader_init(&r);
     reader_feed(&r, &buf);
 
     ASSERT(parse(&r) != -1);
@@ -280,7 +280,7 @@ TEST(test_parse_minus_integer) {
     buf.end = buf.last;
 
     struct reader r;
-    reader_init(ctx, &r);
+    reader_init(&r);
     reader_feed(&r, &buf);
 
     ASSERT(parse(&r) != -1);

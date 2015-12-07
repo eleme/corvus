@@ -48,7 +48,6 @@ int stack_push(struct reader *r)
 {
     if (r->sidx > 8) return -1;
     struct reader_task *task = &r->rstack[++r->sidx];
-    task->ctx = r->ctx;
     task->data = NULL;
     task->cur_data = NULL;
     task->prev_buf = NULL;
@@ -86,19 +85,9 @@ void pos_array_push(struct pos_array *arr, int len, uint8_t *p)
     arr->str_len += len;
 }
 
-struct redis_data *redis_data_create(struct context *ctx, int type)
+struct redis_data *redis_data_create(int type)
 {
-    struct redis_data *data;
-    if (!STAILQ_EMPTY(&ctx->free_redis_dataq)) {
-        LOG(DEBUG, "redis data get cache");
-        data = STAILQ_FIRST(&ctx->free_redis_dataq);
-        STAILQ_REMOVE_HEAD(&ctx->free_redis_dataq, next);
-        STAILQ_NEXT(data, next) = NULL;
-        ctx->nfree_redis_dataq--;
-    } else {
-        data = malloc(sizeof(struct redis_data));
-    }
-    memset(data, 0, sizeof(struct redis_data));
+    struct redis_data *data = calloc(1, sizeof(struct redis_data));
     data->type = type;
     return data;
 }
@@ -109,7 +98,7 @@ struct redis_data *redis_data_get(struct reader_task *task, int type)
     switch (task->type) {
         case REP_UNKNOWN:
             if (task->data == NULL) {
-                task->data = data = redis_data_create(task->ctx, type);
+                task->data = data = redis_data_create(type);
             } else {
                 data = task->data;
             }
@@ -118,7 +107,7 @@ struct redis_data *redis_data_get(struct reader_task *task, int type)
             if (task->cur_data != NULL) {
                 data = task->cur_data;
             } else {
-                task->cur_data = data = redis_data_create(task->ctx, type);
+                task->cur_data = data = redis_data_create(type);
                 task->data->element[task->idx++] = data;
             }
             return data;
@@ -168,7 +157,7 @@ int process_array(struct reader *r)
     struct reader_task *task = &r->rstack[r->sidx];
     task->type = REP_ARRAY;
 
-    if (task->data == NULL) task->data = redis_data_create(r->ctx, REP_ARRAY);
+    if (task->data == NULL) task->data = redis_data_create(REP_ARRAY);
 
     for (; r->buf->pos < r->buf->last; r->buf->pos++) {
         p = r->buf->pos;
@@ -446,7 +435,7 @@ void pos_array_destroy(struct pos_array *arr)
     free(arr);
 }
 
-void redis_data_free(struct context *ctx, struct redis_data *data)
+void redis_data_free(struct redis_data *data)
 {
     if (data == NULL) return;
 
@@ -461,20 +450,17 @@ void redis_data_free(struct context *ctx, struct redis_data *data)
         case REP_ARRAY:
             if (data->element == NULL) break;
             for (i = 0; i < data->elements; i++) {
-                redis_data_free(ctx, data->element[i]);
+                redis_data_free(data->element[i]);
             }
             free(data->element);
             data->element = NULL;
             data->elements = 0;
     }
-    STAILQ_NEXT(data, next) = NULL;
-    STAILQ_INSERT_HEAD(&ctx->free_redis_dataq, data, next);
-    ctx->nfree_redis_dataq++;
+    free(data);
 }
 
-void reader_init(struct context *ctx, struct reader *r)
+void reader_init(struct reader *r)
 {
-    r->ctx = ctx;
     r->type = PARSE_BEGIN;
     r->buf = NULL;
     r->data = NULL;
@@ -493,13 +479,13 @@ void reader_free(struct reader *r)
 {
     if (r == NULL) return;
     if (r->data != NULL) {
-        redis_data_free(r->ctx, r->data);
+        redis_data_free(r->data);
         r->data = NULL;
     }
     int i;
     for (i = 0; i <= r->sidx; i++) {
         if (r->rstack[i].data == NULL) continue;
-        redis_data_free(r->ctx, r->rstack[i].data);
+        redis_data_free(r->rstack[i].data);
         r->rstack[i].data = NULL;
     }
     r->sidx = -1;

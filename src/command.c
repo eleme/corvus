@@ -203,7 +203,7 @@ static void cmd_init(struct context *ctx, struct command *cmd)
     memset(cmd, 0, sizeof(struct command));
 
     cmd->ctx = ctx;
-    reader_init(cmd->ctx, &cmd->reader);
+    reader_init(&cmd->reader);
 
     STAILQ_INIT(&cmd->buf_queue);
     STAILQ_INIT(&cmd->rep_queue);
@@ -217,13 +217,16 @@ static void cmd_init(struct context *ctx, struct command *cmd)
 
 static void cmd_recycle(struct context *ctx, struct command *cmd)
 {
-    LOG(DEBUG, "cmd recycle");
-    STAILQ_NEXT(cmd, cmd_next) = NULL;
-    STAILQ_NEXT(cmd, ready_next) = NULL;
-    STAILQ_NEXT(cmd, waiting_next) = NULL;
-    STAILQ_NEXT(cmd, sub_cmd_next) = NULL;
-    STAILQ_INSERT_HEAD(&ctx->free_cmdq, cmd, cmd_next);
-    ctx->nfree_cmdq++;
+    if (ctx->nfree_cmdq > RECYCLE_SIZE) {
+        free(cmd);
+    } else {
+        STAILQ_NEXT(cmd, cmd_next) = NULL;
+        STAILQ_NEXT(cmd, ready_next) = NULL;
+        STAILQ_NEXT(cmd, waiting_next) = NULL;
+        STAILQ_NEXT(cmd, sub_cmd_next) = NULL;
+        STAILQ_INSERT_HEAD(&ctx->free_cmdq, cmd, cmd_next);
+        ctx->nfree_cmdq++;
+    }
 }
 
 static int cmd_in_queue(struct command *cmd, struct connection *server)
@@ -999,7 +1002,7 @@ void cmd_set_stale(struct command *cmd)
 
 void cmd_iov_add(struct iov_data *iov, void *buf, size_t len)
 {
-    if (iov->cursor > ARRAY_CHUNK_SIZE * 16) {
+    if (iov->cursor > CORVUS_IOV_MAX) {
         iov->len -= iov->cursor;
         memmove(iov->data, iov->data + iov->cursor, iov->len * sizeof(struct iovec));
         iov->cursor = 0;
@@ -1053,6 +1056,9 @@ int cmd_iov_write(struct context *ctx, struct iov_data *iov, int fd)
 void cmd_iov_free(struct iov_data *iov)
 {
     if (iov->ptr != NULL) free(iov->ptr);
+    if (iov->data != NULL) free(iov->data);
+    iov->data = NULL;
+    iov->max_size = 0;
     iov->cursor = 0;
     iov->len = 0;
     iov->ptr = NULL;
@@ -1096,23 +1102,18 @@ void cmd_free(struct command *cmd)
     struct command *c;
     struct context *ctx = cmd->ctx;
     if (cmd->req_data != NULL) {
-        redis_data_free(ctx, cmd->req_data);
+        redis_data_free(cmd->req_data);
         cmd->req_data = NULL;
     }
     if (cmd->rep_data != NULL) {
-        redis_data_free(ctx, cmd->rep_data);
+        redis_data_free(cmd->rep_data);
         cmd->rep_data = NULL;
     }
 
     cmd_iov_free(&cmd->iov);
-    if (cmd->iov.data != NULL) {
-        free(cmd->iov.data);
-        cmd->iov.max_size = 0;
-        cmd->iov.data = NULL;
-    }
 
     reader_free(&cmd->reader);
-    reader_init(cmd->ctx, &cmd->reader);
+    reader_init(&cmd->reader);
 
     cmd_free_reply(cmd);
 

@@ -270,7 +270,6 @@ void context_init(struct context *ctx, bool syslog, int log_level)
 
     STAILQ_INIT(&ctx->free_cmdq);
     STAILQ_INIT(&ctx->free_connq);
-    STAILQ_INIT(&ctx->free_redis_dataq);
     STAILQ_INIT(&ctx->servers);
 }
 
@@ -306,15 +305,6 @@ void context_free(struct context *ctx)
         STAILQ_REMOVE_HEAD(&ctx->free_connq, next);
         free(conn);
         ctx->nfree_connq--;
-    }
-
-    /* redis data queue */
-    struct redis_data *data;
-    while (!STAILQ_EMPTY(&ctx->free_redis_dataq)) {
-        data = STAILQ_FIRST(&ctx->free_redis_dataq);
-        STAILQ_REMOVE_HEAD(&ctx->free_redis_dataq, next);
-        free(data);
-        ctx->nfree_redis_dataq--;
     }
 
     /* event loop */

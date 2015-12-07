@@ -123,11 +123,6 @@ void conn_free(struct connection *conn)
     conn->registered = 0;
 
     cmd_iov_free(&conn->iov);
-    if (conn->iov.data != NULL) {
-        free(conn->iov.data);
-        conn->iov.max_size = 0;
-        conn->iov.data = NULL;
-    }
 
     EMPTY_CMD_QUEUE(&conn->cmd_queue, cmd_next);
     EMPTY_CMD_QUEUE(&conn->ready_queue, ready_next);
@@ -150,9 +145,13 @@ void conn_recycle(struct context *ctx, struct connection *conn)
         LOG(WARN, "connection recycle, data buffer not empty");
     }
 
-    STAILQ_NEXT(conn, next) = NULL;
-    STAILQ_INSERT_HEAD(&ctx->free_connq, conn, next);
-    ctx->nfree_connq++;
+    if (ctx->nfree_connq > RECYCLE_SIZE) {
+        free(conn);
+    } else {
+        STAILQ_NEXT(conn, next) = NULL;
+        STAILQ_INSERT_HEAD(&ctx->free_connq, conn, next);
+        ctx->nfree_connq++;
+    }
 }
 
 int conn_create_fd()
