@@ -48,7 +48,6 @@ int stack_push(struct reader *r)
 {
     if (r->sidx > 8) return -1;
     struct reader_task *task = &r->rstack[++r->sidx];
-    task->ctx = r->ctx;
     task->data = NULL;
     task->cur_data = NULL;
     task->prev_buf = NULL;
@@ -436,7 +435,7 @@ void pos_array_destroy(struct pos_array *arr)
     free(arr);
 }
 
-void redis_data_free(struct context *ctx, struct redis_data *data)
+void redis_data_free(struct redis_data *data)
 {
     if (data == NULL) return;
 
@@ -451,7 +450,7 @@ void redis_data_free(struct context *ctx, struct redis_data *data)
         case REP_ARRAY:
             if (data->element == NULL) break;
             for (i = 0; i < data->elements; i++) {
-                redis_data_free(ctx, data->element[i]);
+                redis_data_free(data->element[i]);
             }
             free(data->element);
             data->element = NULL;
@@ -460,9 +459,8 @@ void redis_data_free(struct context *ctx, struct redis_data *data)
     free(data);
 }
 
-void reader_init(struct context *ctx, struct reader *r)
+void reader_init(struct reader *r)
 {
-    r->ctx = ctx;
     r->type = PARSE_BEGIN;
     r->buf = NULL;
     r->data = NULL;
@@ -481,13 +479,13 @@ void reader_free(struct reader *r)
 {
     if (r == NULL) return;
     if (r->data != NULL) {
-        redis_data_free(r->ctx, r->data);
+        redis_data_free(r->data);
         r->data = NULL;
     }
     int i;
     for (i = 0; i <= r->sidx; i++) {
         if (r->rstack[i].data == NULL) continue;
-        redis_data_free(r->ctx, r->rstack[i].data);
+        redis_data_free(r->rstack[i].data);
         r->rstack[i].data = NULL;
     }
     r->sidx = -1;

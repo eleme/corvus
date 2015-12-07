@@ -98,7 +98,7 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
     memcpy(&ptr, &cmd->rep_buf[0], sizeof(ptr));
 
     server_free_buf(cmd);
-    redis_data_free(cmd->ctx, cmd->rep_data);
+    redis_data_free(cmd->rep_data);
     cmd->rep_data = NULL;
 
     if (cmd->redirected) {
@@ -188,7 +188,7 @@ int server_read(struct connection *server)
             case CORVUS_ASKING:
                 LOG(DEBUG, "recv asking");
                 server_free_buf(cmd);
-                redis_data_free(cmd->ctx, cmd->rep_data);
+                redis_data_free(cmd->rep_data);
                 cmd->rep_data = NULL;
                 cmd->asking = 0;
                 continue;

@@ -51,7 +51,6 @@ struct redis_data {
 STAILQ_HEAD(redis_data_tqh, redis_data);
 
 struct reader_task {
-    struct context *ctx;
     int type;
     int elements;
     size_t idx;
@@ -66,7 +65,6 @@ struct buf_ptr {
 };
 
 struct reader {
-    struct context *ctx;
     int type;
     struct mbuf *buf;
 
@@ -101,7 +99,7 @@ struct pos_array {
     struct pos *items;
 };
 
-void reader_init(struct context *ctx, struct reader *r);
+void reader_init(struct reader *r);
 void reader_free(struct reader *r);
 void reader_feed(struct reader *r, struct mbuf *buf);
 int reader_ready(struct reader *r);
@@ -110,6 +108,6 @@ struct pos *pos_get(struct pos_array *arr, int idx);
 size_t pos_str_len(struct pos *pos);
 int pos_to_str(struct pos_array *pos, char *str);
 int pos_array_compare(struct pos_array *arr, char *data, int len);
-void redis_data_free(struct context *ctx, struct redis_data *data);
+void redis_data_free(struct redis_data *data);
 
 #endif /* end of include guard: __PARSER_H */
