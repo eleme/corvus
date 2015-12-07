@@ -18,6 +18,7 @@
 #define CORVUS_AGAIN -2
 #define CORVUS_EOF -3
 #define CORVUS_INPROGRESS -4
+#define CORVUS_ASKING -5
 
 #define THREAD_STACK_SIZE (1024*1024*4)
 #define MIN(a, b) ((a) > (b) ? (b) : (a))

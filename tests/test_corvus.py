@@ -1,7 +1,13 @@
 # -*- coding: utf-8 -*-
 
-import inspect
+import pytest
 import redis
+
+from ruskit.cluster import Cluster, ClusterNode
+
+PROXY_PORT = 12345
+REDIS_URI_SRC = "redis://localhost:8000"
+REDIS_URI_DST = "redis://localhost:8001"
 
 
 class Redis(redis.Redis):
@@ -36,26 +42,32 @@ class Redis(redis.Redis):
         return self.execute_command('PFCOUNT', *args)
 
 
-r = Redis(port=12345)
-#r = Redis(port=6379)
+r = Redis(port=PROXY_PORT)
 
 
+@pytest.fixture
+def delete_keys(request):
+    _keys = []
+    class _O(object):
+        def keys(self, *args):
+            _keys.extend(args)
 
-def delete_keys(*keys):
-    def decorator(func):
-        setattr(func, "keys", keys)
-        return func
-    return decorator
+    def fin():
+        print("delete", _keys);
+        r.delete(*_keys)
+        _keys[:] = []
+    request.addfinalizer(fin)
+    return _O()
 
 
-@delete_keys("a", "b")
-def test_null_key():
+def test_null_key(delete_keys):
+    delete_keys.keys('')
+
     assert r.set('', 1) is True
     assert r.get('') == '1'
 
 
-@delete_keys("key1", "key2", "key3")
-def test_del():
+def test_del(delete_keys):
     """ DEL key [key ...]
             Available since 1.0.0.
             Time complexity: O(N) where N is the number of keys that will be
@@ -72,13 +84,14 @@ def test_del():
     (integer) 2
     redis>
     """
+    delete_keys.keys("key1", "key2", "key3")
+
     assert r.set("key1", "Hello") is True
     assert r.set("key2", "World") is True
     assert r.delete("key1", "key2", "key3") == 2
 
 
-@delete_keys("mykey")
-def test_dump():
+def test_dump(delete_keys):
     """ DUMP key
             Available since 2.6.0.
             Time complexity: O(1) to access the key and additional O(N*M) to
@@ -92,12 +105,13 @@ def test_dump():
     "\u0000\xC0\n\a\u0000\x91\xAD\x82\xB6\u0006d\xB6\xA1"
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.set("mykey", 10) is True
     assert r.dump("mykey") == "\x00\xc0\n\x06\x00\xf8r?\xc5\xfb\xfb_("
 
 
-@delete_keys("key1", "nosuchkey", "key2")
-def test_exists():
+def test_exists(delete_keys):
     """ EXISTS key [key ...]
             Available since 1.0.0.
             Time complexity: O(1)
@@ -114,6 +128,8 @@ def test_exists():
     (integer) 2
     redis>
     """
+    delete_keys.keys("key1", "nosuchkey", "key2")
+
     assert r.set("key1", "Hello") is True
     assert r.exists("key1") == 1
     assert r.exists("nosuchkey") == 0
@@ -121,8 +137,7 @@ def test_exists():
     assert r.exists("key1", "key2", "nosuchkey")
 
 
-@delete_keys("mykey")
-def test_expire():
+def test_expire(delete_keys):
     """ EXPIRE key seconds
             Available since 1.0.0.
             Time complexity: O(1)
@@ -139,6 +154,8 @@ def test_expire():
     (integer) -1
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.set("mykey", "Hello") is True
     assert r.expire("mykey", 10) == 1
     assert r.ttl("mykey") == 10
@@ -146,8 +163,7 @@ def test_expire():
     assert r.ttl("mykey") is None
 
 
-@delete_keys("mykey")
-def test_expireat():
+def test_expireat(delete_keys):
     """ EXPIREAT key timestamp
             Available since 1.2.0.
             Time complexity: O(1)
@@ -162,93 +178,92 @@ def test_expireat():
     (integer) 0
     redis>
     """
+    delete_keys.keys("mykey")
     assert r.set("mykey", "Hello") is True
     assert r.exists("mykey") is True
     assert r.expireat("mykey", 1293840000) == 1
     assert r.exists("mykey") is False
 
 
-#def test_keys():
-    """ KEYS pattern
-            Available since 1.0.0.
-            Time complexity: O(N) with N being the number of keys in the
-            database, under the assumption that the key names in the database
-            and the given pattern have limited length.
-
-    redis> MSET one 1 two 2 three 3 four 4
-    OK
-    redis> KEYS *o*
-    1) "two"
-    2) "four"
-    3) "one"
-    redis> KEYS t??
-    1) "two"
-    redis> KEYS *
-    1) "two"
-    2) "four"
-    3) "three"
-    4) "one"
-    redis>
-    """
-#    assert r.mset({"one": 1, "two": 2, "three": 3, "four": 4}) is True
-#    assert r.keys("*o*") == ["two", "four", "one"]
-#    assert r.keys("t??") == ["two"]
-#    assert r.keys("*") == ["two", "three", "four", "one"]
-
-
-#def test_migrate():
-    """ MIGRATE host port key destination-db timeout [COPY] [REPLACE]
-            Available since 2.6.0.
-            Time complexity: This command actually executes a DUMP+DEL in the
-            source instance, and a RESTORE in the target instance. See the
-            pages of these commands for time complexity. Also an O(N) data
-            transfer between the two instances is performed.
-    """
+# def test_keys():
+#     """ KEYS pattern
+#             Available since 1.0.0.
+#             Time complexity: O(N) with N being the number of keys in the
+#             database, under the assumption that the key names in the database
+#             and the given pattern have limited length.
+#
+#     redis> MSET one 1 two 2 three 3 four 4
+#     OK
+#     redis> KEYS *o*
+#     1) "two"
+#     2) "four"
+#     3) "one"
+#     redis> KEYS t??
+#     1) "two"
+#     redis> KEYS *
+#     1) "two"
+#     2) "four"
+#     3) "three"
+#     4) "one"
+#     redis>
+#     """
+#     assert r.mset({"one": 1, "two": 2, "three": 3, "four": 4}) is True
+#     assert r.keys("*o*") == ["two", "four", "one"]
+#     assert r.keys("t??") == ["two"]
+#     assert r.keys("*") == ["two", "three", "four", "one"]
 
 
-
-#def test_move():
-    """ MOVE key db
-            Available since 1.0.0.
-            Time complexity: O(1)
-    """
-
-
-#def test_object():
-    """ OBJECT subcommand [arguments [arguments ...]]
-            Available since 2.2.3.
-            Time complexity: O(1) for all the currently implemented subcommands.
-
-    # 1
-    redis> lpush mylist "Hello World"
-    (integer) 4
-    redis> object refcount mylist
-    (integer) 1
-    redis> object encoding mylist
-    "ziplist"
-    redis> object idletime mylist
-    (integer) 10
-
-    # 2
-    redis> set foo 1000
-    OK
-    redis> object encoding foo
-    "int"
-    redis> append foo bar
-    (integer) 7
-    redis> get foo
-    "1000bar"
-    redis> object encoding foo
-    "raw"
-    """
-#    assert r.lpush("mylist", "Hello World") == 1
-#    assert r.object("refcount", "mylist")  == 1
-#    assert r.object("encoding", "mylist") == "ziplist"
-#    assert r.object("idletime", "mylist") == 0
+# def test_migrate():
+#     """ MIGRATE host port key destination-db timeout [COPY] [REPLACE]
+#             Available since 2.6.0.
+#             Time complexity: This command actually executes a DUMP+DEL in the
+#             source instance, and a RESTORE in the target instance. See the
+#             pages of these commands for time complexity. Also an O(N) data
+#             transfer between the two instances is performed.
+#     """
 
 
-@delete_keys("mykey")
-def test_persist():
+# def test_move():
+#     """ MOVE key db
+#             Available since 1.0.0.
+#             Time complexity: O(1)
+#     """
+
+
+# def test_object():
+#     """ OBJECT subcommand [arguments [arguments ...]]
+#             Available since 2.2.3.
+#             Time complexity: O(1) for all the currently implemented subcommands.
+#
+#     # 1
+#     redis> lpush mylist "Hello World"
+#     (integer) 4
+#     redis> object refcount mylist
+#     (integer) 1
+#     redis> object encoding mylist
+#     "ziplist"
+#     redis> object idletime mylist
+#     (integer) 10
+#
+#     # 2
+#     redis> set foo 1000
+#     OK
+#     redis> object encoding foo
+#     "int"
+#     redis> append foo bar
+#     (integer) 7
+#     redis> get foo
+#     "1000bar"
+#     redis> object encoding foo
+#     "raw"
+#     """
+#     assert r.lpush("mylist", "Hello World") == 1
+#     assert r.object("refcount", "mylist")  == 1
+#     assert r.object("encoding", "mylist") == "ziplist"
+#     assert r.object("idletime", "mylist") == 0
+
+
+def test_persist(delete_keys):
     """ PERSIST key
             Available since 2.2.0.
             Time complexity: O(1)
@@ -265,6 +280,8 @@ def test_persist():
     (integer) -1
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.set("mykey", "Hello") is True
     assert r.expire("mykey", 10) == 1
     assert r.ttl("mykey") == 10
@@ -272,8 +289,7 @@ def test_persist():
     assert r.ttl("mykey") is None
 
 
-@delete_keys("mykey")
-def test_pexpire():
+def test_pexpire(delete_keys):
     """ PEXPIRE key milliseconds
             Available since 2.6.0.
             Time complexity: O(1)
@@ -288,13 +304,14 @@ def test_pexpire():
     (integer) 1498
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.set("mykey", "Hello") is True
     assert r.pexpire("mykey", 1500) == 1
     assert r.ttl("mykey")
 
 
-@delete_keys("mykey")
-def test_pexpireat():
+def test_pexpireat(delete_keys):
     """ PEXPIREAT key milliseconds-timestamp
             Available since 2.6.0.
             Time complexity: O(1)
@@ -309,14 +326,15 @@ def test_pexpireat():
     (integer) 107040075951
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.set("mykey", "Hello") is True
     assert r.pexpireat("mykey", 1555555555005) == 1
     assert r.ttl("mykey")
     assert r.pttl("mykey")
 
 
-@delete_keys("mykey")
-def test_pttl():
+def test_pttl(delete_keys):
     """ PTTL key
             Available since 2.6.0.
             Time complexity: O(1)
@@ -329,59 +347,60 @@ def test_pttl():
     (integer) 999
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.set("mykey", "Hello") is True
     assert r.expire("mykey", 1) == 1
     assert r.pttl("mykey")
 
 
-#def test_randomkey():
-    """ RANDOMKEY
-            Available since 1.0.0.
-            Time complexity: O(1)
-    """
+# def test_randomkey():
+#     """ RANDOMKEY
+#             Available since 1.0.0.
+#             Time complexity: O(1)
+#     """
 
 
-#def test_rename():
-    """ RENAME key newkey
-            Available since 1.0.0.
-            Time complexity: O(1)
-
-    redis> SET mykey "Hello"
-    OK
-    redis> RENAME mykey myotherkey
-    OK
-    redis> GET myotherkey
-    "Hello"
-    redis>
-    """
-#    assert r.set("mykey", "Hello") is True
-#    assert r.rename("mykey", "myotherkey") is True
-#    assert r.get("myotherkey") == "Hello"
-
-
-#def test_renamenx():
-    """ RENAMENX key newkey
-            Available since 1.0.0.
-            Time complexity: O(1)
-
-    redis> SET mykey "Hello"
-    OK
-    redis> SET myotherkey "World"
-    OK
-    redis> RENAMENX mykey myotherkey
-    (integer) 0
-    redis> GET myotherkey
-    "World"
-    redis>
-    """
-#    assert r.set("mykey", "Hello") is True
-#    assert r.set("myotherkey", "World") is True
-#    assert r.renamenx("mykey", "myotherkey") is False
-#    assert r.get("myotherkey") == "World"
+# def test_rename():
+#     """ RENAME key newkey
+#             Available since 1.0.0.
+#             Time complexity: O(1)
+#
+#     redis> SET mykey "Hello"
+#     OK
+#     redis> RENAME mykey myotherkey
+#     OK
+#     redis> GET myotherkey
+#     "Hello"
+#     redis>
+#     """
+#     assert r.set("mykey", "Hello") is True
+#     assert r.rename("mykey", "myotherkey") is True
+#     assert r.get("myotherkey") == "Hello"
 
 
-@delete_keys("mykey")
-def test_restore():
+# def test_renamenx():
+#     """ RENAMENX key newkey
+#             Available since 1.0.0.
+#             Time complexity: O(1)
+#
+#     redis> SET mykey "Hello"
+#     OK
+#     redis> SET myotherkey "World"
+#     OK
+#     redis> RENAMENX mykey myotherkey
+#     (integer) 0
+#     redis> GET myotherkey
+#     "World"
+#     redis>
+#     """
+#     assert r.set("mykey", "Hello") is True
+#     assert r.set("myotherkey", "World") is True
+#     assert r.renamenx("mykey", "myotherkey") is False
+#     assert r.get("myotherkey") == "World"
+
+
+def test_restore(delete_keys):
     """ RESTORE key ttl serialized-value [REPLACE]
             Available since 2.6.0.
             Time complexity: O(1) to create the new key and additional O(N*M)
@@ -405,14 +424,15 @@ def test_restore():
     2) "2"
     3) "3"
     """
+    delete_keys.keys("mykey")
+
     res = "\n\x11\x11\x00\x00\x00\x0e\x00\x00\x00\x03\x00\x00\xf2\x02\xf3\x02\xf4\xff\x06\x00Z1_\x1cg\x04!\x18"
     assert r.restore("mykey", 0, res) == "OK"
     assert r.type("mykey") == "list"
     assert r.lrange("mykey", 0, -1) == ["1", "2", "3"]
 
 
-@delete_keys("mylist")
-def test_sort():
+def test_sort(delete_keys):
     """ SORT key [BY pattern] [LIMIT offset count]
         [GET pattern [GET pattern ...]] [ASC|DESC] [ALPHA] [STORE destination]
             Available since 1.0.0.
@@ -439,6 +459,8 @@ def test_sort():
     3) "1"
     127.0.0.1:6379>
     """
+    delete_keys.keys("mylist")
+
     assert r.rpush("mylist", 2, 1, 3) == 3
     assert r.lrange("mylist", 0, -1) == ["2", "1", "3"]
     assert r.sort("mylist") == ["1", "2", "3"]
@@ -446,8 +468,7 @@ def test_sort():
     #assert r.lrange("myotherlist", 0, -1) == ["3", "2", "1"]
 
 
-@delete_keys("mykey")
-def test_ttl():
+def test_ttl(delete_keys):
     """ TTL key
             Available since 1.0.0.
             Time complexity: O(1)
@@ -460,13 +481,14 @@ def test_ttl():
     (integer) 10
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.set("mykey", "Hello") is True
     assert r.expire("mykey", 10) == 1
     assert r.ttl("mykey") == 10
 
 
-@delete_keys("key1", "key2", "key3")
-def test_type():
+def test_type(delete_keys):
     """ TYPE key
             Available since 1.0.0.
             Time complexity: O(1)
@@ -485,6 +507,8 @@ def test_type():
     set
     redis>
     """
+    delete_keys.keys("key1", "key2", "key3")
+
     assert r.set("key1", "value") is True
     assert r.lpush("key2", "value") == 1
     assert r.sadd("key3", "value") == 1
@@ -493,26 +517,25 @@ def test_type():
     assert r.type("key3") == "set"
 
 
-#def test_wait():
-    """ WAIT numslaves timeout
-            Available since 3.0.0.
-            Time complexity: O(1)
-    """
+# def test_wait():
+#     """ WAIT numslaves timeout
+#             Available since 3.0.0.
+#             Time complexity: O(1)
+#     """
 
 
-#def test_scan():
-    """ SCAN cursor [MATCH pattern] [COUNT count]
-            Available since 2.8.0.
-            Time complexity: O(1) for every call. O(N) for a complete
-            iteration, including enough command calls for the cursor to return
-            back to 0. N is the number of elements inside the collection.
-    """
+# def test_scan():
+#     """ SCAN cursor [MATCH pattern] [COUNT count]
+#             Available since 2.8.0.
+#             Time complexity: O(1) for every call. O(N) for a complete
+#             iteration, including enough command calls for the cursor to return
+#             back to 0. N is the number of elements inside the collection.
+#     """
 
 
 
 ###strings
-@delete_keys("mykey", "ts")
-def test_append():
+def test_append(delete_keys):
     """ APPEND key value
             Available since 2.0.0.
             Time complexity: O(1). The amortized time complexity is O(1)
@@ -542,6 +565,8 @@ def test_append():
     "0035"
     redis>
     """
+    delete_keys.keys("mykey", "ts")
+
     assert r.exists("mykey") == 0
     assert r.append("mykey", "Hello") == 5
     assert r.append("mykey", " World") == 11
@@ -553,8 +578,7 @@ def test_append():
     assert r.getrange("ts", 4, 7) == "0035"
 
 
-@delete_keys("mykey")
-def test_bitcount():
+def test_bitcount(delete_keys):
     """ BITCOUNT key [start end]
             Available since 2.6.0.
             Time complexity: O(N)
@@ -569,35 +593,36 @@ def test_bitcount():
     (integer) 6
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.set("mykey", "foobar") is True
     assert r.bitcount("mykey") == 26
     assert r.bitcount("mykey", 0, 0) == 4
     assert r.bitcount("mykey", 1, 1) == 6
 
 
-#def test_bitop():
-    """ BITOP operation destkey key [key ...]
-            Available since 2.6.0.
-            Time complexity: O(N)
+# def test_bitop():
+#     """ BITOP operation destkey key [key ...]
+#             Available since 2.6.0.
+#             Time complexity: O(N)
+#
+#     redis> SET key1 "foobar"
+#     OK
+#     redis> SET key2 "abcdef"
+#     OK
+#     redis> BITOP AND dest key1 key2
+#     (integer) 6
+#     redis> GET dest
+#     "`bc`ab"
+#     redis>
+#     """
+#     assert r.set("key1", "foobar") is True
+#     assert r.set("key2", "abcdef") is True
+#     assert r.bitop("AND", "dest", "key1", "key2") == 6
+#     assert r.get("dest") == "`bc`ab"
 
-    redis> SET key1 "foobar"
-    OK
-    redis> SET key2 "abcdef"
-    OK
-    redis> BITOP AND dest key1 key2
-    (integer) 6
-    redis> GET dest
-    "`bc`ab"
-    redis>
-    """
-#    assert r.set("key1", "foobar") is True
-#    assert r.set("key2", "abcdef") is True
-#    assert r.bitop("AND", "dest", "key1", "key2") == 6
-#    assert r.get("dest") == "`bc`ab"
 
-
-@delete_keys("mykey")
-def test_bitpos():
+def test_bitpos(delete_keys):
     """ BITPOS key bit [start] [end]
             Available since 2.8.7.
             Time complexity: O(N)
@@ -618,6 +643,8 @@ def test_bitpos():
     (integer) -1
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.set("mykey", "\xff\xf0\x00") is True
     assert r.bitpos("mykey", 0) == 12
     assert r.set("mykey", "\x00\xff\xf0") is True
@@ -627,8 +654,7 @@ def test_bitpos():
     assert r.bitpos("mykey", 1) == -1
 
 
-@delete_keys("mykey")
-def test_decr():
+def test_decr(delete_keys):
     """ DECR key
             Available since 1.0.0.
             Time complexity: O(1)
@@ -643,13 +669,14 @@ def test_decr():
     ERR value is not an integer or out of range
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.set("mykey", 10) is True
     assert r.decr("mykey") == 9
     #assert r.set("mykey", )
 
 
-@delete_keys("mykey")
-def test_decrby():
+def test_decrby(delete_keys):
     """ DECRBY key decrement
             Available since 1.0.0.
             Time complexity: O(1)
@@ -660,12 +687,13 @@ def test_decrby():
     (integer) 7
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.set("mykey", 10) is True
     assert r.decrby("mykey", 3) == 7
 
 
-@delete_keys("nonexisting", "mykey")
-def test_get():
+def test_get(delete_keys):
     """ GET key
             Available since 1.0.0.
             Time complexity: O(1)
@@ -678,13 +706,14 @@ def test_get():
     "Hello"
     redis>
     """
+    delete_keys.keys("nonexisting", "mykey")
+
     assert r.get("nonexisting") is None
     assert r.set("mykey", "Hello") is True
     assert r.get("mykey") == "Hello"
 
 
-@delete_keys("mykey")
-def test_getbit():
+def test_getbit(delete_keys):
     """ GETBIT key offset
             Available since 2.2.0.
             Time complexity: O(1)
@@ -699,14 +728,15 @@ def test_getbit():
     (integer) 0
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.setbit("mykey", 7, 1) == 0
     assert r.getbit("mykey", 0) == 0
     assert r.getbit("mykey", 7) == 1
     assert r.getbit("mykey", 100) == 0
 
 
-@delete_keys("mykey")
-def test_getrange():
+def test_getrange(delete_keys):
     """ GETRANGE key start end
             Available since 2.4.0.
             Time complexity: O(N) where N is the length of the returned string.
@@ -726,6 +756,8 @@ def test_getrange():
     "string"
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.set("mykey", "This is a string") is True
     assert r.getrange("mykey", 0, 3) == "This"
     assert r.getrange("mykey", -3, -1) == "ing"
@@ -733,8 +765,7 @@ def test_getrange():
     assert r.getrange("mykey", 10, 100) == "string"
 
 
-@delete_keys("mykey")
-def test_getset():
+def test_getset(delete_keys):
     """ GETSET key value
             Available since 1.0.0.
             Time complexity: O(1)
@@ -757,13 +788,14 @@ def test_getset():
     "World"
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.set("mykey", "Hello") is True
     assert r.getset("mykey", "World") == "Hello"
     assert r.get("mykey") == "World"
 
 
-@delete_keys("mykey")
-def test_incr():
+def test_incr(delete_keys):
     """ INCR key
             Available since 1.0.0.
             Time complexity: O(1)
@@ -776,13 +808,14 @@ def test_incr():
     "11"
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.set("mykey", 10) is True
     assert r.incr("mykey") == 11
     assert r.get("mykey") == "11"
 
 
-@delete_keys("mykey")
-def test_incrby():
+def test_incrby(delete_keys):
     """ INCRBY key increment
             Available since 1.0.0.
             Time complexity: O(1)
@@ -793,12 +826,13 @@ def test_incrby():
     (integer) 15
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.set("mykey", 10) is True
     assert r.incrby("mykey", 5) == 15
 
 
-@delete_keys("mykey")
-def test_incrbyfloat():
+def test_incrbyfloat(delete_keys):
     """ INCRBYFLOAT key increment
             Available since 2.6.0.
             Time complexity: O(1)
@@ -813,14 +847,15 @@ def test_incrbyfloat():
     "5200"
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.set("mykey", "10.50") is True
     assert r.incrbyfloat("mykey", "0.1") == 10.6
     assert r.set("mykey", "5.0e3") is True
     assert r.incrbyfloat("mykey", "2.0e2") == 5200
 
 
-@delete_keys("key1", "key2", "nonexisting")
-def test_mget():
+def test_mget(delete_keys):
     """ MGET key [key ...]
             Available since 1.0.0.
             Time complexity: O(N) where N is the number of keys to retrieve.
@@ -835,13 +870,14 @@ def test_mget():
     3) (nil)
     redis>
     """
+    delete_keys.keys("key1", "key2", "nonexisting")
+
     assert r.set("key1", "Hello") is True
     assert r.set("key2", "World") is True
     assert r.mget("key1", "key2", "nonexisting") == ["Hello", "World", None]
 
 
-@delete_keys("key1", "key2")
-def test_mset():
+def test_mset(delete_keys):
     """ MSET key value [key value ...]
             Available since 1.0.1.
             Time complexity: O(N) where N is the number of keys to set.
@@ -854,6 +890,8 @@ def test_mset():
     "World"
     redis>
     """
+    delete_keys.keys("key1", "key2")
+
     assert r.mset({"key1": "Hello", "key2": "World"}) is True
     assert r.get("key1") == "Hello"
     assert r.get("key2") == "World"
@@ -879,8 +917,7 @@ def test_mset():
 #    assert r.mget("key1", "key2", "key3") == ["Hello", "there", None]
 
 
-@delete_keys("mykey")
-def test_psetex():
+def test_psetex(delete_keys):
     """ PSETEX key milliseconds value
             Available since 2.6.0.
             Time complexity: O(1)
@@ -893,13 +930,14 @@ def test_psetex():
     "Hello"
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.psetex("mykey", 1000, "Hello") is True
     assert r.pttl("mykey") <= 1000
     assert r.get("mykey") == "Hello"
 
 
-@delete_keys("mykey")
-def test_set():
+def test_set(delete_keys):
     """ SET key value [EX seconds] [PX milliseconds] [NX|XX]
             Available since 1.0.0.
             Time complexity: O(1)
@@ -910,12 +948,13 @@ def test_set():
     "Hello"
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.set("mykey", "Hello") is True
     assert r.get("mykey") == "Hello"
 
 
-@delete_keys("mykey")
-def test_setbit():
+def test_setbit(delete_keys):
     """ SETBIT key offset value
             Available since 2.2.0.
             Time complexity: O(1)
@@ -928,13 +967,14 @@ def test_setbit():
     "\u0000"
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.setbit("mykey", 7, 1) == 0
     assert r.setbit("mykey", 7, 0) == 1
     assert r.get("mykey") == "\x00"
 
 
-@delete_keys("mykey")
-def test_setex():
+def test_setex(delete_keys):
     """ SETEX key seconds value
             Available since 2.0.0.
             Time complexity: O(1)
@@ -947,13 +987,14 @@ def test_setex():
     "Hello"
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.setex("mykey", "Hello", 10)            #
     assert r.ttl("mykey") == 10
     assert r.get("mykey") == "Hello"
 
 
-@delete_keys("mykey")
-def test_setnx():
+def test_setnx(delete_keys):
     """ SETNX key value
             Available since 1.0.0.
             Time complexity: O(1)
@@ -966,13 +1007,14 @@ def test_setnx():
     "Hello"
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.setnx("mykey", "Hello") == 1
     assert r.setnx("mykey", "World") == 0
     assert r.get("mykey") == "Hello"
 
 
-@delete_keys("key1")
-def test_setrange():
+def test_setrange(delete_keys):
     """ SETRANGE key offset value
             Available since 2.2.0.
             Time complexity: O(1), not counting the time taken to copy the new
@@ -996,13 +1038,14 @@ def test_setrange():
     "\u0000\u0000\u0000\u0000\u0000\u0000Redis"
     redis>
     """
+    delete_keys.keys("key1")
+
     assert r.set("key1", "Hello World") is True
     assert r.setrange("key1", 6, "Redis") == 11
     assert r.get("key1") == "Hello Redis"
 
 
-@delete_keys("mykey", "nonexisting")
-def test_strlen():
+def test_strlen(delete_keys):
     """ STRLEN key
             Available since 2.2.0.
             Time complexity: O(1)
@@ -1015,14 +1058,15 @@ def test_strlen():
     (integer) 0
     redis>
     """
+    delete_keys.keys("mykey", "nonexisting")
+
     assert r.set("mykey", "Hello world") is True
     assert r.strlen("mykey") == 11
     assert r.strlen("nonexisting") == 0
 
 
 ###hashes
-@delete_keys("myhash")
-def test_hdel():
+def test_hdel(delete_keys):
     """ HDEL key field [field ...]
 
     redis> HSET myhash field1 "foo"
@@ -1033,13 +1077,14 @@ def test_hdel():
     (integer) 0
     redis>
     """
+    delete_keys.keys("myhash")
+
     assert r.hset("myhash", "field1", "foo") == 1
     assert r.hdel("myhash", "field1") == 1
     assert r.hdel("myhash", "field2") == 0
 
 
-@delete_keys("myhash")
-def test_hexists():
+def test_hexists(delete_keys):
     """ HEXISTS key field
 
     redis> HSET myhash field1 "foo"
@@ -1050,13 +1095,14 @@ def test_hexists():
     (integer) 0
     redis>
     """
+    delete_keys.keys("myhash")
+
     assert r.hset("myhash", "field1", "foo") == 1
     assert r.hexists("myhash", "field1") == 1
     assert r.hexists("myhash", "field2") == 0
 
 
-@delete_keys("myhash")
-def test_hget():
+def test_hget(delete_keys):
     """ HGET key field
 
     redis> HSET myhash field1 "foo"
@@ -1067,13 +1113,14 @@ def test_hget():
     (nil)
     redis>
     """
+    delete_keys.keys("myhash")
+
     assert r.hset("myhash", "field1", "foo") == 1
     assert r.hget("myhash", "field1") == "foo"
     assert r.hget("myhash", "field2") is None
 
 
-@delete_keys("myhash")
-def test_hgetall():
+def test_hgetall(delete_keys):
     """ HGETALL key
 
     redis> HSET myhash field1 "Hello"
@@ -1087,13 +1134,14 @@ def test_hgetall():
     4) "World"
     redis>
     """
+    delete_keys.keys("myhash")
+
     assert r.hset("myhash", "field1", "Hello") == 1
     assert r.hset("myhash", "field2", "World") == 1
     assert r.hgetall("myhash") == {"field1": "Hello", "field2": "World"}
 
 
-@delete_keys("myhash")
-def test_hincrby():
+def test_hincrby(delete_keys):
     """ HINCRBY key field increment
 
     redis> HSET myhash field 5
@@ -1106,14 +1154,15 @@ def test_hincrby():
     (integer) -5
     redis>
     """
+    delete_keys.keys("myhash")
+
     assert r.hset("myhash", "field", 5) == 1
     assert r.hincrby("myhash", "field", 1) == 6
     assert r.hincrby("myhash", "field", -1) == 5
     assert r.hincrby("myhash", "field", -10) == -5
 
 
-@delete_keys("mykey")
-def test_hincrbyfloat():
+def test_hincrbyfloat(delete_keys):
     """ HINCRBYFLOAT key field increment
 
     redis> HSET mykey field 10.50
@@ -1126,14 +1175,15 @@ def test_hincrbyfloat():
     "5200"
     redis>
     """
+    delete_keys.keys("mykey")
+
     assert r.hset("mykey", "field", 10.50) == 1
     assert r.hincrbyfloat("mykey", "field", 0.1) == 10.6
     assert r.hset("mykey", "field", "5.0e3") == 0
     assert r.hincrbyfloat("mykey", "field", "2.0e2") == 5200.0
 
 
-@delete_keys("myhash")
-def test_hkeys():
+def test_hkeys(delete_keys):
     """ HKEYS key
 
     redis> HSET myhash field1 "Hello"
@@ -1145,13 +1195,14 @@ def test_hkeys():
     2) "field2"
     redis>
     """
+    delete_keys.keys("myhash")
+
     assert r.hset("myhash", "field1", "Hello") == 1
     assert r.hset("myhash", "field2", "World") == 1
     assert r.hkeys("myhash") == ["field1", "field2"]
 
 
-@delete_keys("myhash")
-def test_hlen():
+def test_hlen(delete_keys):
     """ HLEN key
 
     redis> HSET myhash field1 "Hello"
@@ -1162,13 +1213,14 @@ def test_hlen():
     (integer) 2
     redis>
     """
+    delete_keys.keys("myhash")
+
     assert r.hset("myhash", "field1", "Hello") == 1
     assert r.hset("myhash", "field2", "World") == 1
     assert r.hlen("myhash") == 2
 
 
-@delete_keys("myhash")
-def test_hmget():
+def test_hmget(delete_keys):
     """ HMGET key field [field ...]
 
     redis> HSET myhash field1 "Hello"
@@ -1181,13 +1233,14 @@ def test_hmget():
     3) (nil)
     redis>
     """
+    delete_keys.keys("myhash")
+
     assert r.hset("myhash", "field1", "Hello") == 1
     assert r.hset("myhash", "field2", "World") == 1
     assert r.hmget("myhash", "field1", "field2", "field3") == ["Hello", "World", None]
 
 
-@delete_keys("myhash")
-def test_hmset():
+def test_hmset(delete_keys):
     """ HMSET key field value [field value ...]
 
     redis> HMSET myhash field1 "Hello" field2 "World"
@@ -1198,11 +1251,12 @@ def test_hmset():
     "World"
     redis>
     """
+    delete_keys.keys("myhash")
+
     assert r.hmset("myhash", {"field1": "Hello", "field2": "World"}) is True
 
 
-@delete_keys("myhash")
-def test_hset():
+def test_hset(delete_keys):
     """ HSET key field value
 
     redis> HSET myhash field1 "Hello"
@@ -1211,12 +1265,13 @@ def test_hset():
     "Hello"
     redis>
     """
+    delete_keys.keys("myhash")
+
     assert r.hset("myhash", "field1", "Hello") == 1    # tes
     assert r.hget("myhash", "field1") == "Hello"
 
 
-@delete_keys("myhash")
-def test_hsetnx():
+def test_hsetnx(delete_keys):
     """ HSETNX key field value
 
     redis> HSETNX myhash field "Hello"
@@ -1227,34 +1282,35 @@ def test_hsetnx():
     "Hello"
     redis>
     """
+    delete_keys.keys("myhash")
+
     assert r.hsetnx("myhash", "field", "Hello") == 1
     assert r.hsetnx("myhash", "field", "World") == 0
     assert r.hget("myhash", "field") == "Hello"
 
 
-#def test_hstrlen():
-    """ HSTRLEN key field
-            Available since 3.2.0.
-            Time complexity: O(1)
+# def test_hstrlen():
+#     """ HSTRLEN key field
+#             Available since 3.2.0.
+#             Time complexity: O(1)
+#
+#     redis> HMSET myhash f1 HelloWorld f2 99 f3 -256
+#     OK
+#     redis> HSTRLEN myhash f1
+#     (integer) 10
+#     redis> HSTRLEN myhash f2
+#     (integer) 2
+#     redis> HSTRLEN myhash f3
+#     (integer) 4
+#     redis>
+#     """
+#     assert r.hmset("myhash", {"f1": "HelloWorld", "f2": "99", "f3": -256}) == True
+#     assert r.hstrlen("myhash", "f1") == 10
+#     assert r.hstrlen("myhash", "f2") == 2
+#     assert r.hstrlen("myhash", "f3") == 4
 
-    redis> HMSET myhash f1 HelloWorld f2 99 f3 -256
-    OK
-    redis> HSTRLEN myhash f1
-    (integer) 10
-    redis> HSTRLEN myhash f2
-    (integer) 2
-    redis> HSTRLEN myhash f3
-    (integer) 4
-    redis>
-    """
-#    assert r.hmset("myhash", {"f1": "HelloWorld", "f2": "99", "f3": -256}) == True
-#    assert r.hstrlen("myhash", "f1") == 10
-#    assert r.hstrlen("myhash", "f2") == 2
-#    assert r.hstrlen("myhash", "f3") == 4
 
-
-@delete_keys("myhash")
-def test_hvals():
+def test_hvals(delete_keys):
     """ HVALS key
             Available since 2.0.0.
             Time complexity: O(N) where N is the size of the hash.
@@ -1268,13 +1324,14 @@ def test_hvals():
     2) "World"
     redis>
     """
+    delete_keys.keys("myhash")
+
     assert r.hset("myhash", "field1", "Hello") == 1
     assert r.hset("myhash", "field2", "World") == 1
     assert r.hvals("myhash") == ["Hello", "World"]
 
 
-@delete_keys("myhash")
-def test_hscan():
+def test_hscan(delete_keys):
     """ HSCAN key cursor [MATCH pattern] [COUNT count]
             Available since 2.8.0.
             Time complexity: O(1) for every call. O(N) for a complete
@@ -1291,43 +1348,44 @@ def test_hscan():
        4) "World"
     redis>
     """
+    delete_keys.keys("myhash")
+
     assert r.hmset("myhash", {"field1": "Hello", "field2": "World"}) is True
     assert r.hscan("myhash", 0) == (0, {"field1": "Hello", "field2": "World"})
 
 
 
 ###lists
-#def test_blpop():
-    """ BLPOP key [key ...] timeout
-            Available since 2.0.0.
-            Time complexity: O(1)
-    """
+# def test_blpop():
+#     """ BLPOP key [key ...] timeout
+#             Available since 2.0.0.
+#             Time complexity: O(1)
+#     """
 
 
-#def test_brpop():
-    """ BRPOP key [key ...] timeout
-            Available since 2.0.0.
-            Time complexity: O(1)
-
-    redis> DEL list1 list2
-    (integer) 0
-    redis> RPUSH list1 a b c
-    (integer) 3
-    redis> BRPOP list1 list2 0
-    1) "list1"
-    2) "c"
-    """
-
-
-#def test_brpoplpush():
-    """ BRPOPLPUSH source destination timeout
-        Available since 2.2.0.
-        Time complexity: O(1)
-    """
+# def test_brpop():
+#     """ BRPOP key [key ...] timeout
+#             Available since 2.0.0.
+#             Time complexity: O(1)
+#
+#     redis> DEL list1 list2
+#     (integer) 0
+#     redis> RPUSH list1 a b c
+#     (integer) 3
+#     redis> BRPOP list1 list2 0
+#     1) "list1"
+#     2) "c"
+#     """
 
 
-@delete_keys("mylist")
-def test_lindex():
+# def test_brpoplpush():
+#     """ BRPOPLPUSH source destination timeout
+#         Available since 2.2.0.
+#         Time complexity: O(1)
+#     """
+
+
+def test_lindex(delete_keys):
     """ LINDEX key index
             Available since 1.0.0.
             Time complexity: O(N) where N is the number of elements to
@@ -1346,6 +1404,8 @@ def test_lindex():
     (nil)
     redis>
     """
+    delete_keys.keys("mylist")
+
     assert r.lpush("mylist", "World") == 1
     assert r.lpush("mylist", "Hello") == 2
     assert r.lindex("mylist", 0) == "Hello"
@@ -1353,8 +1413,7 @@ def test_lindex():
     assert r.lindex("mylist", 3) is None
 
 
-@delete_keys("mylist")
-def test_linsert():
+def test_linsert(delete_keys):
     """ LINSERT key BEFORE|AFTER pivot value
             Available since 2.2.0.
             Time complexity: O(N) where N is the number of elements to traverse
@@ -1374,14 +1433,15 @@ def test_linsert():
     3) "World"
     redis>
     """
+    delete_keys.keys("mylist")
+
     assert r.rpush("mylist", "Hello") == 1
     assert r.rpush("mylist", "World") == 2
     assert r.linsert("mylist", "BEFORE", "World", "There") == 3
     assert r.lrange("mylist", 0, -1) == ["Hello", "There", "World"]
 
 
-@delete_keys("mylist")
-def test_llen():
+def test_llen(delete_keys):
     """ LLEN key
             Available since 1.0.0.
             Time complexity: O(1)
@@ -1394,13 +1454,14 @@ def test_llen():
     (integer) 2
     redis>
     """
+    delete_keys.keys("mylist")
+
     assert r.lpush("mylist", "World") == 1
     assert r.lpush("mylist", "Hello") == 2
     assert r.llen("mylist") == 2
 
 
-@delete_keys("mylist")
-def test_lpop():
+def test_lpop(delete_keys):
     """ LPOP key
             Available since 1.0.0.
             Time complexity: O(1)
@@ -1418,6 +1479,8 @@ def test_lpop():
     2) "three"
     redis>
     """
+    delete_keys.keys("mylist")
+
     assert r.rpush("mylist", "one") == 1
     assert r.rpush("mylist", "two") == 2
     assert r.rpush("mylist", "three") == 3
@@ -1425,8 +1488,7 @@ def test_lpop():
     assert r.lrange("mylist", 0, -1) == ["two", "three"]
 
 
-@delete_keys("mylist")
-def test_lpush():
+def test_lpush(delete_keys):
     """ LPUSH key value [value ...]
             Available since 1.0.0.
             Time complexity: O(1)
@@ -1440,13 +1502,14 @@ def test_lpush():
     2) "world"
     redis>
     """
+    delete_keys.keys("mylist")
+
     assert r.lpush("mylist", "world") == 1
     assert r.lpush("mylist", "hello") == 2
     assert r.lrange("mylist", 0, -1) == ["hello", "world"]
 
 
-@delete_keys("mylist", "myotherlist")
-def test_lpushx():
+def test_lpushx(delete_keys):
     """ LPUSHX key value
             Available since 2.2.0.
             Time complexity: O(1)
@@ -1464,6 +1527,8 @@ def test_lpushx():
     (empty list or set)
     redis>
     """
+    delete_keys.keys("mylist", "myotherlist")
+
     assert r.lpush("mylist", "World") == 1
     assert r.lpushx("mylist", "Hello") == 2
     assert r.lpushx("myotherlist", "Hello") == 0
@@ -1471,8 +1536,7 @@ def test_lpushx():
     assert r.lrange("myotherlist", 0, -1) == []
 
 
-@delete_keys("mylist")
-def test_lrange():
+def test_lrange(delete_keys):
     """ LRANGE key start stop
             Available since 1.0.0.
             Time complexity: O(S+N) where S is the distance of start offset
@@ -1499,6 +1563,8 @@ def test_lrange():
     (empty list or set)
     redis>
     """
+    delete_keys.keys("mylist")
+
     assert r.rpush("mylist", "one") == 1
     assert r.rpush("mylist", "two") == 2
     assert r.rpush("mylist", "three") == 3
@@ -1508,8 +1574,7 @@ def test_lrange():
     assert r.lrange("mylist", 5, 10) == []
 
 
-@delete_keys("mylist")
-def test_lrem():
+def test_lrem(delete_keys):
     """ LREM key count value
             Available since 1.0.0.
             Time complexity: O(N) where N is the length of the list.
@@ -1529,6 +1594,8 @@ def test_lrem():
     2) "foo"
     redis>
     """
+    delete_keys.keys("mylist")
+
     assert r.rpush("mylist", "hello") == 1
     assert r.rpush("mylist", "hello") == 2
     assert r.rpush("mylist", "foo") == 3
@@ -1537,8 +1604,7 @@ def test_lrem():
     assert r.lrange("mylist", 0, -1) == ["hello", "foo"]
 
 
-@delete_keys("mylist")
-def test_lset():
+def test_lset(delete_keys):
     """ LSET key index value
             Available since 1.0.0.
             Time complexity: O(N) where N is the length of the list. Setting
@@ -1560,6 +1626,8 @@ def test_lset():
     3) "three"
     redis>
     """
+    delete_keys.keys("mylist")
+
     assert r.rpush("mylist", "one") == 1
     assert r.rpush("mylist", "two") == 2
     assert r.rpush("mylist", "three") == 3
@@ -1568,8 +1636,7 @@ def test_lset():
     assert r.lrange("mylist", 0, -1) == ["four", "five", "three"]
 
 
-@delete_keys("mylist")
-def test_ltrim():
+def test_ltrim(delete_keys):
     """ LTRIM key start stop
             Available since 1.0.0.
             Time complexity: O(N) where N is the number of elements
@@ -1588,6 +1655,8 @@ def test_ltrim():
     2) "three"
     redis>
     """
+    delete_keys.keys("mylist")
+
     assert r.rpush("mylist", "one") == 1
     assert r.rpush("mylist", "two") == 2
     assert r.rpush("mylist", "three") == 3
@@ -1595,8 +1664,7 @@ def test_ltrim():
     assert r.lrange("mylist", 0, -1) == ["two", "three"]
 
 
-@delete_keys("mylist")
-def test_rpop():
+def test_rpop(delete_keys):
     """ RPOP key
             Available since 1.0.0.
             Time complexity: O(1)
@@ -1614,6 +1682,8 @@ def test_rpop():
     2) "two"
     redis>
     """
+    delete_keys.keys("mylist")
+
     assert r.rpush("mylist", "one") == 1
     assert r.rpush("mylist", "two") == 2
     assert r.rpush("mylist", "three") == 3
@@ -1621,8 +1691,7 @@ def test_rpop():
     assert r.lrange("mylist", 0, -1) == ["one", "two"]
 
 
-@delete_keys("{tag}mylist", "{tag}myotherlist")
-def test_rpoplpush():
+def test_rpoplpush(delete_keys):
     """ RPOPLPUSH source destination
             Available since 1.2.0.
             Time complexity: O(1)
@@ -1642,6 +1711,8 @@ def test_rpoplpush():
     1) "three"
     redis>
     """
+    delete_keys.keys("{tag}mylist", "{tag}myotherlist")
+
     assert r.rpush("{tag}mylist", "one") == 1
     assert r.rpush("{tag}mylist", "two") == 2
     assert r.rpush("{tag}mylist", "three") == 3
@@ -1650,8 +1721,7 @@ def test_rpoplpush():
     assert r.lrange("{tag}myotherlist", 0, -1) == ["three"]
 
 
-@delete_keys("mylist")
-def test_rpush():
+def test_rpush(delete_keys):
     """ RPUSH key value [value ...]
             Available since 1.0.0.
             Time complexity: O(1)
@@ -1665,13 +1735,14 @@ def test_rpush():
     2) "world"
     redis>
     """
+    delete_keys.keys("mylist")
+
     assert r.rpush("mylist", "hello") == 1
     assert r.rpush("mylist", "world") == 2
     assert r.lrange("mylist", 0, -1) == ["hello", "world"]
 
 
-@delete_keys("mylist", "myotherlist")
-def test_rpushx():
+def test_rpushx(delete_keys):
     """ RPUSHX key value
             Available since 2.2.0.
             Time complexity: O(1)
@@ -1689,6 +1760,8 @@ def test_rpushx():
     (empty list or set)
     redis>
     """
+    delete_keys.keys("mylist", "myotherlist")
+
     assert r.rpush("mylist", "Hello") == 1
     assert r.rpushx("mylist", "World") == 2
     assert r.rpushx("myotherlist", "World") == 0
@@ -1699,8 +1772,7 @@ def test_rpushx():
 
 
 ###sets
-@delete_keys("myset")
-def test_sadd():
+def test_sadd(delete_keys):
     """ SADD key member [member ...]
             Available since 1.0.0.
             Time complexity: O(N) where N is the number of members to be added.
@@ -1716,14 +1788,15 @@ def test_sadd():
     2) "Hello"
     redis>
     """
+    delete_keys.keys("myset")
+
     assert r.sadd("myset", "Hello") == 1
     assert r.sadd("myset", "World") == 1
     assert r.sadd("myset", "World") == 0
     assert r.smembers("myset") == {"World", "Hello"}
 
 
-@delete_keys("myset")
-def test_scard():
+def test_scard(delete_keys):
     """ SCARD key
             Available since 1.0.0.
             Time complexity: O(1)
@@ -1736,13 +1809,14 @@ def test_scard():
     (integer) 2
     redis>
     """
+    delete_keys.keys("myset")
+
     assert r.sadd("myset", "Hello") == 1
     assert r.sadd("myset", "World") == 1
     assert r.scard("myset") == 2
 
 
-@delete_keys("{tag}key1", "{tag}key2")
-def test_sdiff():
+def test_sdiff(delete_keys):
     """ SDIFF key [key ...]
             Available since 1.0.0.
             Time complexity: O(N) where N is the total number of
@@ -1765,6 +1839,8 @@ def test_sdiff():
     2) "b"
     redis>
     """
+    delete_keys.keys("{tag}key1", "{tag}key2")
+
     assert r.sadd("{tag}key1", "a") == 1
     assert r.sadd("{tag}key1", "b") == 1
     assert r.sadd("{tag}key1", "c") == 1
@@ -1774,8 +1850,7 @@ def test_sdiff():
     assert r.sdiff("{tag}key1", "{tag}key2") == {"a", "b"}
 
 
-@delete_keys("{tag}key1", "{tag}key2", "{tag}key")
-def test_sdiffstore():
+def test_sdiffstore(delete_keys):
     """ SDIFFSTORE destination key [key ...]
             Available since 1.0.0.
             Time complexity: O(N) where N is the total number of
@@ -1800,6 +1875,8 @@ def test_sdiffstore():
     2) "b"
     redis>
     """
+    delete_keys.keys("{tag}key1", "{tag}key2", "{tag}key")
+
     assert r.sadd("{tag}key1", "a") == 1
     assert r.sadd("{tag}key1", "b") == 1
     assert r.sadd("{tag}key1", "c") == 1
@@ -1810,8 +1887,7 @@ def test_sdiffstore():
     assert r.smembers("{tag}key") == {"a", "b"}
 
 
-@delete_keys("{tag}key1", "{tag}key2")
-def test_sinter():
+def test_sinter(delete_keys):
     """ SINTER key [key ...]
             Available since 1.0.0.
             Time complexity: O(N*M) worst case where N is the cardinality of
@@ -1833,6 +1909,8 @@ def test_sinter():
     1) "c"
     redis>
     """
+    delete_keys.keys("{tag}key1", "{tag}key2")
+
     assert r.sadd("{tag}key1", "a") == 1
     assert r.sadd("{tag}key1", "b") == 1
     assert r.sadd("{tag}key1", "c") == 1
@@ -1842,8 +1920,7 @@ def test_sinter():
     assert r.sinter("{tag}key1", "{tag}key2") == {"c"}
 
 
-@delete_keys("{tag}key1", "{tag}key2")
-def test_sinterstore():
+def test_sinterstore(delete_keys):
     """ SINTERSTORE destination key [key ...]
             Available since 1.0.0.
             Time complexity: O(N*M) worst case where N is the cardinality of
@@ -1867,6 +1944,8 @@ def test_sinterstore():
     1) "c"
     redis>
     """
+    delete_keys.keys("{tag}key1", "{tag}key2")
+
     assert r.sadd("{tag}key1", "a") == 1
     assert r.sadd("{tag}key1", "b") == 1
     assert r.sadd("{tag}key1", "c") == 1
@@ -1877,8 +1956,7 @@ def test_sinterstore():
     assert r.smembers("{tag}key") == {"c"}
 
 
-@delete_keys("myset")
-def test_sismember():
+def test_sismember(delete_keys):
     """ SISMEMBER key member
             Available since 1.0.0.
             Time complexity: O(1)
@@ -1891,13 +1969,14 @@ def test_sismember():
     (integer) 0
     redis>
     """
+    delete_keys.keys("myset")
+
     assert r.sadd("myset", "one") == 1
     assert r.sismember("myset", "one") == 1
     assert r.sismember("myset", "two") == 0
 
 
-@delete_keys("myset")
-def test_smembers():
+def test_smembers(delete_keys):
     """ SMEMBERS key
             Available since 1.0.0.
             Time complexity: O(N) where N is the set cardinality.
@@ -1911,13 +1990,14 @@ def test_smembers():
     2) "Hello"
     redis>
     """
+    delete_keys.keys("myset")
+
     assert r.sadd("myset", "Hello") == 1
     assert r.sadd("myset", "World") == 1
     assert r.smembers("myset") == {"World", "Hello"}
 
 
-@delete_keys("{tag}myset", "{tag}myotherset")
-def test_smove():
+def test_smove(delete_keys):
     """ SMOVE source destination member
             Available since 1.0.0.
             Time complexity: O(1)
@@ -1937,6 +2017,8 @@ def test_smove():
     2) "two"
     redis>
     """
+    delete_keys.keys("{tag}myset", "{tag}myotherset")
+
     assert r.sadd("{tag}myset", "one") == 1
     assert r.sadd("{tag}myset", "two") == 1
     assert r.sadd("{tag}myotherset", "three") == 1
@@ -1945,8 +2027,7 @@ def test_smove():
     assert r.smembers("{tag}myotherset") == {"three", "two"}
 
 
-@delete_keys("myset")
-def test_spop():
+def test_spop(delete_keys):
     """ SPOP key [count]
             Available since 1.0.0.
             Time complexity: O(1)
@@ -1974,6 +2055,8 @@ def test_spop():
     1) "one"
     redis>
     """
+    delete_keys.keys("myset")
+
     assert r.sadd("myset", "one") == 1
     assert r.sadd("myset", "two") == 1
     assert r.sadd("myset", "three") == 1
@@ -1985,8 +2068,7 @@ def test_spop():
     #assert r.smembers("myset") == {"one"}
 
 
-@delete_keys("myset")
-def test_srandmember():
+def test_srandmember(delete_keys):
     """ SRANDMEMBER key [count]
             Available since 1.0.0.
             Time complexity: Without the count argument O(1), otherwise O(N)
@@ -2007,6 +2089,8 @@ def test_srandmember():
     5) "one"
     redis>
     """
+    delete_keys.keys("myset")
+
     assert r.sadd("myset", "one", "two", "three") == 3
     # random
     assert r.srandmember("myset") in {"one", "two", "three"}
@@ -2015,8 +2099,7 @@ def test_srandmember():
     #assert r.srandmember("myset", -5) == ["three", "two", "two", "three", "one"]
 
 
-@delete_keys("myset")
-def test_srem():
+def test_srem(delete_keys):
     """ SREM key member [member ...]
             Available since 1.0.0.
             Time complexity: O(N) where N is the number of
@@ -2037,6 +2120,8 @@ def test_srem():
     2) "two"
     redis>
     """
+    delete_keys.keys("myset")
+
     assert r.sadd("myset", "one") == 1
     assert r.sadd("myset", "two") == 1
     assert r.sadd("myset", "three") == 1
@@ -2045,8 +2130,7 @@ def test_srem():
     assert r.smembers("myset") == {"three", "two"}
 
 
-@delete_keys("{tag}key1", "{tag}key2")
-def test_sunion():
+def test_sunion(delete_keys):
     """ SUNION key [key ...]
             Available since 1.0.0.
             Time complexity: O(N) where N is the total number of
@@ -2072,6 +2156,8 @@ def test_sunion():
     5) "e"
     redis>
     """
+    delete_keys.keys("{tag}key1", "{tag}key2")
+
     assert r.sadd("{tag}key1", "a") == 1
     assert r.sadd("{tag}key1", "b") == 1
     assert r.sadd("{tag}key1", "c") == 1
@@ -2081,8 +2167,7 @@ def test_sunion():
     assert r.sunion("{tag}key1", "{tag}key2") == {"a", "b", "c", "d", "e"}
 
 
-@delete_keys("{tag}key1", "{tag}key2", "{tag}key")
-def test_sunionstore():
+def test_sunionstore(delete_keys):
     """ SUNIONSTORE destination key [key ...]
             Available since 1.0.0.
             Time complexity: O(N) where N is the total number of
@@ -2110,6 +2195,8 @@ def test_sunionstore():
     5) "e"
     redis>
     """
+    delete_keys.keys("{tag}key1", "{tag}key2", "{tag}key")
+
     assert r.sadd("{tag}key1", "a") == 1
     assert r.sadd("{tag}key1", "b") == 1
     assert r.sadd("{tag}key1", "c") == 1
@@ -2120,8 +2207,7 @@ def test_sunionstore():
     assert r.smembers("{tag}key") == {"a", "b", "c", "d", "e"}
 
 
-@delete_keys("myset")
-def test_sscan():
+def test_sscan(delete_keys):
     """ SSCAN key cursor [MATCH pattern] [COUNT count]
             Available since 2.8.0.
             Time complexity: O(1) for every call. O(N) for a complete
@@ -2138,6 +2224,8 @@ def test_sscan():
        3) "a"
     redis>
     """
+    delete_keys.keys("myset")
+
     assert r.sadd("myset", "a", "b", "c") == 3
     # assert r.sscan("myset", 0) == (0, ["c", "b", "a])    #
     cursor = r.sscan("myset", 0)
@@ -2149,8 +2237,7 @@ def test_sscan():
 
 
 ###sorted sets
-@delete_keys("myzset")
-def test_zadd():
+def test_zadd(delete_keys):
     """ ZADD key [NX|XX] [CH] [INCR] score member [score member ...]
             Available since 1.2.0.
             Time complexity: O(log(N)) for each item added, where N is
@@ -2173,14 +2260,15 @@ def test_zadd():
     8) "3"
     redis>
     """
+    delete_keys.keys("myzset")
+
     assert r.zadd("myzset", "one", 1) == 1       # reverserd
     assert r.zadd("myzset", "uno", 1) == 1
     assert r.zadd("myzset", "two", 2, "three", 3) == 2
     assert r.zrange("myzset", 0, -1, withscores=True) == [("one", 1), ("uno", 1), ("two", 2), ("three", 3)]
 
 
-@delete_keys("myzset")
-def test_zcard():
+def test_zcard(delete_keys):
     """ ZCARD key
             Available since 1.2.0.
             Time complexity: O(1)
@@ -2193,13 +2281,14 @@ def test_zcard():
     (integer) 2
     redis>
     """
+    delete_keys.keys("myzset")
+
     assert r.zadd("myzset", "one", 1) == 1
     assert r.zadd("myzset", "two", 2) == 1
     assert r.zcard("myzset") == 2
 
 
-@delete_keys("myzset")
-def test_zcount():
+def test_zcount(delete_keys):
     """ ZCOUNT key min max
             Available since 2.0.0.
             Time complexity: O(log(N)) with N being the number of
@@ -2217,6 +2306,8 @@ def test_zcount():
     (integer) 2
     redis>
     """
+    delete_keys.keys("myzset")
+
     assert r.zadd("myzset", "one", 1) == 1
     assert r.zadd("myzset", "two", 2) == 1
     assert r.zadd("myzset", "three", 3) == 1
@@ -2224,8 +2315,7 @@ def test_zcount():
     assert r.zcount("myzset", "(1", 3) == 2
 
 
-@delete_keys("myzset")
-def test_zincrby():
+def test_zincrby(delete_keys):
     """ ZINCRBY key increment member
             Available since 1.2.0.
             Time complexity: O(log(N)) where N is the number of
@@ -2244,14 +2334,15 @@ def test_zincrby():
     4) "3"
     redis>
     """
+    delete_keys.keys("myzset")
+
     assert r.zadd("myzset", "one", 1) == 1
     assert r.zadd("myzset", "two", 2) == 1
     assert r.zincrby("myzset", "one", 2) == 3
     assert r.zrange("myzset", 0, -1, withscores=True) == [("two", 2), ("one", 3)]
 
 
-@delete_keys("{tag}zset1", "{tag}zset2", "{tag}out")
-def test_zinterstore():
+def test_zinterstore(delete_keys):
     """ ZINTERSTORE destination numkeys key [key ...]
         [WEIGHTS weight [weight ...]] [AGGREGATE SUM|MIN|MAX]
             Available since 2.0.0.
@@ -2278,6 +2369,8 @@ def test_zinterstore():
     4) "10"
     redis>
     """
+    delete_keys.keys("{tag}zset1", "{tag}zset2", "{tag}out")
+
     assert r.zadd("{tag}zset1", "one", 1) == 1
     assert r.zadd("{tag}zset1", "two", 2) == 1
     assert r.zadd("{tag}zset2", "one", 1) == 1
@@ -2287,8 +2380,7 @@ def test_zinterstore():
     assert r.zrange("{tag}out", 0, -1, withscores=True) == [("one", 5), ("two", 10)]
 
 
-@delete_keys("myzset")
-def test_zlexcount():
+def test_zlexcount(delete_keys):
     """ ZLEXCOUNT key min max
             Available since 2.8.9.
             Time complexity: O(log(N)) with N being the number of elements
@@ -2304,14 +2396,15 @@ def test_zlexcount():
     (integer) 5
     redis>
     """
+    delete_keys.keys("myzset")
+
     assert r.zadd("myzset", "a", 0, "b", 0, "c", 0, "d", 0, "e", 0) == 5
     assert r.zadd("myzset", "f", 0, "g", 0) == 2
     assert r.zlexcount("myzset", "-", "+") == 7
     assert r.zlexcount("myzset", "[b", "[f") == 5
 
 
-@delete_keys("myzset")
-def test_zrange():
+def test_zrange(delete_keys):
     """ ZRANGE key start stop [WITHSCORES]
             Available since 1.2.0.
             Time complexity: O(log(N)+M) with N being the number of elements
@@ -2343,6 +2436,8 @@ def test_zrange():
     4) "2"
     redis>
     """
+    delete_keys.keys("myzset")
+
     assert r.zadd("myzset", "one", 1) == 1
     assert r.zadd("myzset", "two", 2) == 1
     assert r.zadd("myzset", "three", 3) == 1
@@ -2351,8 +2446,7 @@ def test_zrange():
     assert r.zrange("myzset", -2, -1) == ["two", "three"]
 
 
-@delete_keys("myzset")
-def test_zrangebylex():
+def test_zrangebylex(delete_keys):
     """ ZRANGEBYLEX key min max [LIMIT offset count]
             Available since 2.8.9.
             Time complexity: O(log(N)+M) with N being the number of elements
@@ -2377,14 +2471,15 @@ def test_zrangebylex():
     5) "f"
     redis>
     """
+    delete_keys.keys("myzset")
+
     assert r.zadd("myzset", "a", 0, "b", 0, "c", 0, "d", 0, "e", 0, "f", 0, "g", 0) == 7
     assert r.zrangebylex("myzset", "-", "[c") == ["a", "b", "c"]
     assert r.zrangebylex("myzset", "-", "(c") == ["a", "b"]
     assert r.zrangebylex("myzset", "[aaa", "(g") == ["b", "c", "d", "e", "f"]
 
 
-@delete_keys("myzset")
-def test_zrevrangebylex():
+def test_zrevrangebylex(delete_keys):
     """ ZREVRANGEBYLEX key max min [LIMIT offset count]
             Available since 2.8.9.
             Time complexity: O(log(N)+M) with N being the number of elements
@@ -2409,14 +2504,15 @@ def test_zrevrangebylex():
     5) "b"
     redis>
     """
+    delete_keys.keys("myzset")
+
     assert r.zadd("myzset", "a", 0, "b", 0, "c", 0, "d", 0, "e", 0, "f", 0, "g", 0) == 7
     assert r.zrevrangebylex("myzset", "[c", "-") == ["c", "b", "a"]
     assert r.zrevrangebylex("myzset", "(c", "-") == ["b", "a"]
     assert r.zrevrangebylex("myzset", "(g", "[aaa") == ["f", "e", "d", "c", "b"]
 
 
-@delete_keys("myzset")
-def test_zrangebyscore():
+def test_zrangebyscore(delete_keys):
     """ ZRANGEBYSCORE key min max [WITHSCORES] [LIMIT offset count]
             Available since 1.0.5.
             Time complexity: O(log(N)+M) with N being the number of elements
@@ -2443,6 +2539,8 @@ def test_zrangebyscore():
     (empty list or set)
     redis>
     """
+    delete_keys.keys("myzset")
+
     assert r.zadd("myzset", "one", 1) == 1
     assert r.zadd("myzset", "two", 2) == 1
     assert r.zadd("myzset", "three", 3) == 1
@@ -2452,8 +2550,7 @@ def test_zrangebyscore():
     assert r.zrangebyscore("myzset", "(1", "(2") == []
 
 
-@delete_keys("myzset")
-def test_zrank():
+def test_zrank(delete_keys):
     """ ZRANK key member
             Available since 2.0.0.
             Time complexity: O(log(N))
@@ -2470,6 +2567,8 @@ def test_zrank():
     (nil)
     redis>
     """
+    delete_keys.keys("myzset")
+
     assert r.zadd("myzset", "one", 1) == 1
     assert r.zadd("myzset", "two", 2) == 1
     assert r.zadd("myzset", "three", 3) == 1
@@ -2477,8 +2576,7 @@ def test_zrank():
     assert r.zrank("myzset", "four") is None
 
 
-@delete_keys("myzset")
-def test_zrem():
+def test_zrem(delete_keys):
     """ ZREM key member [member ...]
             Available since 1.2.0.
             Time complexity: O(M*log(N)) with N being the number of elements
@@ -2499,6 +2597,8 @@ def test_zrem():
     4) "3"
     redis>
     """
+    delete_keys.keys("myzset")
+
     assert r.zadd("myzset", "one", 1) == 1
     assert r.zadd("myzset", "two", 2) == 1
     assert r.zadd("myzset", "three", 3) == 1
@@ -2506,8 +2606,7 @@ def test_zrem():
     assert r.zrange("myzset", 0, -1, withscores=True) == [("one", 1), ("three", 3)]
 
 
-@delete_keys("myzset")
-def test_zremrangebylex():
+def test_zremrangebylex(delete_keys):
     """ ZREMRANGEBYLEX key min max
             Available since 2.8.9.
             Time complexity: O(log(N)+M) with N being the number of elements
@@ -2538,6 +2637,8 @@ def test_zremrangebylex():
     4) "zip"
     redis>
     """
+    delete_keys.keys("myzset")
+
     assert r.zadd("myzset", "e", 0, "d", 0, "c", 0, "b", 0, "aaaa", 0) == 5
     assert r.zadd("myzset", "alpha", 0, "ALPHA", 0, "zip", 0, "zap", 0, "foo", 0) == 5
     assert r.zrange("myzset", 0, -1) == ["ALPHA", "aaaa", "alpha", "b", "c", "d", "e", "foo", "zap", "zip"]
@@ -2545,8 +2646,7 @@ def test_zremrangebylex():
     assert r.zrange("myzset", 0, -1) == ["ALPHA", "aaaa", "zap", "zip"]
 
 
-@delete_keys("myzset")
-def test_zremrangebyrank():
+def test_zremrangebyrank(delete_keys):
     """ ZREMRANGEBYRANK key start stop
             Available since 2.0.0.
             Time complexity: O(log(N)+M) with N being the number of elements
@@ -2566,6 +2666,8 @@ def test_zremrangebyrank():
     2) "3"
     redis>
     """
+    delete_keys.keys("myzset")
+
     assert r.zadd("myzset", "one", 1) == 1
     assert r.zadd("myzset", "two", 2) == 1
     assert r.zadd("myzset", "three", 3) == 1
@@ -2573,8 +2675,7 @@ def test_zremrangebyrank():
     assert r.zrange("myzset", 0, -1, withscores=True) == [("three", 3)]
 
 
-@delete_keys("myzset")
-def test_zremrangebyscore():
+def test_zremrangebyscore(delete_keys):
     """ ZREMRANGEBYSCORE key min max
             Available since 1.2.0.
             Time complexity: O(log(N)+M) with N being the number of elements
@@ -2596,6 +2697,8 @@ def test_zremrangebyscore():
     4) "3"
     redis>
     """
+    delete_keys.keys("myzset")
+
     assert r.zadd("myzset", "one", 1) == 1
     assert r.zadd("myzset", "two", 2) == 1
     assert r.zadd("myzset", "three", 3) == 1
@@ -2603,8 +2706,7 @@ def test_zremrangebyscore():
     assert r.zrange("myzset", 0, -1, withscores=True) == [("two", 2), ("three", 3)]
 
 
-@delete_keys("myzset")
-def test_zrevrange():
+def test_zrevrange(delete_keys):
     """ ZREVRANGE key start stop [WITHSCORES]
             Available since 1.2.0.
             Time complexity: O(log(N)+M) with N being the number of elements
@@ -2627,6 +2729,8 @@ def test_zrevrange():
     2) "one"
     redis>
     """
+    delete_keys.keys("myzset")
+
     assert r.zadd("myzset", "one", 1) == 1
     assert r.zadd("myzset", "two", 2) == 1
     assert r.zadd("myzset", "three", 3) == 1
@@ -2635,8 +2739,7 @@ def test_zrevrange():
     assert r.zrevrange("myzset", -2, -1) == ["two", "one"]
 
 
-@delete_keys("myzset")
-def test_zrevrangebyscore():
+def test_zrevrangebyscore(delete_keys):
     """ ZREVRANGEBYSCORE key max min [WITHSCORES] [LIMIT offset count]
             Available since 2.2.0.
             Time complexity: O(log(N)+M) with N being the number of elements
@@ -2663,6 +2766,8 @@ def test_zrevrangebyscore():
     (empty list or set)
     redis>
     """
+    delete_keys.keys("myzset")
+
     assert r.zadd("myzset", "one", 1) == 1
     assert r.zadd("myzset", "two", 2) == 1
     assert r.zadd("myzset", "three", 3) == 1
@@ -2672,8 +2777,7 @@ def test_zrevrangebyscore():
     assert r.zrevrangebyscore("myzset", "(2", "(1") == []
 
 
-@delete_keys("myzset")
-def test_zrevrank():
+def test_zrevrank(delete_keys):
     """ ZREVRANK key member
             Available since 2.0.0.
             Time complexity: O(log(N))
@@ -2690,6 +2794,8 @@ def test_zrevrank():
     (nil)
     redis>
     """
+    delete_keys.keys("myzset")
+
     assert r.zadd("myzset", "one", 1) == 1
     assert r.zadd("myzset", "two", 2) == 1
     assert r.zadd("myzset", "three", 3) == 1
@@ -2697,8 +2803,7 @@ def test_zrevrank():
     assert r.zrevrank("myzset", "four") is None
 
 
-@delete_keys("myzset")
-def test_zscore():
+def test_zscore(delete_keys):
     """ ZSCORE key member
             Available since 1.2.0.
             Time complexity: O(1)
@@ -2709,12 +2814,13 @@ def test_zscore():
     "1"
     redis>
     """
+    delete_keys.keys("myzset")
+
     assert r.zadd("myzset", "one", 1) == 1
     assert r.zscore("myzset", "one") == 1
 
 
-@delete_keys("{tag}zset1", "{tag}zset2", "{tag}out")
-def test_zunionstore():
+def test_zunionstore(delete_keys):
     """ ZUNIONSTORE destination numkeys key [key ...]
         [WEIGHTS weight [weight ...]] [AGGREGATE SUM|MIN|MAX]
             Available since 2.0.0.
@@ -2743,6 +2849,8 @@ def test_zunionstore():
     6) "10"
     redis>
     """
+    delete_keys.keys("{tag}zset1", "{tag}zset2", "{tag}out")
+
     assert r.zadd("{tag}zset1", "one", 1) == 1
     assert r.zadd("{tag}zset1", "two", 2) == 1
     assert r.zadd("{tag}zset2", "one", 1) == 1
@@ -2752,8 +2860,7 @@ def test_zunionstore():
     assert r.zrange("{tag}out", 0, -1, withscores=True) == [("one", 5), ("three", 9), ("two", 10)]
 
 
-@delete_keys("zset1")
-def test_zscan():
+def test_zscan(delete_keys):
     """ ZSCAN key cursor [MATCH pattern] [COUNT count]
             Available since 2.8.0.
             Time complexity: O(1) for every call. O(N) for a complete
@@ -2772,16 +2879,14 @@ def test_zscan():
        6) "3"
     redis>
     """
+    delete_keys.keys("zset1")
+
     assert r.zadd("zset1", "one", 1, "two", 2, "three", 3) == 3
     assert r.zscan("zset1", 0) == (0, [("one", 1), ("two", 2), ("three", 3)])
 
 
-
-
-
 ###hyperloglog
-@delete_keys("hll")
-def test_pfadd():
+def test_pfadd(delete_keys):
     """ PFADD key element [element ...]
             Available since 2.8.9.
             Time complexity: O(1) to add every element.
@@ -2792,12 +2897,13 @@ def test_pfadd():
     (integer) 7
     redis>
     """
+    delete_keys.keys("hll")
+
     assert r.pfadd("hll", "a", "b", "c", "d", "e", "f", "g") == 1
     assert r.pfcount("hll") == 7
 
 
-@delete_keys("{tag}hll", "{tag}some-other-hll")
-def test_pfcount():
+def test_pfcount(delete_keys):
     """ PFCOUNT key [key ...]
             Available since 2.8.9.
             Time complexity: O(1) with every small average constant times when
@@ -2818,6 +2924,8 @@ def test_pfcount():
     (integer) 6
     redis>
     """
+    delete_keys.keys("{tag}hll", "{tag}some-other-hll")
+
     assert r.pfadd("{tag}hll", "foo", "bar", "zap") == 1
     assert r.pfadd("{tag}hll", "zap", "zap", "zap") == 0
     assert r.pfadd("{tag}hll", "foo", "bar") == 0
@@ -2826,8 +2934,7 @@ def test_pfcount():
     assert r.pfcount("{tag}hll", "{tag}some-other-hll") == 6
 
 
-@delete_keys("{tag}hll1", "{tag}hll2", "{tag}hll3")
-def test_pfmerge():
+def test_pfmerdeletege(delete_keys):
     """ PFMERGE destkey sourcekey [sourcekey ...]
             Available since 2.8.9.
             Time complexity: O(N) to merge N HyperLogLogs,
@@ -2843,6 +2950,8 @@ def test_pfmerge():
     (integer) 6
     redis>
     """
+    delete_keys.keys("{tag}hll1", "{tag}hll2", "{tag}hll3")
+
     assert r.pfadd("{tag}hll1", "foo", "bar", "zap", "a") == 1
     assert r.pfadd("{tag}hll2", "a", "b", "c", "foo") == 1
     assert r.pfmerge("{tag}hll3", "{tag}hll1", "{tag}hll2") is True
@@ -2850,42 +2959,43 @@ def test_pfmerge():
 
 
 ###script
-@delete_keys("key1")
-def test_eval():
+def test_eval(delete_keys):
     """ EVAL script numkeys key [key ...] arg [arg ...]
             Available since 2.6.0.
             Time complexity: Depends on the script that is executed.
 
     http://redis.io/commands/eval
     """
+    delete_keys.keys("key1")
+
     lua = "return {KEYS[1],ARGV[1]}"
     keys_and_args = ["key1","first"]
     assert r.eval(lua, 1, *keys_and_args) == keys_and_args
 
 
-#def test_evalsha():
-    """ EVALSHA sha1 numkeys key [key ...] arg [arg ...]
-            Available since 2.6.0.
-            Time complexity: Depends on the script that is executed.
-    """
+# def test_evalsha():
+#     """ EVALSHA sha1 numkeys key [key ...] arg [arg ...]
+#             Available since 2.6.0.
+#             Time complexity: Depends on the script that is executed.
+#     """
 
 
 
 ###misc
-#def test_auth():
-    """ AUTH password
-            Available since 1.0.0.
-    """
+# def test_auth():
+#     """ AUTH password
+#             Available since 1.0.0.
+#     """
 
-#def test_echo():
-    """ ECHO message
-            Available since 1.0.0.
-
-    redis> ECHO "Hello World!"
-    "Hello World!"
-    redis>
-    """
-#    assert r.echo("Hello World") == "Hello World"
+# def test_echo():
+#     """ ECHO message
+#             Available since 1.0.0.
+#
+#     redis> ECHO "Hello World!"
+#     "Hello World!"
+#     redis>
+#     """
+#     assert r.echo("Hello World") == "Hello World"
 
 
 def test_ping():
@@ -2902,18 +3012,18 @@ def test_ping():
     #assert r.ping("hello world") == "hello world"
 
 
-#def test_quit():
-    """ QUIT
-            Available since 1.0.0.
-    """
-#    assert r.quit() == "OK"
+# def test_quit():
+#     """ QUIT
+#             Available since 1.0.0.
+#     """
+#     assert r.quit() == "OK"
 
 
-#def test_select():
-    """ SELECT index
-            Available since 1.0.0.
-    """
-#    assert r.select(0) is True
+# def test_select():
+#     """ SELECT index
+#             Available since 1.0.0.
+#     """
+#     assert r.select(0) is True
 
 
 def test_info():
@@ -2931,33 +3041,35 @@ def test_info():
     assert r.info()
 
 
+def test_moved(delete_keys):
+    delete_keys.keys("hello")
 
-def call(func):
-    RED = "\033[31m"
-    GREEN = "\033[32m"
-    ENDC = "\033[0m"
+    r.set("hello", 123)
+    cluster = Cluster.from_node(ClusterNode.from_uri(REDIS_URI_SRC))
+    cluster.migrate_slot(ClusterNode.from_uri(REDIS_URI_SRC),
+                         ClusterNode.from_uri(REDIS_URI_DST),
+                         866)
+    # double check
+    assert r.get("hello") == "123"
+    assert r.get("hello") == "123"
 
-    if hasattr(func, "keys"):
-        r.delete(*func.keys)
+
+def test_ask(delete_keys):
+    delete_keys.keys("hello")
+    print("hello")
+
+    r.set("hello", 123)
+    node1 = ClusterNode.from_uri(REDIS_URI_SRC)
+    node2 = ClusterNode.from_uri(REDIS_URI_DST)
+
+    node2.setslot("MIGRATING", 866, node1.name)
+    node1.setslot("IMPORTING", 866, node2.name)
+
+    with pytest.raises(redis.ResponseError) as excinfo:
+        node2.get("a{hello}")
+    assert "ASK 866 127.0.0.1:8000" in str(excinfo.value)
+
     try:
-        func()
-    except:
-        print "{} {}FAILED{}".format(func.__name__, RED, ENDC)
-        raise
-    else:
-        print "{} {}PASSED{}".format(func.__name__, GREEN, ENDC)
-
-
-def main():
-    d = globals()
-    for k in d.keys():
-        if not k.startswith("test_"):
-            continue
-        func = d[k]
-        if not inspect.isfunction(func):
-            continue
-        call(func)
-
-
-if __name__ == "__main__":
-    main()
+        assert r.get("a{hello}") is None
+    finally:
+        Cluster.from_node(node1).fix_open_slots()

@@ -720,12 +720,18 @@ int cmd_parse_rep(struct command *cmd, struct mbuf *buf)
             return CORVUS_ERR;
         }
 
+        if (cmd->rep_buf[0].buf == NULL && r->start.buf != NULL) {
+            memcpy(&cmd->rep_buf[0], &r->start, sizeof(r->start));
+        }
+
         if (reader_ready(r)) {
             cmd->rep_data = r->data;
-            CMD_COPY_RANGE(&cmd->rep_buf[0], &cmd->rep_buf[1], r);
+            memcpy(&cmd->rep_buf[1], &r->end, sizeof(r->end));
 
             r->data = NULL;
             r->type = PARSE_BEGIN;
+            memset(&r->start, 0, sizeof(r->start));
+            memset(&r->end, 0, sizeof(r->end));
             break;
         }
     }
@@ -949,8 +955,10 @@ void cmd_mark_done(struct command *cmd)
     cmd_mark(cmd, 0);
 }
 
+/* rep data referenced in server should be freed before mark fail */
 void cmd_mark_fail(struct command *cmd)
 {
+    memset(cmd->rep_buf, 0, sizeof(cmd->rep_buf));
     cmd_mark(cmd, 1);
 }
 

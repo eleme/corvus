@@ -6,6 +6,8 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include "logging.h"
+#include "event.h"
 
 #define MSG_LEN 1024
 
@@ -32,6 +34,8 @@
         if (filter(#test_func, manager.test_func_filter)) {             \
             struct context ctx;                                         \
             context_init(&ctx, 0, ERROR);                               \
+            struct event_loop *loop = event_create(1024);               \
+            ctx.loop = loop;                                            \
             enum test_result res = test_func(&ctx);                     \
             context_free(&ctx);                                         \
             post_test(#test_func, res);                                 \
