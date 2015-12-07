@@ -24,6 +24,7 @@
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
 
 #define ARRAY_CHUNK_SIZE 1024
+#define RECYCLE_SIZE 64
 
 enum thread_role {
     THREAD_UNKNOWN,
@@ -48,9 +49,6 @@ struct context {
 
     uint32_t nfree_connq;
     struct conn_tqh free_connq;
-
-    uint32_t nfree_redis_dataq;
-    struct redis_data_tqh free_redis_dataq;
 
     struct connection *proxy;
 

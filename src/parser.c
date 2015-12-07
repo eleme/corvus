@@ -86,19 +86,9 @@ void pos_array_push(struct pos_array *arr, int len, uint8_t *p)
     arr->str_len += len;
 }
 
-struct redis_data *redis_data_create(struct context *ctx, int type)
+struct redis_data *redis_data_create(int type)
 {
-    struct redis_data *data;
-    if (!STAILQ_EMPTY(&ctx->free_redis_dataq)) {
-        LOG(DEBUG, "redis data get cache");
-        data = STAILQ_FIRST(&ctx->free_redis_dataq);
-        STAILQ_REMOVE_HEAD(&ctx->free_redis_dataq, next);
-        STAILQ_NEXT(data, next) = NULL;
-        ctx->nfree_redis_dataq--;
-    } else {
-        data = malloc(sizeof(struct redis_data));
-    }
-    memset(data, 0, sizeof(struct redis_data));
+    struct redis_data *data = calloc(1, sizeof(struct redis_data));
     data->type = type;
     return data;
 }
@@ -109,7 +99,7 @@ struct redis_data *redis_data_get(struct reader_task *task, int type)
     switch (task->type) {
         case REP_UNKNOWN:
             if (task->data == NULL) {
-                task->data = data = redis_data_create(task->ctx, type);
+                task->data = data = redis_data_create(type);
             } else {
                 data = task->data;
             }
@@ -118,7 +108,7 @@ struct redis_data *redis_data_get(struct reader_task *task, int type)
             if (task->cur_data != NULL) {
                 data = task->cur_data;
             } else {
-                task->cur_data = data = redis_data_create(task->ctx, type);
+                task->cur_data = data = redis_data_create(type);
                 task->data->element[task->idx++] = data;
             }
             return data;
@@ -168,7 +158,7 @@ int process_array(struct reader *r)
     struct reader_task *task = &r->rstack[r->sidx];
     task->type = REP_ARRAY;
 
-    if (task->data == NULL) task->data = redis_data_create(r->ctx, REP_ARRAY);
+    if (task->data == NULL) task->data = redis_data_create(REP_ARRAY);
 
     for (; r->buf->pos < r->buf->last; r->buf->pos++) {
         p = r->buf->pos;
@@ -467,9 +457,7 @@ void redis_data_free(struct context *ctx, struct redis_data *data)
             data->element = NULL;
             data->elements = 0;
     }
-    STAILQ_NEXT(data, next) = NULL;
-    STAILQ_INSERT_HEAD(&ctx->free_redis_dataq, data, next);
-    ctx->nfree_redis_dataq++;
+    free(data);
 }
 
 void reader_init(struct context *ctx, struct reader *r)
