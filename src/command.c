@@ -968,13 +968,21 @@ void cmd_mark_fail(struct command *cmd)
 void cmd_stats(struct command *cmd)
 {
     struct context *ctx = cmd->ctx;
-    struct command *c;
+    struct command *c, *sub_cmd;
+
     STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
         ctx->stats.completed_commands++;
-        ctx->stats.remote_latency += c->rep_time[1] - c->rep_time[0];
         ctx->stats.total_latency += cmd->req_time[1] - c->req_time[0];
         if (STAILQ_NEXT(c, sub_cmd_next) == NULL) {
             ctx->last_command_latency = cmd->req_time[1] - c->req_time[0];
+        }
+
+        if (!STAILQ_EMPTY(&c->sub_cmds)) {
+            STAILQ_FOREACH(sub_cmd, &c->sub_cmds, sub_cmd_next) {
+                ctx->stats.remote_latency += sub_cmd->rep_time[1] - sub_cmd->rep_time[0];
+            }
+        } else {
+            ctx->stats.remote_latency += c->rep_time[1] - c->rep_time[0];
         }
     }
 }
