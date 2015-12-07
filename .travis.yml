@@ -30,6 +30,7 @@ install:
   - ruskit create localhost:800{0,1,2}
 
 before_script:
+  - sudo pip install -r tests/requirements.txt
   - make
   - sed -i 's/loglevel debug/loglevel info/' corvus.conf
   - ./src/corvus ./corvus.conf > corvus.log 2>&1 &
@@ -39,7 +40,7 @@ script:
   - make test
   - valgrind --leak-check=full ./tests/corvus_test --silent
 
-  - sudo python tests/test_corvus.py
+  - sudo py.test -v tests/test_corvus.py
 
 after_script:
   - kill -INT `pgrep -f corvus` && sleep 0.1

@@ -215,7 +215,6 @@ int do_update_slot_map(struct connection *server)
 
     if (socket_write(server->fd, &iov, 1) <= 0) {
         LOG(ERROR, "update slot map, socket write: %s", strerror(errno));
-        conn_free(server);
         return -1;
     }
 
@@ -223,6 +222,7 @@ int do_update_slot_map(struct connection *server)
     cmd->server = server;
     if(cmd_read_reply(cmd, server) != CORVUS_OK) {
         LOG(ERROR, "update slot map, cmd read error");
+        cmd_free(cmd);
         return -1;
     }
 
@@ -240,12 +240,13 @@ void slot_map_init(struct context *ctx)
     struct address address;
     struct node_conf *conf = ctx->node_conf;
 
+    conn_init(&server, ctx);
+
     for (i = 0; i < conf->len; i++) {
         addr = conf->nodes[i];
         port = socket_parse_addr(addr, &address);
         if (port == -1) continue;
 
-        conn_init(&server, ctx);
         server.fd = socket_create_stream();
         if (server.fd == -1) continue;
 

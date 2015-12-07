@@ -1,6 +1,8 @@
+#include <pthread.h>
+#include <unistd.h>
 #include "test.h"
 #include "corvus.h"
-#include "logging.h"
+#include "slot.h"
 
 static void usage(const char *name)
 {
@@ -51,6 +53,7 @@ extern TEST_CASE(test_slot);
 extern TEST_CASE(test_hash);
 extern TEST_CASE(test_parser);
 extern TEST_CASE(test_cmd);
+extern TEST_CASE(test_server);
 
 int main(int argc, const char *argv[])
 {
@@ -59,10 +62,21 @@ int main(int argc, const char *argv[])
         return EXIT_FAILURE;
     }
 
+    struct node_conf conf = {NULL, 0};
+    struct context ctx;
+    context_init(&ctx, 0, ERROR);
+    ctx.node_conf = &conf;
+    slot_init_updater(&ctx);
+
     RUN_CASE(test_slot);
     RUN_CASE(test_hash);
     RUN_CASE(test_parser);
     RUN_CASE(test_cmd);
+    RUN_CASE(test_server);
+
+    usleep(10000);
+    slot_create_job(SLOT_UPDATER_QUIT, NULL);
+    pthread_join(ctx.thread, NULL);
 
     report();
     return manager.failed == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

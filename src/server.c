@@ -93,6 +93,13 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
 {
     int port;
     struct address addr;
+    struct buf_ptr ptr;
+
+    memcpy(&ptr, &cmd->rep_buf[0], sizeof(ptr));
+
+    server_free_buf(cmd);
+    redis_data_free(cmd->ctx, cmd->rep_data);
+    cmd->rep_data = NULL;
 
     if (cmd->redirected) {
         LOG(WARN, "multiple redirect error");
@@ -101,10 +108,6 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
     } else {
         cmd->redirected = 1;
     }
-
-    server_free_buf(cmd);
-    redis_data_free(cmd->ctx, cmd->rep_data);
-    cmd->rep_data = NULL;
 
     port = socket_parse_addr(info->addr, &addr);
     if (port == CORVUS_ERR) {
@@ -123,42 +126,24 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
     cmd->server = server;
     STAILQ_INSERT_TAIL(&server->ready_queue, cmd, ready_next);
 
-    switch (conn_register(server)) {
-        case CORVUS_ERR: return CORVUS_ERR;
-        case CORVUS_OK: break;
+    if (conn_register(server) == CORVUS_ERR) {
+        memcpy(&cmd->rep_buf[0], &ptr, sizeof(ptr));
+        mbuf_inc_ref(cmd->rep_buf[0].buf);
+        return CORVUS_ERR;
     }
     return CORVUS_OK;
 }
 
-int read_one_reply(struct connection *server)
+int server_read_reply(struct connection *server, struct command *cmd)
 {
-    if (STAILQ_EMPTY(&server->waiting_queue)) return CORVUS_AGAIN;
-
-    struct command *cmd = STAILQ_FIRST(&server->waiting_queue);
-
     int status = cmd_read_reply(cmd, server);
     /* after read */
     cmd->rep_time[1] = get_time();
-    if (status == CORVUS_OK) {
-        server->completed_commands++;
-        if (!cmd->asking) {
-            STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
-            STAILQ_NEXT(cmd, waiting_next) = NULL;
-        } else {
-            LOG(DEBUG, "recv asking");
-            server_free_buf(cmd);
-            redis_data_free(cmd->ctx, cmd->rep_data);
-            cmd->rep_data = NULL;
-            cmd->asking = 0;
-            return CORVUS_OK;
-        }
-    }
 
-    switch (status) {
-        case CORVUS_AGAIN: return CORVUS_AGAIN;
-        case CORVUS_EOF: return CORVUS_EOF;
-        case CORVUS_ERR: return CORVUS_ERR;
-    }
+    if (status != CORVUS_OK) return status;
+
+    server->completed_commands++;
+    if (cmd->asking) return CORVUS_ASKING;
 
     if (cmd->stale) {
         server_free_buf(cmd);
@@ -171,9 +156,7 @@ int read_one_reply(struct connection *server)
         return CORVUS_OK;
     }
 
-    struct redirect_info info;
-    info.type = CMD_ERR;
-    info.slot = -1;
+    struct redirect_info info = {.type = CMD_ERR, .slot = -1};
     memset(info.addr, 0, sizeof(info.addr));
 
     cmd_parse_redirect(cmd, &info);
@@ -195,10 +178,27 @@ int read_one_reply(struct connection *server)
 
 int server_read(struct connection *server)
 {
-    int status;
-    do {
-        status = read_one_reply(server);
-    } while (status == CORVUS_OK);
+    int status = CORVUS_OK;
+    struct command *cmd;
+    while (!STAILQ_EMPTY(&server->waiting_queue)) {
+        cmd = STAILQ_FIRST(&server->waiting_queue);
+        status = server_read_reply(server, cmd);
+
+        switch (status) {
+            case CORVUS_ASKING:
+                LOG(DEBUG, "recv asking");
+                server_free_buf(cmd);
+                redis_data_free(cmd->ctx, cmd->rep_data);
+                cmd->rep_data = NULL;
+                cmd->asking = 0;
+                continue;
+            case CORVUS_OK:
+                STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
+                STAILQ_NEXT(cmd, waiting_next) = NULL;
+                continue;
+        }
+        break;
+    }
     return status;
 }
 
@@ -258,14 +258,24 @@ void server_eof(struct connection *server)
         c = STAILQ_FIRST(&server->ready_queue);
         STAILQ_REMOVE_HEAD(&server->ready_queue, ready_next);
         STAILQ_NEXT(c, ready_next) = NULL;
-        cmd_mark_fail(c);
+        if (c->stale) {
+            cmd_free(c);
+        } else {
+            cmd_free_reply(c);
+            cmd_mark_fail(c);
+        }
     }
 
     while (!STAILQ_EMPTY(&server->waiting_queue)) {
         c = STAILQ_FIRST(&server->waiting_queue);
         STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
         STAILQ_NEXT(c, waiting_next) = NULL;
-        cmd_mark_fail(c);
+        if (c->stale) {
+            cmd_free(c);
+        } else {
+            cmd_free_reply(c);
+            cmd_mark_fail(c);
+        }
     }
 
     event_deregister(server->ctx->loop, server);

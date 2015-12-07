@@ -484,6 +484,9 @@ void reader_init(struct context *ctx, struct reader *r)
 
     r->sign = 1;
     r->ready = 0;
+
+    memset(&r->start, 0, sizeof(r->start));
+    memset(&r->end, 0, sizeof(r->end));
 }
 
 void reader_free(struct reader *r)
