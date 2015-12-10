@@ -289,6 +289,25 @@ TEST(test_parse_minus_integer) {
     PASS(NULL);
 }
 
+TEST(test_wrong_integer) {
+    struct mbuf buf;
+
+    char data[] = "*4\r\n:4\n:4\r\n";
+
+    buf.pos = (uint8_t*)data;
+    buf.last = (uint8_t*)data + strlen(data);
+    buf.end = buf.last;
+
+    struct reader r;
+    reader_init(&r);
+    reader_feed(&r, &buf);
+
+    ASSERT(parse(&r) == -1);
+
+    reader_free(&r);
+    PASS(NULL);
+}
+
 TEST(test_pos_array_compare) {
     struct pos p[2] = {
         {.str = (uint8_t*)"hello", .len = 5},
@@ -315,4 +334,5 @@ TEST_CASE(test_parser) {
     RUN_TEST(test_parse_null_array);
     RUN_TEST(test_parse_minus_integer);
     RUN_TEST(test_pos_array_compare);
+    RUN_TEST(test_wrong_integer);
 }

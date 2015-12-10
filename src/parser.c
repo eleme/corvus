@@ -107,6 +107,7 @@ struct redis_data *redis_data_get(struct reader_task *task, int type)
             if (task->cur_data != NULL) {
                 data = task->cur_data;
             } else {
+                if (task->idx >= task->data->elements) return NULL;
                 task->cur_data = data = redis_data_create(type);
                 task->data->element[task->idx++] = data;
             }
@@ -186,8 +187,8 @@ int process_array(struct reader *r)
                 if (*p != '\n') return -1;
 
                 if (task->data->elements > 0) {
-                    task->data->element = malloc(
-                            sizeof(struct redis_data*) * task->data->elements);
+                    task->data->element = calloc(task->data->elements,
+                            sizeof(struct redis_data*));
                     r->type = PARSE_TYPE;
                 } else {
                     switch (stack_pop(r)) {
@@ -226,12 +227,12 @@ int process_string(struct reader *r)
                     case '\r':
                         r->string_size *= r->sign;
                         r->sign = 1;
-                        if (task->elements > 0) task->elements--;
                         if (r->string_size == -1) {
                             r->string_type = PARSE_STRING_END;
                         }
                         break;
                     case '\n':
+                        if (task->elements > 0) task->elements--;
                         r->string_type = PARSE_STRING_ENTITY;
                         break;
                     default:
