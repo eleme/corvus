@@ -227,12 +227,12 @@ int process_string(struct reader *r)
                     case '\r':
                         r->string_size *= r->sign;
                         r->sign = 1;
+                        if (task->elements > 0) task->elements--;
                         if (r->string_size == -1) {
                             r->string_type = PARSE_STRING_END;
                         }
                         break;
                     case '\n':
-                        if (task->elements > 0) task->elements--;
                         r->string_type = PARSE_STRING_ENTITY;
                         break;
                     default:
