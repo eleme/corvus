@@ -54,8 +54,8 @@ struct command {
     struct cmd_tqh sub_cmds;
     struct command *parent;
 
-    struct redis_data *req_data;
-    struct redis_data *rep_data;
+    struct redis_data req_data;
+    struct redis_data rep_data;
 
     struct iov_data iov;
 
@@ -73,7 +73,7 @@ struct command {
 
 struct redirect_info {
     uint16_t slot;
-    char addr[HOST_NAME_MAX + 8];
+    char addr[DSN_MAX];
     int type;
 };
 

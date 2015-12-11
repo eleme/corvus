@@ -61,7 +61,8 @@ static struct connection *conn_create_server(struct context *ctx, struct address
         return NULL;
     }
 
-    dict_set(ctx->server_table, key, (void*)server);
+    strcpy(server->dsn, key);
+    dict_set(ctx->server_table, server->dsn, (void*)server);
     STAILQ_INSERT_TAIL(&ctx->servers, server, next);
     return server;
 }
@@ -82,6 +83,7 @@ void conn_init(struct connection *conn, struct context *ctx)
     STAILQ_INIT(&conn->data);
 
     memset(&conn->iov, 0, sizeof(conn->iov));
+    memset(&conn->dsn, 0, sizeof(conn->dsn));
 }
 
 struct connection *conn_create(struct context *ctx)
@@ -172,18 +174,16 @@ int conn_create_fd()
 struct connection *conn_get_server_from_pool(struct context *ctx, struct address *addr)
 {
     struct connection *server;
-    char *key;
+    char key[DSN_MAX];
 
-    key = socket_get_key(addr);
+    socket_get_key(addr, key);
     server = dict_get(ctx->server_table, key);
     if (server != NULL) {
-        free(key);
         if (verify_server(server, addr) == -1) return NULL;
         return server;
     }
 
     server = conn_create_server(ctx, addr, key);
-    if (server == NULL) free(key);
     return server;
 }
 

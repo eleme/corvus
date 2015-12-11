@@ -22,26 +22,26 @@ TEST(test_nested_array) {
         FAIL(NULL);
     }
 
-    struct redis_data *d = r.data;
+    struct redis_data *d = &r.data;
     ASSERT(d != NULL);
     ASSERT(d->elements == 3);
 
-    struct redis_data *f1 = d->element[0];
+    struct redis_data *f1 = &d->element[0];
     ASSERT(f1->type == REP_STRING);
-    ASSERT(f1->pos->pos_len == 1);
-    ASSERT(f1->pos->items[0].len == 3);
-    ASSERT(strncmp("SET", (const char *)f1->pos->items[0].str, 3) == 0);
+    ASSERT(f1->pos.pos_len == 1);
+    ASSERT(f1->pos.items[0].len == 3);
+    ASSERT(strncmp("SET", (const char *)f1->pos.items[0].str, 3) == 0);
 
-    struct redis_data *f2 = d->element[1];
+    struct redis_data *f2 = &d->element[1];
     ASSERT(f2->type == REP_ARRAY);
     ASSERT(f2->elements == 1);
-    ASSERT(f2->element[0]->pos->items[0].len == 5);
-    ASSERT(strncmp("hello", (const char *)f2->element[0]->pos->items[0].str, 5) == 0);
+    ASSERT(f2->element[0].pos.items[0].len == 5);
+    ASSERT(strncmp("hello", (const char *)f2->element[0].pos.items[0].str, 5) == 0);
 
-    struct redis_data *f3 = d->element[2];
+    struct redis_data *f3 = &d->element[2];
     ASSERT(f3->type == REP_STRING);
-    ASSERT(f3->pos->items[0].len == 3);
-    ASSERT(strncmp("123", (const char *)f3->pos->items[0].str, 3) == 0);
+    ASSERT(f3->pos.items[0].len == 3);
+    ASSERT(strncmp("123", (const char *)f3->pos.items[0].str, 3) == 0);
 
     mbuf_recycle(ctx, buf);
     reader_free(&r);
@@ -89,21 +89,21 @@ TEST(test_partial_parse) {
     }
 
     ASSERT(reader.ready);
-    struct redis_data *d = reader.data;
+    struct redis_data *d = &reader.data;
     ASSERT(d->elements == 3);
-    ASSERT(d->element[0]->pos->pos_len == 1);
-    ASSERT(d->element[0]->pos->items[0].len == 3);
-    ASSERT(strncmp("SET", (const char *)d->element[0]->pos->items[0].str, 3) == 0);
-    ASSERT(d->element[1]->pos->pos_len == 1);
-    ASSERT(d->element[1]->pos->items[0].len == 5);
-    ASSERT(strncmp("hello", (const char *)d->element[1]->pos->items[0].str, 5) == 0);
-    ASSERT(d->element[2]->pos->pos_len == 2);
-    LOG(DEBUG, "%d %d", d->element[2]->pos->items[0].len, d->element[2]->pos->items[1].len);
-    ASSERT(d->element[2]->pos->items[0].len == (uint32_t)size);
-    ASSERT(strncmp(value, (const char *)d->element[2]->pos->items[0].str, size) == 0);
+    ASSERT(d->element[0].pos.pos_len == 1);
+    ASSERT(d->element[0].pos.items[0].len == 3);
+    ASSERT(strncmp("SET", (const char *)d->element[0].pos.items[0].str, 3) == 0);
+    ASSERT(d->element[1].pos.pos_len == 1);
+    ASSERT(d->element[1].pos.items[0].len == 5);
+    ASSERT(strncmp("hello", (const char *)d->element[1].pos.items[0].str, 5) == 0);
+    ASSERT(d->element[2].pos.pos_len == 2);
+    LOG(DEBUG, "%d %d", d->element[2].pos.items[0].len, d->element[2].pos.items[1].len);
+    ASSERT(d->element[2].pos.items[0].len == (uint32_t)size);
+    ASSERT(strncmp(value, (const char *)d->element[2].pos.items[0].str, size) == 0);
     uint32_t remain = 16387 - size;
-    ASSERT(d->element[2]->pos->items[1].len == remain);
-    ASSERT(strncmp(value, (const char *)d->element[2]->pos->items[1].str, remain) == 0);
+    ASSERT(d->element[2].pos.items[1].len == remain);
+    ASSERT(strncmp(value, (const char *)d->element[2].pos.items[1].str, remain) == 0);
 
     mbuf_recycle(ctx, buf);
     mbuf_recycle(ctx, buf2);
@@ -124,18 +124,15 @@ TEST(test_process_integer) {
     reader_init(&r);
     reader_feed(&r, &buf);
 
-    struct redis_data *d;
     ASSERT(parse(&r) != -1);
     ASSERT(r.ready == 1);
-    ASSERT(r.data != NULL);
-    ASSERT(r.data->type == REP_INTEGER);
-    ASSERT(r.data->integer == 40235);
-    d = r.data;
+    ASSERT(r.data.type == REP_INTEGER);
+    ASSERT(r.data.integer == 40235);
 
     ASSERT(parse(&r) != -1);
-    ASSERT(r.data->integer == 231);
+    ASSERT(r.data.integer == 231);
 
-    redis_data_free(d);
+    redis_data_free(&r.data);
     reader_free(&r);
     PASS(NULL);
 }
@@ -154,17 +151,15 @@ TEST(test_empty_array) {
     reader_init(&r);
     reader_feed(&r, &buf);
 
-    struct redis_data *d;
     ASSERT(parse(&r) != -1);
     ASSERT(r.ready == 1);
-    ASSERT(r.data->type == REP_ARRAY);
-    ASSERT(r.data->elements == 0);
-    ASSERT(r.data->element == NULL);
-    d = r.data;
+    ASSERT(r.data.type == REP_ARRAY);
+    ASSERT(r.data.elements == 0);
+    ASSERT(r.data.element == NULL);
 
     ASSERT(parse(&r) != -1);
 
-    redis_data_free(d);
+    redis_data_free(&r.data);
     reader_free(&r);
     PASS(NULL);
 }

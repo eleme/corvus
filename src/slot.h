@@ -17,14 +17,9 @@ enum {
 };
 
 struct node_info {
-    LIST_ENTRY(node_info) next;
-    int id;
     struct address master;
-    size_t slave_count;
-    struct address *slaves;
+    int dsn_added;
 };
-
-LIST_HEAD(node_list, node_info);
 
 uint16_t slot_get(struct pos_array *pos);
 void slot_get_addr_list(char **dest);

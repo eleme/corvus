@@ -12,8 +12,13 @@
 #include "logging.h"
 #include "dict.h"
 
-#define ADDR_LIST_CHUNK 128
-#define ADDR_NAME_LEN (HOST_NAME_MAX + 8)
+#define MAX_UPDATE_NODES 16
+#define ADDR_LIST_MAX (ARRAY_CHUNK_SIZE * DSN_MAX)
+
+struct map_item {
+    uint32_t hash;
+    struct node_info *node;
+};
 
 struct job {
     STAILQ_ENTRY(job) next;
@@ -28,7 +33,6 @@ enum {
 
 STAILQ_HEAD(job_queue, job);
 
-extern void context_init(struct context *ctx, bool syslog, int log_level);
 extern void context_free(struct context *ctx);
 
 static struct node_info *slot_map[REDIS_CLUSTER_SLOTS];
@@ -42,57 +46,44 @@ static struct job_queue job_queue;
 static pthread_rwlock_t slot_map_lock = PTHREAD_RWLOCK_INITIALIZER;
 static pthread_rwlock_t addr_list_lock = PTHREAD_RWLOCK_INITIALIZER;
 
-static struct node_list node_list;
+static struct {
+    struct node_info nodes[MAX_UPDATE_NODES];
+    int idx;
+} node_list;
 
 static struct {
-    char *addrs;
+    char addrs[ADDR_LIST_MAX];
     int bytes;
-    int max_size;
-} addr_list = {NULL, 0, 0};
+} addr_list;
+
+static struct {
+    struct node_info nodes[REDIS_CLUSTER_SLOTS];
+    struct map_item map[REDIS_CLUSTER_SLOTS];
+    int map_size;
+    int idx;
+} node_store;
 
 void addr_add(char *host, uint16_t port)
 {
     int n;
     pthread_rwlock_wrlock(&addr_list_lock);
     if (addr_list.bytes > 0) {
-        addr_list.addrs[addr_list.bytes++] = ',';
+        if (addr_list.bytes < ADDR_LIST_MAX) {
+            addr_list.addrs[addr_list.bytes++] = ',';
+        }
     }
-    if (addr_list.max_size - addr_list.bytes < ADDR_NAME_LEN) {
-        addr_list.max_size += ADDR_LIST_CHUNK * ADDR_NAME_LEN;
-        addr_list.addrs = realloc(addr_list.addrs, addr_list.max_size);
+    if (ADDR_LIST_MAX - addr_list.bytes > DSN_MAX) {
+        n = snprintf(addr_list.addrs + addr_list.bytes, DSN_MAX, "%s:%d", host, port);
+        addr_list.bytes += n;
     }
-    n = snprintf(addr_list.addrs + addr_list.bytes, ADDR_NAME_LEN, "%s:%d", host, port);
-    addr_list.bytes += n;
     pthread_rwlock_unlock(&addr_list_lock);
 }
 
-void addr_list_clear()
+struct node_info *node_info_get(struct address *addr)
 {
-    pthread_rwlock_wrlock(&addr_list_lock);
-    if (addr_list.addrs != NULL) {
-        memset(addr_list.addrs, 0, addr_list.max_size);
-    }
-    addr_list.bytes = 0;
-    pthread_rwlock_unlock(&addr_list_lock);
-}
-
-void node_list_free()
-{
-    struct node_info *node;
-    while(!LIST_EMPTY(&node_list)) {
-        node = LIST_FIRST(&node_list);
-        LIST_REMOVE(node, next);
-        if (node->slaves != NULL) free(node->slaves);
-        free(node);
-    }
-}
-
-struct node_info *node_info_create(struct address *addr)
-{
-    struct node_info *node = malloc(sizeof(struct node_info));
-    node->id = -1;
-    node->slave_count = 0;
-    node->slaves = NULL;
+    if (node_store.idx >= REDIS_CLUSTER_SLOTS) return NULL;
+    struct node_info *node = &node_store.nodes[node_store.idx++];
+    memset(node, 0, sizeof(struct node_info));
 
     addr_add(addr->host, addr->port);
 
@@ -100,55 +91,91 @@ struct node_info *node_info_create(struct address *addr)
     return node;
 }
 
-struct node_info *node_info_find(struct context *ctx, struct redis_data *data)
+int map_compare(const void *a, const void *b)
+{
+    const struct map_item *x = (const struct map_item*)a;
+    const struct map_item *y = (const struct map_item*)b;
+    return (x->hash > y->hash) - (x->hash < y->hash);
+}
+
+void *map_get(char *key)
+{
+    if (node_store.map_size <= 0) return NULL;
+
+    uint32_t hash = lookup3_hash(key, strlen(key));
+    struct map_item item = {.hash = hash};
+    struct map_item *target;
+    target = bsearch(&item, node_store.map, node_store.map_size,
+            sizeof(struct map_item), map_compare);
+    if (target == NULL) return NULL;
+    return target->node;
+}
+
+void map_set(char *key, struct node_info *data)
+{
+    int i;
+    uint32_t hash = lookup3_hash(key, strlen(key));
+
+    for (i = 0; i < node_store.map_size; i++) {
+        if (hash < node_store.map[i].hash) {
+            memmove(node_store.map + i + 1, node_store.map + i,
+                    sizeof(struct map_item) * (node_store.map_size - i));
+            break;
+        }
+    }
+    node_store.map[i].hash = hash;
+    node_store.map[i].node = data;
+    node_store.map_size++;
+}
+
+struct node_info *node_info_find(struct redis_data *data)
 {
     struct node_info *node;
-    char *key;
 
     if (data->elements != 2) return NULL;
 
-    struct pos_array *p = data->element[0]->pos;
+    struct pos_array *p = &data->element[0].pos;
     if (p->str_len <= 0) return NULL;
 
     char hostname[p->str_len + 1];
     if (pos_to_str(p, hostname) == CORVUS_ERR) return NULL;
 
-    uint16_t port = data->element[1]->integer;
+    uint16_t port = data->element[1].integer;
 
     struct address addr;
     socket_get_addr(hostname, p->str_len, port, &addr);
 
-    key = socket_get_key(&addr);
-    node = dict_get(ctx->server_table, key);
-    if (node != NULL) {
-        free(key);
-    } else {
-        node = node_info_create(&addr);
-        dict_set(ctx->server_table, key, (void*)node);
+    char key[DSN_MAX];
+    socket_get_key(&addr, key);
+
+    node = map_get(key);
+    if (node == NULL) {
+        node = node_info_get(&addr);
+        if (node == NULL) return NULL;
+        map_set(key, node);
     }
     return node;
 }
 
-int node_info_add_slave(struct node_info *node, struct redis_data *data)
+int node_info_add_addr(struct redis_data *data)
 {
-    struct address *addr = &node->slaves[node->slave_count++];
-
     if (data->elements != 2) return -1;
 
-    struct pos_array *p = data->element[0]->pos;
-    if (p->str_len <= 0) return CORVUS_ERR;
+    struct pos_array *p = &data->element[0].pos;
+    if (p->str_len <= 0) return -1;
 
     char hostname[p->str_len + 1];
-    if (pos_to_str(p, hostname) == CORVUS_ERR) return CORVUS_ERR;
+    if (pos_to_str(p, hostname) == CORVUS_ERR) return -1;
 
-    uint16_t port = data->element[1]->integer;
-    socket_get_addr(hostname, p->str_len, port, addr);
+    uint16_t port = data->element[1].integer;
+    struct address addr;
+    socket_get_addr(hostname, p->str_len, port, &addr);
 
-    addr_add(addr->host, addr->port);
+    addr_add(addr.host, addr.port);
     return 0;
 }
 
-int parse_slots_data(struct context *ctx, struct redis_data *data)
+int parse_slots_data(struct redis_data *data)
 {
     size_t i, h;
     long long j;
@@ -159,46 +186,48 @@ int parse_slots_data(struct context *ctx, struct redis_data *data)
     if (data->elements <= 0) return -1;
 
     for (i = 0; i < data->elements; i++) {
-        d = data->element[i];
+        d = &data->element[i];
 
         if (d->elements < 3) return -1;
 
-        node = node_info_find(ctx, d->element[2]);
+        node = node_info_find(&d->element[2]);
         if (node == NULL) return -1;
 
-        for (j = d->element[0]->integer; j < d->element[1]->integer + 1; j++) {
+        for (j = d->element[0].integer; j < d->element[1].integer + 1; j++) {
             count++;
             slot_map[j] = node;
         }
 
-        if (node->slaves == NULL && d->elements - 3 > 0) {
-            node->slaves = malloc(sizeof(struct address) * (d->elements - 3));
+        if (!node->dsn_added && d->elements - 3 > 0) {
             for (h = 3; h < d->elements; h++) {
-                if (node_info_add_slave(node, d->element[h]) == -1) return -1;
+                if (node_info_add_addr(&d->element[h]) == -1) return -1;
             }
+            node->dsn_added = 1;
         }
     }
 
     return count;
 }
 
-void slot_map_clear(struct context *ctx)
+void slot_map_clear()
 {
     pthread_rwlock_wrlock(&slot_map_lock);
     memset(slot_map, 0, sizeof(slot_map));
     pthread_rwlock_unlock(&slot_map_lock);
 
-    addr_list_clear();
+    pthread_rwlock_wrlock(&addr_list_lock);
+    memset(&addr_list, 0, sizeof(addr_list));
+    pthread_rwlock_unlock(&addr_list_lock);
 
     struct node_info *node_info;
 
-    struct dict_iter iter = DICT_ITER_INITIALIZER(ctx->server_table);
-    dict_each(&iter) {
-        free((void *)(iter.key));
-        node_info = (struct node_info *)(iter.val);
-        LIST_INSERT_HEAD(&node_list, node_info, next);
+    int i = 0;
+    for (i = 0; i < node_store.map_size; i++) {
+        node_info = node_store.map[i].node;
+        if (node_list.idx >= MAX_UPDATE_NODES) break;
+        memcpy(&node_list.nodes[node_list.idx++], node_info, sizeof(struct node_info));
     }
-    dict_clear(ctx->server_table);
+    memset(&node_store, 0, sizeof(node_store));
 }
 
 int do_update_slot_map(struct connection *server)
@@ -227,8 +256,9 @@ int do_update_slot_map(struct connection *server)
     }
 
     LOG(INFO, "updating slot map using %s:%d", server->addr.host, server->addr.port);
-    int count = parse_slots_data(server->ctx, cmd->rep_data);
+    int count = parse_slots_data(&cmd->rep_data);
     cmd_free(cmd);
+    mbuf_destroy(server->ctx);
     return count;
 }
 
@@ -275,13 +305,14 @@ void slot_map_init(struct context *ctx)
 
 void slot_map_update(struct context *ctx)
 {
-    int count = 0;
+    int i, count = 0;
     struct node_info *node;
     struct connection server;
 
     conn_init(&server, ctx);
 
-    LIST_FOREACH(node, &node_list, next) {
+    for (i = 0; i < node_list.idx; i++) {
+        node = &node_list.nodes[i];
         server.fd = socket_create_stream();
         if (server.fd == -1) continue;
 
@@ -300,8 +331,8 @@ void slot_map_update(struct context *ctx)
         }
         break;
     }
+    node_list.idx = 0;
 
-    node_list_free();
     conn_free(&server);
     conn_buf_free(&server);
 
@@ -314,9 +345,9 @@ void slot_map_update(struct context *ctx)
 
 void do_update(struct context *ctx, struct job *job)
 {
-    slot_map_clear(ctx);
+    slot_map_clear();
 
-    if (job->type == SLOT_UPDATE && LIST_EMPTY(&node_list)) {
+    if (job->type == SLOT_UPDATE && node_list.idx <= 0) {
         job->type = SLOT_UPDATE_INIT;
     }
 
@@ -369,13 +400,6 @@ void *slot_map_updater(void *data)
         STAILQ_REMOVE_HEAD(&job_queue, next);
         free(job);
     }
-    pthread_rwlock_wrlock(&addr_list_lock);
-    if (addr_list.addrs != NULL) free(addr_list.addrs);
-    addr_list.addrs = NULL;
-    addr_list.bytes = 0;
-    pthread_rwlock_unlock(&addr_list_lock);
-
-    node_list_free();
 
     pthread_rwlock_destroy(&slot_map_lock);
     pthread_rwlock_destroy(&addr_list_lock);
@@ -521,7 +545,9 @@ int slot_init_updater(struct context *ctx)
 
     memset(slot_map, 0, sizeof(struct node_info*) * REDIS_CLUSTER_SLOTS);
     STAILQ_INIT(&job_queue);
-    LIST_INIT(&node_list);
+
+    memset(&node_list, 0, sizeof(node_list));
+    memset(&node_store, 0, sizeof(node_store));
 
     pthread_mutex_init(&job_queue_mutex, NULL);
     pthread_cond_init(&signal_cond, NULL);

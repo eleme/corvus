@@ -11,7 +11,7 @@
 #include "dict.h"
 
 struct bytes {
-    char key[HOST_NAME_MAX + 8];
+    char key[DSN_MAX];
     long long recv;
     long long send;
     long long completed;

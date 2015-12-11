@@ -9,6 +9,8 @@
 #define HOST_NAME_MAX 255
 #endif
 
+#define DSN_MAX (HOST_NAME_MAX + 8)
+
 struct iovec;
 
 struct address {
@@ -29,6 +31,6 @@ int socket_set_nonblocking(int fd);
 int socket_set_tcpnodelay(int fd);
 int socket_set_timeout(int fd, int timeout);
 int socket_parse_addr(char *addr, struct address *address);
-char *socket_get_key(struct address *addr);
+void socket_get_key(struct address *addr, char *dst);
 
 #endif /* end of include guard: __SOCKET_H */

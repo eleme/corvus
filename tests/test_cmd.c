@@ -19,8 +19,10 @@ TEST(test_parse_redirect) {
 
     struct pos_array pos = {.str_len = len1 + len2, .pos_len = 2, .items = items};
 
-    struct redis_data data = {.type = REP_ERROR, .pos = &pos};
-    struct command cmd = {.rep_data = &data};
+    struct redis_data data = {.type = REP_ERROR};
+    memcpy(&data.pos, &pos, sizeof(pos));
+    struct command cmd;
+    memcpy(&cmd.rep_data, &data, sizeof(data));
 
     struct redirect_info info;
     info.type = CMD_ERR;
