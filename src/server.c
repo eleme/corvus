@@ -98,8 +98,7 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
     memcpy(&ptr, &cmd->rep_buf[0], sizeof(ptr));
 
     server_free_buf(cmd);
-    redis_data_free(cmd->rep_data);
-    cmd->rep_data = NULL;
+    redis_data_free(&cmd->rep_data);
 
     if (cmd->redirected) {
         LOG(WARN, "multiple redirect error");
@@ -151,7 +150,7 @@ int server_read_reply(struct connection *server, struct command *cmd)
         return CORVUS_OK;
     }
 
-    if (cmd->rep_data->type != REP_ERROR) {
+    if (cmd->rep_data.type != REP_ERROR) {
         cmd_mark_done(cmd);
         return CORVUS_OK;
     }
@@ -188,8 +187,7 @@ int server_read(struct connection *server)
             case CORVUS_ASKING:
                 LOG(DEBUG, "recv asking");
                 server_free_buf(cmd);
-                redis_data_free(cmd->rep_data);
-                cmd->rep_data = NULL;
+                redis_data_free(&cmd->rep_data);
                 cmd->asking = 0;
                 continue;
             case CORVUS_OK:

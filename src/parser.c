@@ -22,8 +22,7 @@ int stack_pop(struct reader *r)
 
     if (r->sidx == 0) {
         cur = &r->rstack[r->sidx];
-        r->data = cur->data;
-        cur->data = NULL;
+        redis_data_move(&r->data, &cur->data);
         return 0;
     }
 
@@ -31,40 +30,25 @@ int stack_pop(struct reader *r)
     top = &r->rstack[r->sidx];
     switch (top->type) {
         case REP_UNKNOWN:
-            r->data = cur->data;
-            cur->data = NULL;
+            redis_data_move(&r->data, &cur->data);
             return 0;
         case REP_ARRAY:
-            top->data->element[top->idx++] = cur->data;
-            cur->data = NULL;
+            redis_data_move(&top->data.element[top->idx++], &cur->data);
             top->elements--;
-            if (top->idx >= top->data->elements) return stack_pop(r);
+            if (top->idx >= top->data.elements) return stack_pop(r);
     }
     return 1;
 }
 
-
-int stack_push(struct reader *r)
+int stack_push(struct reader *r, int type)
 {
     if (r->sidx > 8) return -1;
     struct reader_task *task = &r->rstack[++r->sidx];
-    task->data = NULL;
-    task->cur_data = NULL;
-    task->prev_buf = NULL;
+    memset(task, 0, sizeof(struct reader_task));
     task->elements = -1;
-    task->idx = 0;
-    task->type = REP_UNKNOWN;
+    task->type = type;
+    task->data.type = type;
     return 0;
-}
-
-struct pos_array *pos_array_create()
-{
-    struct pos_array *arr = malloc(sizeof(struct pos_array));
-    arr->pos_len = 0;
-    arr->str_len = 0;
-    arr->items = NULL;
-    arr->max_pos_size = 0;
-    return arr;
 }
 
 void pos_array_push(struct pos_array *arr, int len, uint8_t *p)
@@ -85,33 +69,25 @@ void pos_array_push(struct pos_array *arr, int len, uint8_t *p)
     arr->str_len += len;
 }
 
-struct redis_data *redis_data_create(int type)
+void redis_data_move(struct redis_data *lhs, struct redis_data *rhs)
 {
-    struct redis_data *data = calloc(1, sizeof(struct redis_data));
-    data->type = type;
-    return data;
+    memcpy(lhs, rhs, sizeof(struct redis_data));
+    memset(rhs, 0, sizeof(struct redis_data));
 }
 
 struct redis_data *redis_data_get(struct reader_task *task, int type)
 {
-    struct redis_data *data;
     switch (task->type) {
         case REP_UNKNOWN:
-            if (task->data == NULL) {
-                task->data = data = redis_data_create(type);
-            } else {
-                data = task->data;
-            }
-            return data;
+            task->data.type = type;
+            return &task->data;
         case REP_ARRAY:
-            if (task->cur_data != NULL) {
-                data = task->cur_data;
-            } else {
-                if (task->idx >= task->data->elements) return NULL;
-                task->cur_data = data = redis_data_create(type);
-                task->data->element[task->idx++] = data;
-            }
-            return data;
+            if (task->cur_data != NULL) return task->cur_data;
+            if (task->idx >= task->data.elements) return NULL;
+
+            task->cur_data = &task->data.element[task->idx++];
+            task->cur_data->type = type;
+            return task->cur_data;
     }
     return NULL;
 }
@@ -123,7 +99,7 @@ int process_type(struct reader *r)
             r->array_size = 0;
             r->array_type = PARSE_ARRAY_BEGIN;
             r->type = PARSE_ARRAY;
-            if (stack_push(r) == -1) return -1;
+            if (stack_push(r, REP_ARRAY) == -1) return -1;
             break;
         case '$':
             r->string_size = 0;
@@ -156,9 +132,7 @@ int process_array(struct reader *r)
     char c;
 
     struct reader_task *task = &r->rstack[r->sidx];
-    task->type = REP_ARRAY;
-
-    if (task->data == NULL) task->data = redis_data_create(REP_ARRAY);
+    if (task->type != REP_ARRAY) return -1;
 
     for (; r->buf->pos < r->buf->last; r->buf->pos++) {
         p = r->buf->pos;
@@ -177,7 +151,7 @@ int process_array(struct reader *r)
                         TO_NUMBER(v, c);
                         r->array_size = v;
                         if (r->sign != -1) {
-                            task->elements = task->data->elements = v;
+                            task->elements = task->data.elements = v;
                         }
                         break;
                 }
@@ -186,9 +160,8 @@ int process_array(struct reader *r)
                 r->buf->pos++;
                 if (*p != '\n') return -1;
 
-                if (task->data->elements > 0) {
-                    task->data->element = calloc(task->data->elements,
-                            sizeof(struct redis_data*));
+                if (task->data.elements > 0) {
+                    task->data.element = calloc(task->data.elements, sizeof(struct redis_data));
                     r->type = PARSE_TYPE;
                 } else {
                     switch (stack_pop(r)) {
@@ -213,8 +186,7 @@ int process_string(struct reader *r)
     struct redis_data *data = redis_data_get(task, REP_STRING);
     if (data == NULL) return -1;
 
-    if (data->pos == NULL) data->pos = pos_array_create();
-    struct pos_array *arr = data->pos;
+    struct pos_array *arr = &data->pos;
 
     for (; r->buf->pos < r->buf->last; r->buf->pos++) {
         p = r->buf->pos;
@@ -326,8 +298,7 @@ int process_simple_string(struct reader *r, int type)
     struct redis_data *data = redis_data_get(task, type);
     if (data == NULL) return -1;
 
-    if (data->pos == NULL) data->pos = pos_array_create();
-    struct pos_array *arr = data->pos;
+    struct pos_array *arr = &data->pos;
 
     if (arr->items == NULL) pos_array_push(arr, 0, NULL);
 
@@ -383,7 +354,7 @@ int parse(struct reader *r)
         switch (r->type) {
             case PARSE_BEGIN:
                 r->ready = 0;
-                r->data = NULL;
+                memset(&r->data, 0, sizeof(struct redis_data));
                 r->type = PARSE_TYPE;
                 r->start.buf = r->buf;
                 r->start.pos = r->buf->pos;
@@ -425,15 +396,11 @@ int parse(struct reader *r)
     return 0;
 }
 
-void pos_array_destroy(struct pos_array *arr)
+void pos_array_free(struct pos_array *arr)
 {
     if (arr == NULL) return;
     if (arr->items != NULL) free(arr->items);
-    arr->items = NULL;
-    arr->pos_len = 0;
-    arr->str_len = 0;
-    arr->max_pos_size = 0;
-    free(arr);
+    memset(arr, 0, sizeof(struct pos_array));
 }
 
 void redis_data_free(struct redis_data *data)
@@ -445,49 +412,36 @@ void redis_data_free(struct redis_data *data)
         case REP_STRING:
         case REP_SIMPLE_STRING:
         case REP_ERROR:
-            pos_array_destroy(data->pos);
-            data->pos = NULL;
+            pos_array_free(&data->pos);
             break;
         case REP_ARRAY:
             if (data->element == NULL) break;
             for (i = 0; i < data->elements; i++) {
-                redis_data_free(data->element[i]);
+                redis_data_free(&data->element[i]);
             }
             free(data->element);
             data->element = NULL;
             data->elements = 0;
+            break;
     }
-    free(data);
+    memset(data, 0, sizeof(struct redis_data));
 }
 
 void reader_init(struct reader *r)
 {
+    memset(r, 0, sizeof(struct reader));
     r->type = PARSE_BEGIN;
-    r->buf = NULL;
-    r->data = NULL;
-
     r->sidx = -1;
-    stack_push(r);
-
     r->sign = 1;
-    r->ready = 0;
-
-    memset(&r->start, 0, sizeof(r->start));
-    memset(&r->end, 0, sizeof(r->end));
+    stack_push(r, REP_UNKNOWN);
 }
 
 void reader_free(struct reader *r)
 {
     if (r == NULL) return;
-    if (r->data != NULL) {
-        redis_data_free(r->data);
-        r->data = NULL;
-    }
-    int i;
-    for (i = 0; i <= r->sidx; i++) {
-        if (r->rstack[i].data == NULL) continue;
-        redis_data_free(r->rstack[i].data);
-        r->rstack[i].data = NULL;
+    redis_data_free(&r->data);
+    for (int i = 0; i <= r->sidx; i++) {
+        redis_data_free(&r->rstack[i].data);
     }
     r->sidx = -1;
 }

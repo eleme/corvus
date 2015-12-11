@@ -22,15 +22,6 @@
 #define CORVUS_IOV_MAX IOV_MAX
 #endif
 
-#define CMD_COPY_RANGE(start_buf, end_buf, reader) \
-do {                                               \
-    int bytes = sizeof(struct buf_ptr);            \
-    memcpy(start_buf, &reader->start, bytes);      \
-    memcpy(end_buf, &reader->end, bytes);          \
-    memset(&reader->start, 0, bytes);              \
-    memset(&reader->end, 0, bytes);                \
-} while (0)
-
 #define CMD_DEFINE(cmd, type) CMD_##cmd,
 #define CMD_BUILD_MAP(cmd, type) {#cmd, CMD_##cmd, CMD_##type},
 
@@ -343,12 +334,14 @@ void cmd_add_fragment(struct command *cmd, struct pos_array *data)
 int cmd_get_slot(struct command *cmd)
 {
     uint16_t slot;
-    struct redis_data *data = cmd->req_data;
+    struct redis_data *data = &cmd->req_data;
 
     if (data->elements < 2) return -1;
+    struct redis_data *cmd_key = &data->element[1];
 
-    struct redis_data *cmd_key = data->element[1];
-    struct pos_array *pos = cmd_key->pos;
+    if (cmd_key->type != REP_STRING) return -1;
+    struct pos_array *pos = &cmd_key->pos;
+    if (pos == NULL) return -1;
 
     slot = slot_get(pos);
     cmd->slot = slot;
@@ -383,7 +376,7 @@ int cmd_forward_basic(struct command *cmd)
 int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len)
 {
     struct redis_data *key;
-    struct redis_data *data = cmd->req_data;
+    struct redis_data *data = &cmd->req_data;
     if (data->elements < 2) {
         LOG(ERROR, "protocol error");
         return -1;
@@ -392,10 +385,10 @@ int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len)
     size_t i;
     struct command *ncmd;
     for (i = 1; i < data->elements; i++) {
-        key = data->element[i];
+        key = &data->element[i];
 
         ncmd = cmd_create(cmd->ctx);
-        ncmd->slot = slot_get(key->pos);
+        ncmd->slot = slot_get(&key->pos);
         ncmd->parent = cmd;
         ncmd->client = cmd->client;
 
@@ -403,7 +396,7 @@ int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len)
         cmd->cmd_count++;
 
         mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, prefix, len);
-        cmd_add_fragment(ncmd, key->pos);
+        cmd_add_fragment(ncmd, &key->pos);
 
         if (cmd_apply_range(ncmd, CMD_REQ) == CORVUS_ERR) {
             cmd_mark_fail(ncmd);
@@ -420,7 +413,7 @@ int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len)
 
 int cmd_forward_mset(struct command *cmd)
 {
-    struct redis_data *data = cmd->req_data;
+    struct redis_data *data = &cmd->req_data;
     LOG(DEBUG, "elements %d", data->elements);
     if (data->elements < 3 || (data->elements & 1) == 0) {
         LOG(ERROR, "protocol error");
@@ -432,11 +425,11 @@ int cmd_forward_mset(struct command *cmd)
     struct command *ncmd;
     struct redis_data *key, *value;
     for (i = 1; i < data->elements; i += 2) {
-        key = data->element[i];
-        value = data->element[i + 1];
+        key = &data->element[i];
+        value = &data->element[i + 1];
 
         ncmd = cmd_create(cmd->ctx);
-        ncmd->slot = slot_get(key->pos);
+        ncmd->slot = slot_get(&key->pos);
         ncmd->parent = cmd;
         ncmd->client = cmd->client;
 
@@ -444,8 +437,8 @@ int cmd_forward_mset(struct command *cmd)
         cmd->cmd_count++;
 
         mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, (uint8_t*)rep_set, 13);
-        cmd_add_fragment(ncmd, key->pos);
-        cmd_add_fragment(ncmd, value->pos);
+        cmd_add_fragment(ncmd, &key->pos);
+        cmd_add_fragment(ncmd, &value->pos);
 
         if (cmd_apply_range(ncmd, CMD_REQ) == CORVUS_ERR) {
             cmd_mark_fail(ncmd);
@@ -463,10 +456,10 @@ int cmd_forward_mset(struct command *cmd)
 
 int cmd_forward_eval(struct command *cmd)
 {
-    struct redis_data *data = cmd->req_data;
+    struct redis_data *data = &cmd->req_data;
     if (data->elements < 4) return -1;
 
-    cmd->slot = slot_get(data->element[3]->pos);
+    cmd->slot = slot_get(&data->element[3].pos);
     return cmd_forward_basic(cmd);
 }
 
@@ -581,20 +574,17 @@ int cmd_forward(struct command *cmd)
 
 int cmd_parse_token(struct command *cmd)
 {
-    if (cmd->req_data == NULL) return -1;
-
     struct pos *p;
-    struct redis_data *data = cmd->req_data;
+    struct redis_data *data = &cmd->req_data;
 
     if (data->type != REP_ARRAY) return -1;
     if (data->elements <= 0) return -1;
 
-    struct redis_data *f1 = data->element[0];
+    struct redis_data *f1 = &data->element[0];
     if (f1->type != REP_STRING) return -1;
-    p = &f1->pos->items[0];
-    LOG(DEBUG, "process command %.*s", p->len, p->str);
+    p = &f1->pos.items[0];
 
-    cmd->request_type = cmd_get_type(cmd, f1->pos);
+    cmd->request_type = cmd_get_type(cmd, &f1->pos);
     if (cmd->request_type < 0) {
         LOG(WARN, "wrong command type, command %.*s", p->len, p->str);
         return -1;
@@ -605,7 +595,7 @@ int cmd_parse_token(struct command *cmd)
 void cmd_gen_mget_iovec(struct command *cmd, struct iov_data *iov)
 {
     const char *fmt = "*%ld\r\n";
-    int keys = cmd->req_data->elements - 1;
+    int keys = cmd->req_data.elements - 1;
     int n = snprintf(NULL, 0, fmt, keys);
     char *b = malloc(sizeof(char) * (n + 1));
     snprintf(b, n + 1, fmt, keys);
@@ -628,11 +618,9 @@ void cmd_gen_mget_iovec(struct command *cmd, struct iov_data *iov)
 void cmd_gen_mset_iovec(struct command *cmd, struct iov_data *iov)
 {
     struct command *c;
-    struct redis_data *rep;
     int fail = 0;
     STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
-        rep = c->rep_data;
-        if (c->cmd_fail || rep->type == REP_ERROR) {
+        if (c->cmd_fail || c->rep_data.type == REP_ERROR) {
             fail = 1;
             break;
         }
@@ -652,11 +640,11 @@ void cmd_gen_multikey_iovec(struct command *cmd, struct iov_data *iov)
     int n = 0;
     int count = 0, fail = 0;
     STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
-        if (c->cmd_fail || c->rep_data->type == REP_ERROR) {
+        if (c->cmd_fail || c->rep_data.type == REP_ERROR) {
             fail = 1;
             break;
         }
-        if (c->rep_data->integer == 1) {
+        if (c->rep_data.integer == 1) {
             count++;
         }
     }
@@ -690,14 +678,16 @@ int cmd_parse_req(struct command *cmd, struct mbuf *buf)
             ncmd->req_time[0] = get_time();
             ncmd->parent = cmd;
             ncmd->client = cmd->client;
-            ncmd->req_data = r->data;
-            CMD_COPY_RANGE(&ncmd->req_buf[0], &ncmd->req_buf[1], r);
+            redis_data_move(&ncmd->req_data, &r->data);
+
+            memcpy(&ncmd->req_buf[0], &r->start, sizeof(r->start));
+            memset(&r->start, 0, sizeof(r->start));
+
+            memcpy(&ncmd->req_buf[1], &r->end, sizeof(r->end));
+            memset(&r->end, 0, sizeof(r->end));
 
             STAILQ_INSERT_TAIL(&cmd->sub_cmds, ncmd, sub_cmd_next);
             cmd->cmd_count++;
-
-            r->data = NULL;
-            r->type = PARSE_BEGIN;
 
             if (cmd_parse_token(ncmd) == -1) {
                 cmd_mark_fail(ncmd);
@@ -725,15 +715,13 @@ int cmd_parse_rep(struct command *cmd, struct mbuf *buf)
 
         if (cmd->rep_buf[0].buf == NULL && r->start.buf != NULL) {
             memcpy(&cmd->rep_buf[0], &r->start, sizeof(r->start));
+            memset(&r->start, 0, sizeof(r->start));
         }
 
         if (reader_ready(r)) {
-            cmd->rep_data = r->data;
-            memcpy(&cmd->rep_buf[1], &r->end, sizeof(r->end));
+            redis_data_move(&cmd->rep_data, &r->data);
 
-            r->data = NULL;
-            r->type = PARSE_BEGIN;
-            memset(&r->start, 0, sizeof(r->start));
+            memcpy(&cmd->rep_buf[1], &r->end, sizeof(r->end));
             memset(&r->end, 0, sizeof(r->end));
             break;
         }
@@ -932,8 +920,7 @@ void cmd_make_iovec(struct command *cmd, struct iov_data *iov)
 
 void cmd_parse_redirect(struct command *cmd, struct redirect_info *info)
 {
-    LOG(DEBUG, "parse redirect");
-    struct pos_array *pos = cmd->rep_data->pos;
+    struct pos_array *pos = &cmd->rep_data.pos;
     if (pos->str_len <= 0) return;
 
     char err[pos->str_len + 1];
@@ -1109,14 +1096,8 @@ void cmd_free(struct command *cmd)
     struct mbuf *buf;
     struct command *c;
     struct context *ctx = cmd->ctx;
-    if (cmd->req_data != NULL) {
-        redis_data_free(cmd->req_data);
-        cmd->req_data = NULL;
-    }
-    if (cmd->rep_data != NULL) {
-        redis_data_free(cmd->rep_data);
-        cmd->rep_data = NULL;
-    }
+    redis_data_free(&cmd->req_data);
+    redis_data_free(&cmd->rep_data);
 
     cmd_iov_free(&cmd->iov);
 

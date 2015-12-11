@@ -339,9 +339,12 @@ int socket_parse_addr(char *addr, struct address *address)
     return port;
 }
 
-char *socket_get_key(struct address *addr)
+void socket_get_key(struct address *addr, char *dst)
 {
-    char *dest = calloc(1, sizeof(struct address) + 8);
-    sprintf(dest, "%s:%d", addr->host, addr->port);
-    return dest;
+    int n = snprintf(dst, DSN_MAX, "%s:%d", addr->host, addr->port);
+    if (n >= DSN_MAX) {
+        LOG(WARN, "hostname %s length exceed %d", addr->host,
+                HOST_NAME_MAX - 1);
+        dst[DSN_MAX - 1] = '\0';
+    }
 }

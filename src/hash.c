@@ -62,40 +62,51 @@ static const uint16_t crc16tab[256]= {
     0x6e17,0x7e36,0x4e55,0x5e74,0x2e93,0x3eb2,0x0ed1,0x1ef0
 };
 
-/* only for little endian */
-uint32_t lookup3_hash(struct pos_array *pos)
+uint32_t lookup3_hash(const void *key, uint32_t length)
 {
-    int h, i, len, idx = -1, j = 0;
-    struct pos *p;
-    uint8_t *s;
-    uint32_t d[3], x;
-    uint32_t length = pos->str_len;
+    uint32_t a,b,c;
 
     /* Set up the internal state */
-    d[0] = d[1] = d[2] = 0xdeadbeef + length;
+    a = b = c = 0xdeadbeef + length;
 
-    for (h = 0; h < pos->pos_len; h++) {
-        p = &pos->items[h];
-        len = p->len;
-        s = p->str;
+    const uint8_t *k = (const uint8_t *)key;
 
-        for (i = 0; i < len; i++, j++) {
-            if ((j & 3) == 0) {
-                if (idx == 2) mix(d[0], d[1], d[2]);
-                if (++idx >= 3) idx = 0;
-            }
-
-            switch (j & 3) {
-                case 0: x = s[i]; break;
-                case 1: x = ((uint32_t)s[i]) << 8; break;
-                case 2: x = ((uint32_t)s[i]) << 16; break;
-                case 3: x = ((uint32_t)s[i]) << 24; break;
-            }
-            d[idx] += x;
-        }
+    while (length > 12) {
+        a += k[0];
+        a += ((uint32_t)k[1])<<8;
+        a += ((uint32_t)k[2])<<16;
+        a += ((uint32_t)k[3])<<24;
+        b += k[4];
+        b += ((uint32_t)k[5])<<8;
+        b += ((uint32_t)k[6])<<16;
+        b += ((uint32_t)k[7])<<24;
+        c += k[8];
+        c += ((uint32_t)k[9])<<8;
+        c += ((uint32_t)k[10])<<16;
+        c += ((uint32_t)k[11])<<24;
+        mix(a,b,c);
+        length -= 12;
+        k += 12;
     }
-    if (length != 0) final(d[0], d[1], d[2]);
-    return d[2];
+
+    switch(length) {
+        case 12: c+=((uint32_t)k[11])<<24;
+        case 11: c+=((uint32_t)k[10])<<16;
+        case 10: c+=((uint32_t)k[9])<<8;
+        case 9 : c+=k[8];
+        case 8 : b+=((uint32_t)k[7])<<24;
+        case 7 : b+=((uint32_t)k[6])<<16;
+        case 6 : b+=((uint32_t)k[5])<<8;
+        case 5 : b+=k[4];
+        case 4 : a+=((uint32_t)k[3])<<24;
+        case 3 : a+=((uint32_t)k[2])<<16;
+        case 2 : a+=((uint32_t)k[1])<<8;
+        case 1 : a+=k[0]; break;
+        case 0 : return c;
+        }
+
+    final(a,b,c);
+    return c;
 }
 
 uint16_t crc16(struct pos_array *pos)

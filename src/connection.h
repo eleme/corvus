@@ -21,6 +21,7 @@ struct connection {
     int fd;
 
     struct address addr;
+    char dsn[DSN_MAX];
 
     int registered;
 

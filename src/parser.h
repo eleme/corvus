@@ -39,16 +39,20 @@ enum {
     REP_ERROR,
 };
 
-struct redis_data {
-    STAILQ_ENTRY(redis_data) next;
-    int type;
-    long long integer;
-    struct pos_array *pos;
-    size_t elements;
-    struct redis_data **element;
+struct pos_array {
+    int str_len;
+    int pos_len;
+    int max_pos_size;
+    struct pos *items;
 };
 
-STAILQ_HEAD(redis_data_tqh, redis_data);
+struct redis_data {
+    int type;
+    long long integer;
+    struct pos_array pos;
+    size_t elements;
+    struct redis_data *element;
+};
 
 struct reader_task {
     int type;
@@ -56,7 +60,7 @@ struct reader_task {
     size_t idx;
     struct mbuf *prev_buf;
     struct redis_data *cur_data;
-    struct redis_data *data;
+    struct redis_data data;
 };
 
 struct buf_ptr {
@@ -71,7 +75,7 @@ struct reader {
     struct reader_task rstack[9];
     int sidx;
 
-    struct redis_data *data;
+    struct redis_data data;
 
     int array_size;
     int array_type;
@@ -92,13 +96,6 @@ struct pos {
     uint8_t *str;
 };
 
-struct pos_array {
-    int str_len;
-    int pos_len;
-    int max_pos_size;
-    struct pos *items;
-};
-
 void reader_init(struct reader *r);
 void reader_free(struct reader *r);
 void reader_feed(struct reader *r, struct mbuf *buf);
@@ -109,5 +106,6 @@ size_t pos_str_len(struct pos *pos);
 int pos_to_str(struct pos_array *pos, char *str);
 int pos_array_compare(struct pos_array *arr, char *data, int len);
 void redis_data_free(struct redis_data *data);
+void redis_data_move(struct redis_data *lhs, struct redis_data *rhs);
 
 #endif /* end of include guard: __PARSER_H */
