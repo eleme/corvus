@@ -2,7 +2,6 @@
 #define __SLOT_H
 
 #include <stdint.h>
-#include "corvus.h"
 #include "parser.h"
 #include "socket.h"
 
@@ -22,7 +21,7 @@ struct node_info {
 };
 
 uint16_t slot_get(struct pos_array *pos);
-void slot_get_addr_list(char **dest);
+void slot_get_addr_list(char *dest);
 int slot_get_node_addr(uint16_t slot, struct address *addr);
 void slot_create_job(int type, void *arg);
 int slot_init_updater(struct context *ctx);

@@ -147,12 +147,12 @@ void stats_send_node_info()
 void stats_get(struct stats *stats)
 {
     stats_get_simple(stats);
-
-    stats->last_command_latency = calloc(stats->threads, sizeof(double));
-    slot_get_addr_list(&stats->remote_nodes);
+    memset(stats->remote_nodes, 0, sizeof(stats->remote_nodes));
+    slot_get_addr_list(stats->remote_nodes);
 
     struct context *contexts = get_contexts();
 
+    memset(stats->last_command_latency, 0, sizeof(stats->last_command_latency));
     for (int i = 0; i < stats->threads; i++) {
         stats->last_command_latency[i] = contexts[i].last_command_latency;
     }

@@ -521,8 +521,6 @@ void cmd_proxy_info(struct command *cmd)
     n = cmd_format_stats(NULL, 0, &stats, latency);
     char info[n + 1];
     cmd_format_stats(info, sizeof(info), &stats, latency);
-    free(stats.remote_nodes);
-    free(stats.last_command_latency);
 
     char *fmt = "$%lu\r\n";
     size = snprintf(NULL, 0, fmt, n);

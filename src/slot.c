@@ -13,7 +13,6 @@
 #include "dict.h"
 
 #define MAX_UPDATE_NODES 16
-#define ADDR_LIST_MAX (ARRAY_CHUNK_SIZE * DSN_MAX)
 
 struct map_item {
     uint32_t hash;
@@ -68,11 +67,11 @@ void addr_add(char *host, uint16_t port)
     int n;
     pthread_rwlock_wrlock(&addr_list_lock);
     if (addr_list.bytes > 0) {
-        if (addr_list.bytes < ADDR_LIST_MAX) {
+        if (addr_list.bytes + DSN_MAX + 1 <= ADDR_LIST_MAX) {
             addr_list.addrs[addr_list.bytes++] = ',';
         }
     }
-    if (ADDR_LIST_MAX - addr_list.bytes > DSN_MAX) {
+    if (ADDR_LIST_MAX - addr_list.bytes >= DSN_MAX) {
         n = snprintf(addr_list.addrs + addr_list.bytes, DSN_MAX, "%s:%d", host, port);
         addr_list.bytes += n;
     }
@@ -499,15 +498,10 @@ int slot_get_node_addr(uint16_t slot, struct address *addr)
     return res;
 }
 
-void slot_get_addr_list(char **dest)
+void slot_get_addr_list(char *dest)
 {
     pthread_rwlock_rdlock(&addr_list_lock);
-    *dest = calloc(addr_list.bytes + 1, sizeof(char));
-    if (addr_list.addrs != NULL) {
-        memcpy(*dest, addr_list.addrs, addr_list.bytes + 1);
-    } else {
-        (*dest)[0] = '\0';
-    }
+    memcpy(dest, addr_list.addrs, addr_list.bytes + 1);
     pthread_rwlock_unlock(&addr_list_lock);
 }
 

@@ -2,6 +2,10 @@
 #define __STATS_H
 
 #include <sys/types.h>
+#include "socket.h"
+
+#define ADDR_MAX 1024
+#define ADDR_LIST_MAX (ADDR_MAX * DSN_MAX)
 
 struct basic_stats {
     long long connected_clients;
@@ -22,8 +26,8 @@ struct stats {
     double used_cpu_sys;
     double used_cpu_user;
 
-    double *last_command_latency;
-    char *remote_nodes;
+    double last_command_latency[ADDR_MAX];
+    char remote_nodes[ADDR_LIST_MAX];
 
     struct basic_stats basic;
 
