@@ -77,6 +77,8 @@ struct context {
     double last_command_latency;
 };
 
+char *cluster_name;
+
 double get_time();
 int get_thread_num();
 struct context *get_contexts();

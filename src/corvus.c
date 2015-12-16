@@ -18,6 +18,7 @@
 #include "dict.h"
 
 static struct {
+    char cluster_name[128];
     uint16_t bind;
     struct node_conf node;
     int thread;
@@ -46,7 +47,10 @@ static void config_init()
 static int config_add(char *name, char *value)
 {
     char *end;
-    if (strcmp(name, "bind") == 0) {
+    if (strcmp(name, "cluster_name") == 0) {
+        strcpy(config.cluster_name, value);
+        cluster_name = config.cluster_name;
+    } else if (strcmp(name, "bind") == 0) {
         config.bind = strtoul(value, &end, 0);
         if (config.bind > 0xFFFF) return -1;
     } else if (strcmp(name, "syslog") == 0) {

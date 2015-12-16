@@ -177,6 +177,7 @@ struct cmd_item {
     int type;
 };
 
+
 static const char *rep_err = "-ERR server error\r\n";
 static const char *rep_get = "*2\r\n$3\r\nGET\r\n";
 static const char *rep_set = "*3\r\n$3\r\nSET\r\n";
@@ -258,6 +259,7 @@ static int cmd_get_type(struct command *cmd, struct pos_array *pos)
 static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *latency)
 {
     return snprintf(dest, n,
+            "cluster_name:%s\r\n"
             "version:%s\r\n"
             "pid:%d\r\n"
             "threads:%d\r\n"
@@ -273,7 +275,7 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             "in_use_buffers:%lld\r\n"
             "free_buffers:%lld\r\n"
             "remotes:%s\r\n",
-            VERSION, stats->pid, stats->threads,
+            cluster_name, VERSION, stats->pid, stats->threads,
             stats->used_cpu_sys, stats->used_cpu_user,
             stats->basic.connected_clients,
             stats->basic.completed_commands,

@@ -25,7 +25,6 @@ static struct dict *bytes_map;
 static char hostname[HOST_NAME_MAX + 1];
 static uint16_t port;
 
-
 static void stats_send(char *metric, double value)
 {
     if (statsd_fd == -1) {
@@ -33,10 +32,10 @@ static void stats_send(char *metric, double value)
     }
 
     int n;
-    const char *fmt = "corvus.%s-%d.%s:%f|g";
-    n = snprintf(NULL, 0, fmt, hostname, port, metric, value);
+    const char *fmt = "corvus.%s.%s-%d.%s:%f|g";
+    n = snprintf(NULL, 0, fmt, cluster_name, hostname, port, metric, value);
     char buf[n + 1];
-    snprintf(buf, sizeof(buf), fmt, hostname, port, metric, value);
+    snprintf(buf, sizeof(buf), fmt, cluster_name, hostname, port, metric, value);
     if (sendto(statsd_fd, buf, n, 0, (struct sockaddr*)&dest, sizeof(dest)) == -1) {
         LOG(WARN, "fail to send metrics data: %s", strerror(errno));
     }
@@ -189,7 +188,6 @@ int stats_init(int interval)
     }
 
     port = get_bind();
-
     metric_interval = interval;
 
     /* Make the thread killable at any time can work reliably. */
