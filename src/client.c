@@ -12,8 +12,9 @@ int client_write(struct connection *client)
     int status;
     struct command *cmd = STAILQ_FIRST(&client->cmd_queue);
     LOG(DEBUG, "client %d %d", cmd->cmd_count, cmd->cmd_done_count);
-    if (cmd->cmd_count <= 0 || cmd->cmd_count != cmd->cmd_done_count)
+    if (cmd->cmd_count <= 0 || cmd->cmd_count != cmd->cmd_done_count) {
         return CORVUS_OK;
+    }
 
     if (cmd->iov.len <= 0) {
         /* before write */

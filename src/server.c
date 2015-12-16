@@ -101,7 +101,8 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
     redis_data_free(&cmd->rep_data);
 
     if (cmd->redirected) {
-        LOG(WARN, "multiple redirect error");
+        LOG(WARN, "multiple redirect error: (%d)%s:%d -> %s", cmd->slot,
+                cmd->server->addr.host, cmd->server->addr.port, info->addr);
         cmd_mark_fail(cmd);
         return CORVUS_OK;
     } else {
@@ -122,31 +123,30 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
         return CORVUS_OK;
     }
 
-    cmd->server = server;
-    STAILQ_INSERT_TAIL(&server->ready_queue, cmd, ready_next);
-
     if (conn_register(server) == CORVUS_ERR) {
         memcpy(&cmd->rep_buf[0], &ptr, sizeof(ptr));
         mbuf_inc_ref(cmd->rep_buf[0].buf);
         return CORVUS_ERR;
     }
+
+    cmd->server = server;
+    STAILQ_INSERT_TAIL(&server->ready_queue, cmd, ready_next);
     return CORVUS_OK;
 }
 
 int server_read_reply(struct connection *server, struct command *cmd)
 {
     int status = cmd_read_reply(cmd, server);
+    if (status != CORVUS_OK) return status;
+
     /* after read */
     cmd->rep_time[1] = get_time();
-
-    if (status != CORVUS_OK) return status;
 
     server->completed_commands++;
     if (cmd->asking) return CORVUS_ASKING;
 
     if (cmd->stale) {
         server_free_buf(cmd);
-        cmd_free(cmd);
         return CORVUS_OK;
     }
 
@@ -162,7 +162,7 @@ int server_read_reply(struct connection *server, struct command *cmd)
     switch (info.type) {
         case CMD_ERR_MOVED:
             if (server_redirect(cmd, &info) == CORVUS_ERR) return CORVUS_ERR;
-            slot_create_job(SLOT_UPDATE, NULL);
+            slot_create_job(SLOT_UPDATE);
             break;
         case CMD_ERR_ASK:
             if (server_redirect(cmd, &info) == CORVUS_ERR) return CORVUS_ERR;
@@ -193,6 +193,7 @@ int server_read(struct connection *server)
             case CORVUS_OK:
                 STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
                 STAILQ_NEXT(cmd, waiting_next) = NULL;
+                if (cmd->stale) cmd_free(cmd);
                 continue;
         }
         break;
@@ -279,5 +280,5 @@ void server_eof(struct connection *server)
     event_deregister(server->ctx->loop, server);
     /* not free connection buffer */
     conn_free(server);
-    slot_create_job(SLOT_UPDATE, NULL);
+    slot_create_job(SLOT_UPDATE);
 }

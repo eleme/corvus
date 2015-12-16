@@ -808,7 +808,7 @@ int cmd_read_reply(struct command *cmd, struct connection *server)
     int n, rsize;
     struct mbuf *buf;
 
-    do {
+    while (1) {
         buf = conn_get_buf(server);
         rsize = mbuf_read_size(buf);
 
@@ -825,11 +825,7 @@ int cmd_read_reply(struct command *cmd, struct connection *server)
 
         cmd->ctx->stats.recv_bytes += n;
         server->recv_bytes += n;
-
-        if (cmd_parse_rep(cmd, buf) == -1) {
-            return CORVUS_ERR;
-        }
-    } while (!reader_ready(&cmd->reader));
+    }
 
     return CORVUS_OK;
 }
@@ -976,7 +972,7 @@ void cmd_set_stale(struct command *cmd)
 {
     if (STAILQ_EMPTY(&cmd->sub_cmds)) {
         if (cmd->server != NULL && cmd_in_queue(cmd, cmd->server)) {
-            LOG(DEBUG, "command set stale");
+            LOG(WARN, "command set stale");
             cmd->stale = 1;
         } else {
             cmd_free(cmd);
@@ -1090,7 +1086,6 @@ void cmd_free_reply(struct command *cmd)
 
 void cmd_free(struct command *cmd)
 {
-    LOG(DEBUG, "do free");
     struct mbuf *buf;
     struct command *c;
     struct context *ctx = cmd->ctx;

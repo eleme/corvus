@@ -136,7 +136,7 @@ static void quit()
         if (!contexts[i].started) continue;
         switch (contexts[i].role) {
             case THREAD_SLOT_UPDATER:
-                slot_create_job(SLOT_UPDATER_QUIT, NULL);
+                slot_create_job(SLOT_UPDATER_QUIT);
                 break;
             case THREAD_MAIN_WORKER:
                 status = write(contexts[i].notifier->fd, &data, sizeof(data));
@@ -393,7 +393,7 @@ int main(int argc, const char *argv[])
     }
 
     if (config.syslog) {
-        openlog(NULL, LOG_PID | LOG_NDELAY | LOG_NOWAIT, LOG_USER);
+        openlog(NULL, LOG_NDELAY | LOG_NOWAIT, LOG_USER);
     }
 
     contexts = malloc(sizeof(struct context) * (config.thread + 1));
@@ -405,7 +405,7 @@ int main(int argc, const char *argv[])
 
     cmd_map_init();
     slot_init_updater(&contexts[config.thread]);
-    slot_create_job(SLOT_UPDATE_INIT, NULL);
+    slot_create_job(SLOT_UPDATE);
 
     for (i = 0; i < config.thread; i++) {
         start_worker(i);

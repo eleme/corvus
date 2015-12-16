@@ -154,6 +154,7 @@ void stats_get(struct stats *stats)
 
     memset(stats->last_command_latency, 0, sizeof(stats->last_command_latency));
     for (int i = 0; i < stats->threads; i++) {
+        if (i >= ADDR_MAX) break;
         stats->last_command_latency[i] = contexts[i].last_command_latency;
     }
 }

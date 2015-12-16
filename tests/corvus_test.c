@@ -75,7 +75,7 @@ int main(int argc, const char *argv[])
     RUN_CASE(test_server);
 
     usleep(10000);
-    slot_create_job(SLOT_UPDATER_QUIT, NULL);
+    slot_create_job(SLOT_UPDATER_QUIT);
     pthread_join(ctx.thread, NULL);
 
     report();

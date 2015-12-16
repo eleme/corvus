@@ -2,6 +2,7 @@
 #include <stdarg.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 #include <time.h>
 #include "corvus.h"
@@ -34,20 +35,20 @@ void logger(const char *file, int line, int level, const char *fmt, ...)
 
     if (level < log_level) return;
 
+    pid_t thread_id = (pid_t)syscall(SYS_gettid);
+
     va_start(ap, fmt);
     vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
 
     if (enable_syslog) {
-        syslog(SYSLOG_LEVEL_MAP[level], "%s", msg);
+        syslog(SYSLOG_LEVEL_MAP[level], "[%d] %s", (int)thread_id, msg);
     } else {
-        pid_t pid = getpid();
-
         gettimeofday(&now, NULL);
         int n = strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S,",
                         localtime(&now.tv_sec));
         snprintf(timestamp + n, sizeof(timestamp) - n, "%03d", (int)now.tv_usec/1000);
         fprintf(stderr, "%s %s [%d]: %s (%s:%d)\n", timestamp, LEVEL_MAP[level],
-                (int)pid, msg, file, line);
+                (int)thread_id, msg, file, line);
     }
 }

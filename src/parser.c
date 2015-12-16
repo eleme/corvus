@@ -9,7 +9,7 @@
 #define TO_NUMBER(v, c)                                        \
 do {                                                           \
     if (c < '0' || c > '9') {                                  \
-        LOG(ERROR, "protocol error, '%c' not between 0-9", c); \
+        LOG(WARN, "protocol error, '%c' not between 0-9", c);  \
         return -1;                                             \
     }                                                          \
     v *= 10;                                                   \
@@ -51,7 +51,7 @@ int stack_push(struct reader *r, int type)
     return 0;
 }
 
-void pos_array_push(struct pos_array *arr, int len, uint8_t *p)
+struct pos *pos_array_push(struct pos_array *arr, int len, uint8_t *p)
 {
     struct pos *pos;
     if (arr->items == NULL ) {
@@ -67,6 +67,7 @@ void pos_array_push(struct pos_array *arr, int len, uint8_t *p)
     pos->len = len;
     pos->str = p;
     arr->str_len += len;
+    return pos;
 }
 
 void redis_data_move(struct redis_data *lhs, struct redis_data *rhs)
@@ -299,28 +300,21 @@ int process_simple_string(struct reader *r, int type)
     if (data == NULL) return -1;
 
     struct pos_array *arr = &data->pos;
+    struct pos *pos;
 
-    if (arr->items == NULL) pos_array_push(arr, 0, NULL);
-
-    if (task->prev_buf == NULL) task->prev_buf = r->buf;
     if (task->prev_buf != r->buf) {
-        pos_array_push(arr, 0, NULL);
+        pos = pos_array_push(arr, 0, NULL);
         task->prev_buf = r->buf;
-        r->simple_string_type = PARSE_SIMPLE_STRING_BEGIN;
-    }
-
-    struct pos *pos = &arr->items[arr->pos_len - 1];
-
-    if (r->simple_string_type == PARSE_SIMPLE_STRING_BEGIN) {
         pos->str = r->buf->pos;
         pos->len = 0;
-        r->simple_string_type = PARSE_SIMPLE_STRING_ENTITY;
+    } else {
+        pos = &arr->items[arr->pos_len - 1];
     }
 
     for (; r->buf->pos < r->buf->last; r->buf->pos++) {
         p = r->buf->pos;
         switch (r->simple_string_type) {
-            case PARSE_SIMPLE_STRING_ENTITY:
+            case PARSE_SIMPLE_STRING_BEGIN:
                 c = *p;
                 if (c == '\r') {
                     if (task->elements > 0) task->elements--;
@@ -332,6 +326,7 @@ int process_simple_string(struct reader *r, int type)
                 break;
             case PARSE_SIMPLE_STRING_END:
                 task->cur_data = NULL;
+                task->prev_buf = NULL;
                 r->buf->pos++;
                 if (*p != '\n') return -1;
                 if (task->elements <= 0) {
@@ -350,11 +345,14 @@ int process_simple_string(struct reader *r, int type)
 
 int parse(struct reader *r)
 {
+    struct mbuf *buf;
     while (r->buf->pos < r->buf->last) {
         switch (r->type) {
             case PARSE_BEGIN:
-                r->ready = 0;
-                memset(&r->data, 0, sizeof(struct redis_data));
+                buf = r->buf;
+                reader_init(r);
+                r->buf = buf;
+
                 r->type = PARSE_TYPE;
                 r->start.buf = r->buf;
                 r->start.pos = r->buf->pos;
