@@ -199,8 +199,8 @@ TEST(test_parse_simple_string) {
 TEST(test_parse_error) {
     struct mbuf buf;
 
-    char data1[] = "-MOV";
-    char data2[] = "ED 866 127.0.0.1:8001\r\n";
+    char data1[] = "-MOVED 866 127.0.0.1:8001\r";
+    char data2[] = "\n-MOVED 5333 127.0.0.1:8029\r\n";
 
     size_t len1 = strlen(data1);
     size_t len2 = strlen(data2);
@@ -223,6 +223,12 @@ TEST(test_parse_error) {
 
     reader_feed(&r, &buf2);
     ASSERT(parse(&r) != -1);
+
+    ASSERT(r.data.pos.str_len == 24);
+    ASSERT(r.data.pos.pos_len == 2);
+    ASSERT(r.data.pos.items[0].len == 24);
+    ASSERT(strncmp((char*)r.data.pos.items[0].str, "MOVED 866 127.0.0.1:8001", 24) == 0);
+    ASSERT(r.data.pos.items[1].len == 0);
 
     reader_free(&r);
     PASS(NULL);

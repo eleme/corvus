@@ -19,18 +19,10 @@ struct map_item {
     struct node_info *node;
 };
 
-struct job {
-    STAILQ_ENTRY(job) next;
-    int type;
-    void *arg;
-};
-
 enum {
     SLOT_MAP_NEW,
     SLOT_MAP_DIRTY,
 };
-
-STAILQ_HEAD(job_queue, job);
 
 extern void context_free(struct context *ctx);
 
@@ -38,12 +30,13 @@ static struct node_info *slot_map[REDIS_CLUSTER_SLOTS];
 static const char SLOTS_CMD[] = "*2\r\n$7\r\nCLUSTER\r\n$5\r\nSLOTS\r\n";
 
 static int slot_map_status;
-static pthread_mutex_t job_queue_mutex;
+static pthread_mutex_t job_mutex;
 static pthread_cond_t signal_cond;
-static struct job_queue job_queue;
 
 static pthread_rwlock_t slot_map_lock = PTHREAD_RWLOCK_INITIALIZER;
 static pthread_rwlock_t addr_list_lock = PTHREAD_RWLOCK_INITIALIZER;
+
+static int slot_job = SLOT_UPDATE_UNKNOWN;
 
 static struct {
     struct node_info nodes[MAX_UPDATE_NODES];
@@ -342,15 +335,15 @@ void slot_map_update(struct context *ctx)
     }
 }
 
-void do_update(struct context *ctx, struct job *job)
+void do_update(struct context *ctx, int job)
 {
     slot_map_clear();
 
-    if (job->type == SLOT_UPDATE && node_list.idx <= 0) {
-        job->type = SLOT_UPDATE_INIT;
+    if (job == SLOT_UPDATE && node_list.idx <= 0) {
+        job = SLOT_UPDATE_INIT;
     }
 
-    switch (job->type) {
+    switch (job) {
         case SLOT_UPDATE_INIT:
             slot_map_init(ctx);
             break;
@@ -361,48 +354,41 @@ void do_update(struct context *ctx, struct job *job)
             ctx->quit = 1;
             break;
     }
-    free(job);
 }
 
 void *slot_map_updater(void *data)
 {
-    struct job *job;
+    int job;
     struct context *ctx = data;
 
     /* Make the thread killable at any time can work reliably. */
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
     pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
-    pthread_mutex_lock(&job_queue_mutex);
+    pthread_mutex_lock(&job_mutex);
     slot_map_status = SLOT_MAP_NEW;
 
     while (!ctx->quit) {
-        if (STAILQ_EMPTY(&job_queue)) {
-            pthread_cond_wait(&signal_cond, &job_queue_mutex);
+        if (slot_job == SLOT_UPDATE_UNKNOWN) {
+            pthread_cond_wait(&signal_cond, &job_mutex);
             continue;
         }
 
-        job = STAILQ_FIRST(&job_queue);
-        STAILQ_REMOVE_HEAD(&job_queue, next);
+        job = slot_job;
+        slot_job = SLOT_UPDATE_UNKNOWN;
 
-        pthread_mutex_unlock(&job_queue_mutex);
+        pthread_mutex_unlock(&job_mutex);
 
         do_update(ctx, job);
 
-        pthread_mutex_lock(&job_queue_mutex);
+        pthread_mutex_lock(&job_mutex);
         slot_map_status = SLOT_MAP_NEW;
     }
-    pthread_mutex_unlock(&job_queue_mutex);
-
-    while (!STAILQ_EMPTY(&job_queue)) {
-        job = STAILQ_FIRST(&job_queue);
-        STAILQ_REMOVE_HEAD(&job_queue, next);
-        free(job);
-    }
+    pthread_mutex_unlock(&job_mutex);
 
     pthread_rwlock_destroy(&slot_map_lock);
     pthread_rwlock_destroy(&addr_list_lock);
-    pthread_mutex_destroy(&job_queue_mutex);
+    pthread_mutex_destroy(&job_mutex);
     context_free(ctx);
 
     LOG(DEBUG, "slot map update thread quiting");
@@ -505,19 +491,15 @@ void slot_get_addr_list(char *dest)
     pthread_rwlock_unlock(&addr_list_lock);
 }
 
-void slot_create_job(int type, void *arg)
+void slot_create_job(int type)
 {
-    if (slot_map_status == SLOT_MAP_DIRTY) return;
-
-    struct job *job = malloc(sizeof(struct job));
-    job->arg = arg;
-    job->type = type;
-
-    pthread_mutex_lock(&job_queue_mutex);
-    slot_map_status = SLOT_MAP_DIRTY;
-    STAILQ_INSERT_TAIL(&job_queue, job, next);
-    pthread_cond_signal(&signal_cond);
-    pthread_mutex_unlock(&job_queue_mutex);
+    pthread_mutex_lock(&job_mutex);
+    if (slot_map_status == SLOT_MAP_NEW) {
+        slot_map_status = SLOT_MAP_DIRTY;
+        slot_job = type;
+        pthread_cond_signal(&signal_cond);
+    }
+    pthread_mutex_unlock(&job_mutex);
 }
 
 int slot_init_updater(struct context *ctx)
@@ -538,12 +520,10 @@ int slot_init_updater(struct context *ctx)
     pthread_attr_setstacksize(&attr, stacksize);
 
     memset(slot_map, 0, sizeof(struct node_info*) * REDIS_CLUSTER_SLOTS);
-    STAILQ_INIT(&job_queue);
-
     memset(&node_list, 0, sizeof(node_list));
     memset(&node_store, 0, sizeof(node_store));
 
-    pthread_mutex_init(&job_queue_mutex, NULL);
+    pthread_mutex_init(&job_mutex, NULL);
     pthread_cond_init(&signal_cond, NULL);
 
     if (pthread_create(&thread, &attr, slot_map_updater, (void*)ctx) != 0) {

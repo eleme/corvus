@@ -43,16 +43,7 @@ TEST(test_slot_get2) {
     PASS(NULL);
 }
 
-TEST(test_socket_addr) {
-    struct address addr;
-    socket_get_addr("localhost", 9, 8000, &addr);
-    ASSERT(strncmp(addr.host, "localhost", 9) == 0);
-    ASSERT(addr.port == 8000);
-    PASS(NULL);
-}
-
 TEST_CASE(test_slot) {
     RUN_TEST(test_slot_get1);
     RUN_TEST(test_slot_get2);
-    RUN_TEST(test_socket_addr);
 }

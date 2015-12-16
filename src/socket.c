@@ -320,6 +320,14 @@ void socket_get_addr(char *host, int host_len, int port, struct address *addr)
     } else {
         addr->host[host_len] = '\0';
     }
+
+    struct addrinfo *addrs;
+    if (_getaddrinfo(addr->host, port, &addrs, SOCK_STREAM) != CORVUS_ERR &&
+            addrs != NULL) {
+        struct sockaddr_in *h = (struct sockaddr_in *)addrs->ai_addr;
+        strcpy(addr->host, inet_ntoa(h->sin_addr));
+        freeaddrinfo(addrs);
+    }
     addr->port = port;
 }
 
