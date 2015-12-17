@@ -275,7 +275,7 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             "in_use_buffers:%lld\r\n"
             "free_buffers:%lld\r\n"
             "remotes:%s\r\n",
-            cluster_name, VERSION, stats->pid, stats->threads,
+            config.cluster_name, VERSION, stats->pid, stats->threads,
             stats->used_cpu_sys, stats->used_cpu_user,
             stats->basic.connected_clients,
             stats->basic.completed_commands,

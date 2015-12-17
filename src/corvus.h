@@ -91,8 +91,6 @@ struct {
     int stats;
 } config;
 
-char *cluster_name;
-
 double get_time();
 struct context *get_contexts();
 
