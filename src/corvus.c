@@ -17,18 +17,6 @@
 #include "stats.h"
 #include "dict.h"
 
-static struct {
-    char cluster_name[NAME_LEN + 1];
-    uint16_t bind;
-    struct node_conf node;
-    int thread;
-    int loglevel;
-    int syslog;
-    char statsd_addr[DSN_MAX + 1];
-    int metric_interval;
-    int stats;
-} config;
-
 static struct context *contexts;
 
 static void config_init()
@@ -244,16 +232,6 @@ double get_time()
     ms = tv.tv_sec * 1000;
     ms += tv.tv_usec / 1000.0;
     return ms;
-}
-
-int get_thread_num()
-{
-    return config.thread;
-}
-
-int get_bind()
-{
-    return config.bind;
 }
 
 struct context *get_contexts()

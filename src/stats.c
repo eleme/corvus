@@ -23,7 +23,6 @@ static pthread_t stats_thread;
 static int metric_interval = 10;
 static struct dict *bytes_map;
 static char hostname[HOST_NAME_MAX + 1];
-static uint16_t port;
 
 static void stats_send(char *metric, double value)
 {
@@ -33,9 +32,9 @@ static void stats_send(char *metric, double value)
 
     int n;
     const char *fmt = "corvus.%s.%s-%d.%s:%f|g";
-    n = snprintf(NULL, 0, fmt, cluster_name, hostname, port, metric, value);
+    n = snprintf(NULL, 0, fmt, cluster_name, hostname, config.bind, metric, value);
     char buf[n + 1];
-    snprintf(buf, sizeof(buf), fmt, cluster_name, hostname, port, metric, value);
+    snprintf(buf, sizeof(buf), fmt, cluster_name, hostname, config.bind, metric, value);
     if (sendto(statsd_fd, buf, n, 0, (struct sockaddr*)&dest, sizeof(dest)) == -1) {
         LOG(WARN, "fail to send metrics data: %s", strerror(errno));
     }
@@ -47,17 +46,16 @@ void stats_get_simple(struct stats *stats)
     memset(&ru, 0, sizeof(ru));
     getrusage(RUSAGE_SELF, &ru);
 
-    int threads = get_thread_num();
     struct context *contexts = get_contexts();
 
     stats->pid = getpid();
-    stats->threads = threads;
+    stats->threads = config.thread;
 
     stats->used_cpu_sys = ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1000000.0;
     stats->used_cpu_user = ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1000000.0;
 
     int i;
-    for (i = 0; i < threads; i++) {
+    for (i = 0; i < config.thread; i++) {
         stats->basic.connected_clients += contexts[i].stats.connected_clients;
         stats->basic.completed_commands += contexts[i].stats.completed_commands;
         stats->basic.remote_latency += contexts[i].stats.remote_latency;
@@ -74,9 +72,9 @@ void stats_node_info_agg(struct bytes *bytes)
     struct bytes *b;
     struct connection *server;
     struct context *contexts = get_contexts();
-    int j, n, m = 0, threads = get_thread_num();
+    int j, n, m = 0;
 
-    for (int i = 0; i < threads; i++) {
+    for (int i = 0; i < config.thread; i++) {
         STAILQ_FOREACH(server, &contexts[i].servers, next) {
             n = strlen(server->addr.host);
             if (n <= 0) continue;
@@ -187,7 +185,6 @@ int stats_init(int interval)
         if (hostname[i] == '.') hostname[i] = '-';
     }
 
-    port = get_bind();
     metric_interval = interval;
 
     /* Make the thread killable at any time can work reliably. */
