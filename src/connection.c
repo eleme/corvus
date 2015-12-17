@@ -61,7 +61,7 @@ static struct connection *conn_create_server(struct context *ctx, struct address
         return NULL;
     }
 
-    strcpy(server->dsn, key);
+    strncpy(server->dsn, key, DSN_MAX);
     dict_set(ctx->server_table, server->dsn, (void*)server);
     STAILQ_INSERT_TAIL(&ctx->servers, server, next);
     return server;

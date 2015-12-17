@@ -26,6 +26,8 @@
 #define ARRAY_CHUNK_SIZE 1024
 #define RECYCLE_SIZE 64
 
+#define NAME_LEN 127
+
 enum thread_role {
     THREAD_UNKNOWN,
     THREAD_MAIN_WORKER,

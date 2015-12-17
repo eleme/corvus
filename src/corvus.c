@@ -18,13 +18,13 @@
 #include "dict.h"
 
 static struct {
-    char cluster_name[128];
+    char cluster_name[NAME_LEN + 1];
     uint16_t bind;
     struct node_conf node;
     int thread;
     int loglevel;
     int syslog;
-    char statsd_addr[DSN_MAX];
+    char statsd_addr[DSN_MAX + 1];
     int metric_interval;
     int stats;
 } config;
@@ -33,6 +33,7 @@ static struct context *contexts;
 
 static void config_init()
 {
+    memset(&config.cluster_name, 0, NAME_LEN + 1);
     config.bind = 12345;
     memset(&config.node, 0, sizeof(struct node_conf));
     config.thread = 4;
@@ -48,7 +49,7 @@ static int config_add(char *name, char *value)
 {
     char *end;
     if (strcmp(name, "cluster_name") == 0) {
-        strcpy(config.cluster_name, value);
+        strncpy(config.cluster_name, value, NAME_LEN);
         cluster_name = config.cluster_name;
     } else if (strcmp(name, "bind") == 0) {
         config.bind = strtoul(value, &end, 0);
@@ -59,7 +60,7 @@ static int config_add(char *name, char *value)
         config.thread = strtoul(value, &end, 0);
         if (config.thread <= 0) config.thread = 4;
     } else if (strcmp(name, "statsd") == 0) {
-        strcpy(config.statsd_addr, value);
+        strncpy(config.statsd_addr, value, DSN_MAX);
     } else if (strcmp(name, "metric_interval") == 0) {
         config.metric_interval = strtoul(value, &end, 0);
         if (config.metric_interval <= 0) config.metric_interval = 10;
