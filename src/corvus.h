@@ -10,6 +10,7 @@
 #include "command.h"
 #include "connection.h"
 #include "stats.h"
+#include "dict.h"
 
 #define VERSION "0.0.1"
 
@@ -57,7 +58,7 @@ struct context {
     int log_level;
 
     /* connection pool */
-    struct dict *server_table;
+    struct dict server_table;
 
     struct conn_tqh servers;
     struct node_conf *node_conf;

@@ -10,7 +10,6 @@
 #include "slot.h"
 #include "socket.h"
 #include "logging.h"
-#include "dict.h"
 
 #define MAX_UPDATE_NODES 16
 
@@ -50,8 +49,7 @@ static struct {
 
 static struct {
     struct node_info nodes[REDIS_CLUSTER_SLOTS];
-    struct map_item map[REDIS_CLUSTER_SLOTS];
-    int map_size;
+    struct dict map;
     int idx;
 } node_store;
 
@@ -83,46 +81,9 @@ struct node_info *node_info_get(struct address *addr)
     return node;
 }
 
-int map_compare(const void *a, const void *b)
-{
-    const struct map_item *x = (const struct map_item*)a;
-    const struct map_item *y = (const struct map_item*)b;
-    return (x->hash > y->hash) - (x->hash < y->hash);
-}
-
-void *map_get(char *key)
-{
-    if (node_store.map_size <= 0) return NULL;
-
-    uint32_t hash = lookup3_hash(key, strlen(key));
-    struct map_item item = {.hash = hash};
-    struct map_item *target;
-    target = bsearch(&item, node_store.map, node_store.map_size,
-            sizeof(struct map_item), map_compare);
-    if (target == NULL) return NULL;
-    return target->node;
-}
-
-void map_set(char *key, struct node_info *data)
-{
-    int i;
-    uint32_t hash = lookup3_hash(key, strlen(key));
-
-    for (i = 0; i < node_store.map_size; i++) {
-        if (hash < node_store.map[i].hash) {
-            memmove(node_store.map + i + 1, node_store.map + i,
-                    sizeof(struct map_item) * (node_store.map_size - i));
-            break;
-        }
-    }
-    node_store.map[i].hash = hash;
-    node_store.map[i].node = data;
-    node_store.map_size++;
-}
-
 struct node_info *node_info_find(struct redis_data *data)
 {
-    struct node_info *node;
+    struct node_info *node = NULL;
 
     if (data->elements != 2) return NULL;
 
@@ -140,11 +101,11 @@ struct node_info *node_info_find(struct redis_data *data)
     char key[DSN_MAX];
     socket_get_key(&addr, key);
 
-    node = map_get(key);
+    node = dict_get(&node_store.map, key);
     if (node == NULL) {
         node = node_info_get(&addr);
         if (node == NULL) return NULL;
-        map_set(key, node);
+        dict_set(&node_store.map, key, node);
     }
     return node;
 }
@@ -213,13 +174,15 @@ void slot_map_clear()
 
     struct node_info *node_info;
 
-    int i = 0;
-    for (i = 0; i < node_store.map_size; i++) {
-        node_info = node_store.map[i].node;
+    struct dict_iter iter = DICT_ITER_INITIALIZER;
+    DICT_FOREACH(&node_store.map, &iter) {
+        node_info = (struct node_info *)iter.value;
         if (node_list.idx >= MAX_UPDATE_NODES) break;
         memcpy(&node_list.nodes[node_list.idx++], node_info, sizeof(struct node_info));
     }
-    memset(&node_store, 0, sizeof(node_store));
+    node_store.idx = 0;
+    dict_clear(&node_store.map);
+    memset(node_store.nodes, 0, sizeof(node_store.nodes));
 }
 
 int do_update_slot_map(struct connection *server)
@@ -386,6 +349,8 @@ void *slot_map_updater(void *data)
     }
     pthread_mutex_unlock(&job_mutex);
 
+    dict_free(&node_store.map);
+
     pthread_rwlock_destroy(&slot_map_lock);
     pthread_rwlock_destroy(&addr_list_lock);
     pthread_mutex_destroy(&job_mutex);
@@ -522,6 +487,7 @@ int slot_init_updater(struct context *ctx)
     memset(slot_map, 0, sizeof(struct node_info*) * REDIS_CLUSTER_SLOTS);
     memset(&node_list, 0, sizeof(node_list));
     memset(&node_store, 0, sizeof(node_store));
+    dict_init(&node_store.map);
 
     pthread_mutex_init(&job_mutex, NULL);
     pthread_cond_init(&signal_cond, NULL);

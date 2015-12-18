@@ -8,6 +8,7 @@
 #include <stdbool.h>
 #include "logging.h"
 #include "event.h"
+#include "corvus.h"
 
 #define MSG_LEN 1024
 
