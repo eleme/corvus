@@ -32,7 +32,7 @@ static int verify_server(struct connection *server, struct address *addr)
 
     server->fd = conn_create_fd();
     if (server->fd == -1) {
-        LOG(ERROR, "fail to create fd");
+        LOG(ERROR, "verify_server: fail to create fd");
         conn_free(server);
         return -1;
     }

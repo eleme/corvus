@@ -381,6 +381,8 @@ int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len)
         return -1;
     }
 
+    cmd->cmd_count = data->elements - 1;
+
     size_t i;
     struct command *ncmd;
     for (i = 1; i < data->elements; i++) {
@@ -392,7 +394,6 @@ int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len)
         ncmd->client = cmd->client;
 
         STAILQ_INSERT_TAIL(&cmd->sub_cmds, ncmd, sub_cmd_next);
-        cmd->cmd_count++;
 
         mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, prefix, len);
         cmd_add_fragment(ncmd, &key->pos);
@@ -420,6 +421,8 @@ int cmd_forward_mset(struct command *cmd)
     }
     LOG(DEBUG, "process mset");
 
+    cmd->cmd_count = (data->elements - 1) >> 1;
+
     size_t i;
     struct command *ncmd;
     struct redis_data *key, *value;
@@ -433,7 +436,6 @@ int cmd_forward_mset(struct command *cmd)
         ncmd->client = cmd->client;
 
         STAILQ_INSERT_TAIL(&cmd->sub_cmds, ncmd, sub_cmd_next);
-        cmd->cmd_count++;
 
         mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, (uint8_t*)rep_set, 13);
         cmd_add_fragment(ncmd, &key->pos);
