@@ -8,7 +8,6 @@
 #include "socket.h"
 #include "logging.h"
 #include "slot.h"
-#include "dict.h"
 
 struct bytes {
     char key[DSN_MAX];
@@ -21,7 +20,7 @@ static int statsd_fd = -1;
 static struct sockaddr_in dest;
 static pthread_t stats_thread;
 static int metric_interval = 10;
-static struct dict *bytes_map;
+static struct dict bytes_map;
 static char hostname[HOST_NAME_MAX + 1];
 static uint16_t port;
 
@@ -66,13 +65,17 @@ void stats_get_simple(struct stats *stats)
         stats->basic.recv_bytes += contexts[i].stats.recv_bytes;
         stats->basic.send_bytes += contexts[i].stats.send_bytes;
         stats->basic.buffers += contexts[i].stats.buffers;
+        stats->basic.conns += contexts[i].stats.conns;
+        stats->basic.cmds += contexts[i].stats.cmds;
         stats->free_buffers += contexts[i].nfree_mbufq;
+        stats->free_cmds += contexts[i].nfree_cmdq;
+        stats->free_conns += contexts[i].nfree_connq;
     }
 }
 
 void stats_node_info_agg(struct bytes *bytes)
 {
-    struct bytes *b;
+    struct bytes *b = NULL;
     struct connection *server;
     struct context *contexts = get_contexts();
     int j, n, m = 0, threads = get_thread_num();
@@ -89,14 +92,14 @@ void stats_node_info_agg(struct bytes *bytes)
             }
             sprintf(host + j, "-%d", server->addr.port);
 
-            b = dict_get(bytes_map, host);
+            b = dict_get(&bytes_map, host);
             if (b == NULL) {
                 b = &bytes[m++];
                 strncpy(b->key, host, sizeof(b->key));
                 b->send = 0;
                 b->recv = 0;
                 b->completed = 0;
-                dict_set(bytes_map, b->key, (void*)b);
+                dict_set(&bytes_map, b->key, (void*)b);
             }
             b->send += server->send_bytes;
             b->recv += server->recv_bytes;
@@ -128,9 +131,9 @@ void stats_send_node_info()
     struct bytes bytes[REDIS_CLUSTER_SLOTS];
     stats_node_info_agg(bytes);
 
-    struct dict_iter iter = DICT_ITER_INITIALIZER(bytes_map);
-    dict_each(&iter) {
-        value = (struct bytes*)iter.val;
+    struct dict_iter iter = DICT_ITER_INITIALIZER;
+    DICT_FOREACH(&bytes_map, &iter) {
+        value = (struct bytes*)iter.value;
         snprintf(name, len, "redis-node.%s.bytes.send", iter.key);
         stats_send(name, value->send);
         snprintf(name, len, "redis-node.%s.bytes.recv", iter.key);
@@ -141,7 +144,7 @@ void stats_send_node_info()
         value->recv = 0;
         value->completed = 0;
     }
-    dict_clear(bytes_map);
+    dict_clear(&bytes_map);
 }
 
 void stats_get(struct stats *stats)
@@ -175,7 +178,7 @@ int stats_init(int interval)
     size_t stacksize;
     pthread_attr_t attr;
     int len;
-    bytes_map = dict();
+    dict_init(&bytes_map);
 
     gethostname(hostname, HOST_NAME_MAX + 1);
     len = strlen(hostname);
@@ -216,7 +219,7 @@ void stats_kill()
 {
     int err;
 
-    dict_free(bytes_map);
+    dict_free(&bytes_map);
 
     if (pthread_cancel(stats_thread) == 0) {
         if ((err = pthread_join(stats_thread, NULL)) != 0) {

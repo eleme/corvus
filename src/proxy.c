@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
 #include "corvus.h"
 #include "proxy.h"
 #include "socket.h"
@@ -16,7 +17,7 @@ void proxy_ready(struct connection *self, uint32_t mask)
         int fd = socket_accept(self->fd, ip, sizeof(ip), &port);
         struct connection *client;
         switch (fd) {
-            case CORVUS_ERR: close(fd); break;
+            case CORVUS_ERR: break;
             case CORVUS_AGAIN: break;
             default:
                 if ((client = client_create(self->ctx, fd)) == NULL) {
@@ -31,7 +32,7 @@ void proxy_ready(struct connection *self, uint32_t mask)
                 self->ctx->stats.connected_clients++;
                 break;
         }
-        if (fd != CORVUS_ERR) conn_register(self);
+        conn_register(self);
     }
 }
 

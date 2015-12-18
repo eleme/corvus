@@ -14,7 +14,6 @@
 #include "server.h"
 #include "client.h"
 #include "stats.h"
-#include "dict.h"
 
 #ifndef IOV_MAX
 #define CORVUS_IOV_MAX 128
@@ -187,7 +186,7 @@ static const char *rep_zero = ":0\r\n";
 static const char *rep_ping = "+PONG\r\n";
 
 static struct cmd_item cmds[] = {CMD_DO(CMD_BUILD_MAP)};
-static struct dict *command_map;
+static struct dict command_map;
 
 static void cmd_init(struct context *ctx, struct command *cmd)
 {
@@ -208,16 +207,13 @@ static void cmd_init(struct context *ctx, struct command *cmd)
 
 static void cmd_recycle(struct context *ctx, struct command *cmd)
 {
-    if (ctx->nfree_cmdq > RECYCLE_SIZE) {
-        free(cmd);
-    } else {
-        STAILQ_NEXT(cmd, cmd_next) = NULL;
-        STAILQ_NEXT(cmd, ready_next) = NULL;
-        STAILQ_NEXT(cmd, waiting_next) = NULL;
-        STAILQ_NEXT(cmd, sub_cmd_next) = NULL;
-        STAILQ_INSERT_HEAD(&ctx->free_cmdq, cmd, cmd_next);
-        ctx->nfree_cmdq++;
-    }
+    ctx->stats.cmds--;
+    STAILQ_NEXT(cmd, cmd_next) = NULL;
+    STAILQ_NEXT(cmd, ready_next) = NULL;
+    STAILQ_NEXT(cmd, waiting_next) = NULL;
+    STAILQ_NEXT(cmd, sub_cmd_next) = NULL;
+    STAILQ_INSERT_HEAD(&ctx->free_cmdq, cmd, cmd_next);
+    ctx->nfree_cmdq++;
 }
 
 static int cmd_in_queue(struct command *cmd, struct connection *server)
@@ -249,7 +245,7 @@ static int cmd_get_type(struct command *cmd, struct pos_array *pos)
     cmd_get_map_key(pos, key);
     key[pos->str_len] = '\0';
 
-    struct cmd_item *item = dict_get(command_map, key);
+    struct cmd_item *item = dict_get(&command_map, key);
     if (item == NULL) return -1;
     cmd->cmd_type = item->value;
     return item->type;
@@ -272,6 +268,10 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             "last_command_latency:%s\r\n"
             "in_use_buffers:%lld\r\n"
             "free_buffers:%lld\r\n"
+            "in_use_cmds:%lld\r\n"
+            "free_cmds:%lld\r\n"
+            "in_use_conns:%lld\r\n"
+            "free_conns:%lld\r\n"
             "remotes:%s\r\n",
             VERSION, stats->pid, stats->threads,
             stats->used_cpu_sys, stats->used_cpu_user,
@@ -282,6 +282,10 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             stats->basic.total_latency, latency,
             stats->basic.buffers,
             stats->free_buffers,
+            stats->basic.cmds,
+            stats->free_cmds,
+            stats->basic.conns,
+            stats->free_conns,
             stats->remote_nodes);
 }
 
@@ -382,6 +386,8 @@ int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len)
         return -1;
     }
 
+    cmd->cmd_count = data->elements - 1;
+
     size_t i;
     struct command *ncmd;
     for (i = 1; i < data->elements; i++) {
@@ -393,7 +399,6 @@ int cmd_forward_multikey(struct command *cmd, uint8_t *prefix, size_t len)
         ncmd->client = cmd->client;
 
         STAILQ_INSERT_TAIL(&cmd->sub_cmds, ncmd, sub_cmd_next);
-        cmd->cmd_count++;
 
         mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, prefix, len);
         cmd_add_fragment(ncmd, &key->pos);
@@ -421,6 +426,8 @@ int cmd_forward_mset(struct command *cmd)
     }
     LOG(DEBUG, "process mset");
 
+    cmd->cmd_count = (data->elements - 1) >> 1;
+
     size_t i;
     struct command *ncmd;
     struct redis_data *key, *value;
@@ -434,7 +441,6 @@ int cmd_forward_mset(struct command *cmd)
         ncmd->client = cmd->client;
 
         STAILQ_INSERT_TAIL(&cmd->sub_cmds, ncmd, sub_cmd_next);
-        cmd->cmd_count++;
 
         mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, (uint8_t*)rep_set, 13);
         cmd_add_fragment(ncmd, &key->pos);
@@ -752,18 +758,18 @@ void cmd_mark(struct command *cmd, int fail)
 
 void cmd_map_init()
 {
-    command_map = dict();
+    dict_init(&command_map);
 
     size_t i, cmds_len = sizeof(cmds) / sizeof(struct cmd_item);
 
     for (i = 0; i < cmds_len; i++) {
-        dict_set(command_map, cmds[i].cmd, &cmds[i]);
+        dict_set(&command_map, cmds[i].cmd, &cmds[i]);
     }
 }
 
 void cmd_map_destroy()
 {
-        dict_free(command_map);
+        dict_free(&command_map);
 }
 
 struct command *cmd_create(struct context *ctx)
@@ -779,6 +785,7 @@ struct command *cmd_create(struct context *ctx)
         cmd = malloc(sizeof(struct command));
     }
     cmd_init(ctx, cmd);
+    ctx->stats.cmds++;
     return cmd;
 }
 

@@ -262,7 +262,7 @@ void context_init(struct context *ctx, bool syslog, int log_level)
 
     ctx->syslog = syslog;
     ctx->log_level = log_level;
-    ctx->server_table = dict();
+    dict_init(&ctx->server_table);
     ctx->started = false;
     ctx->role = THREAD_UNKNOWN;
     mbuf_init(ctx);
@@ -277,14 +277,14 @@ void context_free(struct context *ctx)
 {
     /* server pool */
     struct connection *conn;
-    struct dict_iter iter = DICT_ITER_INITIALIZER(ctx->server_table);
-    dict_each(&iter) {
-        conn = (struct connection*)(iter.val);
+    struct dict_iter iter = DICT_ITER_INITIALIZER;
+    DICT_FOREACH(&ctx->server_table, &iter) {
+        conn = (struct connection*)(iter.value);
         conn_free(conn);
         conn_buf_free(conn);
         free(conn);
     }
-    dict_free(ctx->server_table);
+    dict_free(&ctx->server_table);
 
     /* mbuf queue */
     mbuf_destroy(ctx);

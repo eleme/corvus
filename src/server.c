@@ -96,13 +96,12 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
     struct buf_ptr ptr;
 
     memcpy(&ptr, &cmd->rep_buf[0], sizeof(ptr));
-
-    server_free_buf(cmd);
     redis_data_free(&cmd->rep_data);
 
     if (cmd->redirected) {
         LOG(WARN, "multiple redirect error: (%d)%s:%d -> %s", cmd->slot,
                 cmd->server->addr.host, cmd->server->addr.port, info->addr);
+        server_free_buf(cmd);
         cmd_mark_fail(cmd);
         return CORVUS_OK;
     } else {
@@ -112,6 +111,7 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
     port = socket_parse_addr(info->addr, &addr);
     if (port == CORVUS_ERR) {
         LOG(WARN, "server_redirect: fail to parse addr %s", info->addr);
+        server_free_buf(cmd);
         cmd_mark_fail(cmd);
         return CORVUS_OK;
     }
@@ -119,6 +119,7 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
     struct connection *server = conn_get_server_from_pool(cmd->ctx, &addr);
     if (server == NULL) {
         LOG(WARN, "server_redirect: fail to get server %s", info->addr);
+        server_free_buf(cmd);
         cmd_mark_fail(cmd);
         return CORVUS_OK;
     }
@@ -129,6 +130,7 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
         return CORVUS_ERR;
     }
 
+    server_free_buf(cmd);
     cmd->server = server;
     STAILQ_INSERT_TAIL(&server->ready_queue, cmd, ready_next);
     return CORVUS_OK;

@@ -55,9 +55,12 @@ static int _accept(int fd, struct sockaddr *sa, socklen_t *len)
     while (1) {
         s = accept(fd, sa, len);
         if (s == -1) {
-            if (errno == EINTR) continue;
+            switch (errno) {
+                case EINTR: continue;
+                case EAGAIN: return CORVUS_AGAIN;
+            }
             LOG(ERROR, "accept: %s", strerror(errno));
-            return -1;
+            return CORVUS_ERR;
         }
         break;
     }
@@ -68,7 +71,7 @@ static inline int _socket(int domain, int type, int protocol)
 {
     int fd;
     if ((fd = socket(domain, type | SOCK_CLOEXEC, protocol)) == -1) {
-        LOG(ERROR, "Fail to create socket: %s", strerror(errno));
+        LOG(ERROR, "fail to create socket: %s", strerror(errno));
         return -1;
     }
     return fd;
@@ -92,7 +95,7 @@ static int _connect(int fd, const struct sockaddr *addr, socklen_t addrlen)
 
 static int _getaddrinfo(const char *addr, int port, struct addrinfo **servinfo, int socktype)
 {
-    int err;
+    int err = 0;
     char _port[6];
     struct addrinfo hints;
 
@@ -116,7 +119,7 @@ int socket_set_nonblocking(int fd)
         return -1;
     }
     if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
-        LOG(ERROR, "Fail to set nonblock for fd %d: %s", fd, strerror(errno));
+        LOG(ERROR, "fail to set nonblock for fd %d: %s", fd, strerror(errno));
         return -1;
     }
     return 0;
@@ -222,12 +225,7 @@ int socket_accept(int fd, char *ip, size_t ip_len, int *port)
     socklen_t salen = sizeof(sa);
 
     s = _accept(fd, (struct sockaddr*)&sa, &salen);
-    if (s == -1) {
-        if (errno == EAGAIN) {
-            return CORVUS_AGAIN;
-        }
-        return CORVUS_ERR;
-    }
+    if (s == CORVUS_AGAIN || s == CORVUS_ERR) return s;
 
     struct sockaddr_in *addr = (struct sockaddr_in*)&sa;
     if (ip) inet_ntop(AF_INET, (void*)&(addr->sin_addr), ip, ip_len);
@@ -319,14 +317,6 @@ void socket_get_addr(char *host, int host_len, int port, struct address *addr)
         addr->host[max_len - 1] = '\0';
     } else {
         addr->host[host_len] = '\0';
-    }
-
-    struct addrinfo *addrs;
-    if (_getaddrinfo(addr->host, port, &addrs, SOCK_STREAM) != CORVUS_ERR &&
-            addrs != NULL) {
-        struct sockaddr_in *h = (struct sockaddr_in *)addrs->ai_addr;
-        strcpy(addr->host, inet_ntoa(h->sin_addr));
-        freeaddrinfo(addrs);
     }
     addr->port = port;
 }

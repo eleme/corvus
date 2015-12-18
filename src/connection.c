@@ -32,7 +32,7 @@ static int verify_server(struct connection *server, struct address *addr)
 
     server->fd = conn_create_fd();
     if (server->fd == -1) {
-        LOG(ERROR, "fail to create fd");
+        LOG(ERROR, "verify_server: fail to create fd");
         conn_free(server);
         return -1;
     }
@@ -62,7 +62,7 @@ static struct connection *conn_create_server(struct context *ctx, struct address
     }
 
     strcpy(server->dsn, key);
-    dict_set(ctx->server_table, server->dsn, (void*)server);
+    dict_set(&ctx->server_table, server->dsn, (void*)server);
     STAILQ_INSERT_TAIL(&ctx->servers, server, next);
     return server;
 }
@@ -99,6 +99,7 @@ struct connection *conn_create(struct context *ctx)
         conn = malloc(sizeof(struct connection));
     }
     conn_init(conn, ctx);
+    ctx->stats.conns++;
     return conn;
 }
 
@@ -147,13 +148,10 @@ void conn_recycle(struct context *ctx, struct connection *conn)
         LOG(WARN, "connection recycle, data buffer not empty");
     }
 
-    if (ctx->nfree_connq > RECYCLE_SIZE) {
-        free(conn);
-    } else {
-        STAILQ_NEXT(conn, next) = NULL;
-        STAILQ_INSERT_HEAD(&ctx->free_connq, conn, next);
-        ctx->nfree_connq++;
-    }
+    ctx->stats.conns--;
+    STAILQ_NEXT(conn, next) = NULL;
+    STAILQ_INSERT_HEAD(&ctx->free_connq, conn, next);
+    ctx->nfree_connq++;
 }
 
 int conn_create_fd()
@@ -173,11 +171,11 @@ int conn_create_fd()
 
 struct connection *conn_get_server_from_pool(struct context *ctx, struct address *addr)
 {
-    struct connection *server;
+    struct connection *server = NULL;
     char key[DSN_MAX];
 
     socket_get_key(addr, key);
-    server = dict_get(ctx->server_table, key);
+    server = dict_get(&ctx->server_table, key);
     if (server != NULL) {
         if (verify_server(server, addr) == -1) return NULL;
         return server;
