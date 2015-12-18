@@ -65,7 +65,11 @@ void stats_get_simple(struct stats *stats)
         stats->basic.recv_bytes += contexts[i].stats.recv_bytes;
         stats->basic.send_bytes += contexts[i].stats.send_bytes;
         stats->basic.buffers += contexts[i].stats.buffers;
+        stats->basic.conns += contexts[i].stats.conns;
+        stats->basic.cmds += contexts[i].stats.cmds;
         stats->free_buffers += contexts[i].nfree_mbufq;
+        stats->free_cmds += contexts[i].nfree_cmdq;
+        stats->free_conns += contexts[i].nfree_connq;
     }
 }
 

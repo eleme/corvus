@@ -67,12 +67,6 @@ struct mbuf *mbuf_get(struct context *ctx)
 void mbuf_recycle(struct context *ctx, struct mbuf *mbuf)
 {
     ctx->stats.buffers--;
-
-    if (ctx->nfree_mbufq > RECYCLE_SIZE) {
-        mbuf_free(ctx, mbuf);
-        return;
-    }
-
     STAILQ_NEXT(mbuf, next) = NULL;
     STAILQ_INSERT_HEAD(&ctx->free_mbufq, mbuf, next);
     ctx->nfree_mbufq++;

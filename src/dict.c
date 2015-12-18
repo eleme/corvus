@@ -1,5 +1,4 @@
 #include <string.h>
-#include <math.h>
 #include "hash.h"
 #include "dict.h"
 

@@ -207,16 +207,13 @@ static void cmd_init(struct context *ctx, struct command *cmd)
 
 static void cmd_recycle(struct context *ctx, struct command *cmd)
 {
-    if (ctx->nfree_cmdq > RECYCLE_SIZE) {
-        free(cmd);
-    } else {
-        STAILQ_NEXT(cmd, cmd_next) = NULL;
-        STAILQ_NEXT(cmd, ready_next) = NULL;
-        STAILQ_NEXT(cmd, waiting_next) = NULL;
-        STAILQ_NEXT(cmd, sub_cmd_next) = NULL;
-        STAILQ_INSERT_HEAD(&ctx->free_cmdq, cmd, cmd_next);
-        ctx->nfree_cmdq++;
-    }
+    ctx->stats.cmds--;
+    STAILQ_NEXT(cmd, cmd_next) = NULL;
+    STAILQ_NEXT(cmd, ready_next) = NULL;
+    STAILQ_NEXT(cmd, waiting_next) = NULL;
+    STAILQ_NEXT(cmd, sub_cmd_next) = NULL;
+    STAILQ_INSERT_HEAD(&ctx->free_cmdq, cmd, cmd_next);
+    ctx->nfree_cmdq++;
 }
 
 static int cmd_in_queue(struct command *cmd, struct connection *server)
@@ -271,6 +268,10 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             "last_command_latency:%s\r\n"
             "in_use_buffers:%lld\r\n"
             "free_buffers:%lld\r\n"
+            "in_use_cmds:%lld\r\n"
+            "free_cmds:%lld\r\n"
+            "in_use_conns:%lld\r\n"
+            "free_conns:%lld\r\n"
             "remotes:%s\r\n",
             VERSION, stats->pid, stats->threads,
             stats->used_cpu_sys, stats->used_cpu_user,
@@ -281,6 +282,10 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             stats->basic.total_latency, latency,
             stats->basic.buffers,
             stats->free_buffers,
+            stats->basic.cmds,
+            stats->free_cmds,
+            stats->basic.conns,
+            stats->free_conns,
             stats->remote_nodes);
 }
 
@@ -780,6 +785,7 @@ struct command *cmd_create(struct context *ctx)
         cmd = malloc(sizeof(struct command));
     }
     cmd_init(ctx, cmd);
+    ctx->stats.cmds++;
     return cmd;
 }
 

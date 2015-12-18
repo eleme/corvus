@@ -99,6 +99,7 @@ struct connection *conn_create(struct context *ctx)
         conn = malloc(sizeof(struct connection));
     }
     conn_init(conn, ctx);
+    ctx->stats.conns++;
     return conn;
 }
 
@@ -147,13 +148,10 @@ void conn_recycle(struct context *ctx, struct connection *conn)
         LOG(WARN, "connection recycle, data buffer not empty");
     }
 
-    if (ctx->nfree_connq > RECYCLE_SIZE) {
-        free(conn);
-    } else {
-        STAILQ_NEXT(conn, next) = NULL;
-        STAILQ_INSERT_HEAD(&ctx->free_connq, conn, next);
-        ctx->nfree_connq++;
-    }
+    ctx->stats.conns--;
+    STAILQ_NEXT(conn, next) = NULL;
+    STAILQ_INSERT_HEAD(&ctx->free_connq, conn, next);
+    ctx->nfree_connq++;
 }
 
 int conn_create_fd()

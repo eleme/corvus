@@ -17,6 +17,8 @@ struct basic_stats {
     double total_latency;
 
     long long buffers;
+    long long cmds;
+    long long conns;
 };
 
 struct stats {
@@ -32,6 +34,8 @@ struct stats {
     struct basic_stats basic;
 
     long long free_buffers;
+    long long free_cmds;
+    long long free_conns;
 };
 
 int stats_init(int interval);
