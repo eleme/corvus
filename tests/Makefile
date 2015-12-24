@@ -2,7 +2,7 @@ default: test
 
 NAME=corvus_test
 CC=gcc
-CFLAGS=-std=c99 -pedantic -g -D_GNU_SOURCE -DCORVUS_TEST -I../src
+CFLAGS=-std=c99 -g -D_GNU_SOURCE -DCORVUS_TEST -I../src
 LDFLAGS=-pthread
 
 BIN:=$(NAME)

@@ -28,23 +28,22 @@ int client_write(struct connection *client)
         cmd_free(cmd);
         return CORVUS_ERR;
     }
-    status = cmd_iov_write(cmd->ctx, &cmd->iov, client->fd);
 
-    if (status == CORVUS_ERR) return CORVUS_ERR;
-    if (status == CORVUS_AGAIN) return CORVUS_OK;
-
-    if (cmd->iov.cursor >= cmd->iov.len) {
-        STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
-        cmd_stats(cmd);
-        cmd_free(cmd);
-    } else {
-        switch (conn_register(client)) {
-            case CORVUS_ERR:
-                LOG(ERROR, "fail to register client %d", client->fd);
-                return CORVUS_ERR;
-            case CORVUS_OK:
-                break;
+    while (1) {
+        status = cmd_iov_write(cmd->ctx, &cmd->iov, client->fd);
+        if (status == CORVUS_ERR) return CORVUS_ERR;
+        if (status == CORVUS_AGAIN) return CORVUS_OK;
+        if (cmd->iov.cursor >= cmd->iov.len) {
+            STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
+            cmd_stats(cmd);
+            cmd_free(cmd);
+            break;
         }
+    }
+
+    if (conn_register(client) == CORVUS_ERR) {
+        LOG(ERROR, "fail to reregister client %d", client->fd);
+        return CORVUS_ERR;
     }
 
     LOG(DEBUG, "client write ok");

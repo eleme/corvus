@@ -6,6 +6,8 @@
 #include "parser.h"
 #include "logging.h"
 
+#define ARRAY_BASE_SIZE 32
+
 #define TO_NUMBER(v, c)                                        \
 do {                                                           \
     if (c < '0' || c > '9') {                                  \
@@ -33,9 +35,11 @@ int stack_pop(struct reader *r)
             redis_data_move(&r->data, &cur->data);
             return 0;
         case REP_ARRAY:
-            redis_data_move(&top->data.element[top->idx++], &cur->data);
+            if (top->data.element != NULL) {
+                redis_data_move(&top->data.element[top->idx++], &cur->data);
+            }
             top->elements--;
-            if (top->idx >= top->data.elements) return stack_pop(r);
+            if (top->elements <= 0) return stack_pop(r);
     }
     return 1;
 }
@@ -54,13 +58,9 @@ int stack_push(struct reader *r, int type)
 struct pos *pos_array_push(struct pos_array *arr, int len, uint8_t *p)
 {
     struct pos *pos;
-    if (arr->items == NULL ) {
-        arr->items = malloc(sizeof(struct pos) * ARRAY_CHUNK_SIZE);
-        arr->max_pos_size = ARRAY_CHUNK_SIZE;
-    }
-
     if (arr->pos_len >= arr->max_pos_size) {
-        arr->max_pos_size += ARRAY_CHUNK_SIZE;
+        arr->max_pos_size *= 2;
+        if (arr->max_pos_size == 0) arr->max_pos_size = ARRAY_BASE_SIZE;
         arr->items = realloc(arr->items, sizeof(struct pos) * arr->max_pos_size);
     }
     pos = &arr->items[arr->pos_len++];
@@ -85,6 +85,7 @@ struct redis_data *redis_data_get(struct reader_task *task, int type)
         case REP_ARRAY:
             if (task->cur_data != NULL) return task->cur_data;
             if (task->idx >= task->data.elements) return NULL;
+            if (task->data.element == NULL) return NULL;
 
             task->cur_data = &task->data.element[task->idx++];
             task->cur_data->type = type;
@@ -100,24 +101,30 @@ int process_type(struct reader *r)
             r->array_size = 0;
             r->array_type = PARSE_ARRAY_BEGIN;
             r->type = PARSE_ARRAY;
+            r->redis_data_type = REP_ARRAY;
             if (stack_push(r, REP_ARRAY) == -1) return -1;
             break;
         case '$':
             r->string_size = 0;
             r->string_type = PARSE_STRING_BEGIN;
             r->type = PARSE_STRING;
+            r->redis_data_type = REP_STRING;
             break;
         case ':':
+            r->integer = 0;
             r->type = PARSE_INTEGER;
             r->integer_type = PARSE_INTEGER_BEGIN;
+            r->redis_data_type = REP_INTEGER;
             break;
         case '+':
             r->type = PARSE_SIMPLE_STRING;
             r->simple_string_type = PARSE_SIMPLE_STRING_BEGIN;
+            r->redis_data_type = REP_SIMPLE_STRING;
             break;
         case '-':
             r->type = PARSE_ERROR;
             r->simple_string_type = PARSE_SIMPLE_STRING_BEGIN;
+            r->redis_data_type = REP_ERROR;
             break;
         default:
             return -1;
@@ -128,6 +135,7 @@ int process_type(struct reader *r)
 
 int process_array(struct reader *r)
 {
+    size_t size;
     uint8_t *p;
     long long v;
     char c;
@@ -162,7 +170,12 @@ int process_array(struct reader *r)
                 if (*p != '\n') return -1;
 
                 if (task->data.elements > 0) {
-                    task->data.element = calloc(task->data.elements, sizeof(struct redis_data));
+                    if (r->mode == MODE_REQ) {
+                        for (size = 1; size * ARRAY_BASE_SIZE  < task->data.elements - 1; size *= 2);
+                        task->data.element = calloc(size * ARRAY_BASE_SIZE, sizeof(struct redis_data));
+                    } else {
+                        task->data.element = NULL;
+                    }
                     r->type = PARSE_TYPE;
                 } else {
                     switch (stack_pop(r)) {
@@ -184,10 +197,15 @@ int process_string(struct reader *r)
     long long v;
 
     struct reader_task *task = &r->rstack[r->sidx];
-    struct redis_data *data = redis_data_get(task, REP_STRING);
-    if (data == NULL) return -1;
 
-    struct pos_array *arr = &data->pos;
+    struct redis_data *data = NULL;
+    struct pos_array *arr = NULL;
+
+    if (r->mode == MODE_REQ) {
+        data = redis_data_get(task, REP_STRING);
+        if (data == NULL) return -1;
+        arr = &data->pos;
+    }
 
     for (; r->buf->pos < r->buf->last; r->buf->pos++) {
         p = r->buf->pos;
@@ -220,11 +238,12 @@ int process_string(struct reader *r)
                 if (r->string_size < remain) {
                     r->string_type = PARSE_STRING_END;
                     r->buf->pos += r->string_size;
-                    pos_array_push(arr, r->string_size, p);
+                    if (arr != NULL) pos_array_push(arr, r->string_size, p);
+                    r->string_size = 0;
                 } else {
                     r->string_size -= remain;
                     r->buf->pos += remain - 1;
-                    pos_array_push(arr, remain, p);
+                    if (arr != NULL) pos_array_push(arr, remain, p);
                 }
                 break;
             case PARSE_STRING_END:
@@ -251,8 +270,13 @@ int process_integer(struct reader *r)
     long long v;
     uint8_t *p;
     struct reader_task *task = &r->rstack[r->sidx];
-    struct redis_data *data = redis_data_get(task, REP_INTEGER);
-    if (data == NULL) return -1;
+
+    struct redis_data *data = NULL;
+
+    if (r->mode == MODE_REQ) {
+        data = redis_data_get(task, REP_INTEGER);
+        if (data == NULL) return -1;
+    }
 
     for (; r->buf->pos < r->buf->last; r->buf->pos++) {
         p = r->buf->pos;
@@ -262,15 +286,15 @@ int process_integer(struct reader *r)
                 switch (c) {
                     case '-': r->sign = -1; break;
                     case '\r':
-                        data->integer *= r->sign;
+                        r->integer *= r->sign;
+                        if (data != NULL) data->integer = r->integer;
                         if (task->elements > 0) task->elements--;
                         r->integer_type = PARSE_INTEGER_END;
                         break;
                     default:
-                        v = data->integer;
+                        v = r->integer;
                         TO_NUMBER(v, c);
-                        data->integer = v;
-                        break;
+                        r->integer = v;
                 }
                 break;
             case PARSE_INTEGER_END:
@@ -296,19 +320,24 @@ int process_simple_string(struct reader *r, int type)
     char c;
     uint8_t *p;
     struct reader_task *task = &r->rstack[r->sidx];
-    struct redis_data *data = redis_data_get(task, type);
-    if (data == NULL) return -1;
 
-    struct pos_array *arr = &data->pos;
-    struct pos *pos;
+    struct redis_data *data = NULL;
+    struct pos_array *arr = NULL;
+    struct pos *pos = NULL;
 
-    if (task->prev_buf != r->buf) {
-        pos = pos_array_push(arr, 0, NULL);
-        task->prev_buf = r->buf;
-        pos->str = r->buf->pos;
-        pos->len = 0;
-    } else {
-        pos = &arr->items[arr->pos_len - 1];
+    if (r->mode == MODE_REQ) {
+        data = redis_data_get(task, type);
+        if (data == NULL) return -1;
+
+        arr = &data->pos;
+        if (task->prev_buf != r->buf) {
+            pos = pos_array_push(arr, 0, NULL);
+            task->prev_buf = r->buf;
+            pos->str = r->buf->pos;
+            pos->len = 0;
+        } else {
+            pos = &arr->items[arr->pos_len - 1];
+        }
     }
 
     for (; r->buf->pos < r->buf->last; r->buf->pos++) {
@@ -319,7 +348,7 @@ int process_simple_string(struct reader *r, int type)
                 if (c == '\r') {
                     if (task->elements > 0) task->elements--;
                     r->simple_string_type = PARSE_SIMPLE_STRING_END;
-                } else {
+                } else if (pos != NULL && arr != NULL) {
                     pos->len++;
                     arr->str_len++;
                 }
@@ -343,7 +372,7 @@ int process_simple_string(struct reader *r, int type)
     return 0;
 }
 
-int parse(struct reader *r)
+int parse(struct reader *r, int mode)
 {
     struct mbuf *buf;
     while (r->buf->pos < r->buf->last) {
@@ -352,6 +381,7 @@ int parse(struct reader *r)
                 buf = r->buf;
                 reader_init(r);
                 r->buf = buf;
+                r->mode = mode;
 
                 r->type = PARSE_TYPE;
                 r->start.buf = r->buf;
@@ -466,19 +496,4 @@ int pos_to_str(struct pos_array *pos, char *str)
     }
     str[length] = '\0';
     return CORVUS_OK;
-}
-
-int pos_array_compare(struct pos_array *arr, char *data, int len)
-{
-    int i, size = 0;
-    struct pos *p;
-    if (arr->str_len != len) return 1;
-    for (i = 0; i < arr->pos_len; i++) {
-        p = &arr->items[i];
-        if (strncmp((char*)p->str, data + size, p->len) != 0) {
-            return 1;
-        }
-        size += p->len;
-    }
-    return 0;
 }

@@ -3041,6 +3041,16 @@ def test_info():
     assert r.info()
 
 
+def test_large_value(delete_keys):
+    delete_keys.keys("hello")
+
+    length = 1024 * 1024 * 100
+    r.set("hello", "h" * length)
+    a = r.get("hello")
+
+    assert len(a) == length
+
+
 def test_moved(delete_keys):
     delete_keys.keys("hello")
 
@@ -3056,7 +3066,6 @@ def test_moved(delete_keys):
 
 def test_ask(delete_keys):
     delete_keys.keys("hello")
-    print("hello")
 
     r.set("hello", 123)
     node1 = ClusterNode.from_uri(REDIS_URI_SRC)

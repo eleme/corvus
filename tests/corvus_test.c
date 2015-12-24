@@ -55,6 +55,7 @@ extern TEST_CASE(test_parser);
 extern TEST_CASE(test_cmd);
 extern TEST_CASE(test_server);
 extern TEST_CASE(test_dict);
+extern TEST_CASE(test_socket);
 
 int main(int argc, const char *argv[])
 {
@@ -75,6 +76,7 @@ int main(int argc, const char *argv[])
     RUN_CASE(test_cmd);
     RUN_CASE(test_server);
     RUN_CASE(test_dict);
+    RUN_CASE(test_socket);
 
     usleep(10000);
     slot_create_job(SLOT_UPDATER_QUIT);

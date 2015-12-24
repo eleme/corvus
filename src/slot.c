@@ -53,6 +53,29 @@ static struct {
     int idx;
 } node_store;
 
+void slot_map_clear()
+{
+    pthread_rwlock_wrlock(&slot_map_lock);
+    memset(slot_map, 0, sizeof(slot_map));
+    pthread_rwlock_unlock(&slot_map_lock);
+
+    pthread_rwlock_wrlock(&addr_list_lock);
+    memset(&addr_list, 0, sizeof(addr_list));
+    pthread_rwlock_unlock(&addr_list_lock);
+
+    struct node_info *node_info;
+
+    struct dict_iter iter = DICT_ITER_INITIALIZER;
+    DICT_FOREACH(&node_store.map, &iter) {
+        node_info = (struct node_info *)iter.value;
+        if (node_list.idx >= MAX_UPDATE_NODES) break;
+        memcpy(&node_list.nodes[node_list.idx++], node_info, sizeof(struct node_info));
+    }
+    node_store.idx = 0;
+    dict_clear(&node_store.map);
+    memset(node_store.nodes, 0, sizeof(node_store.nodes));
+}
+
 void addr_add(char *host, uint16_t port)
 {
     int n;
@@ -96,7 +119,7 @@ struct node_info *node_info_find(struct redis_data *data)
     uint16_t port = data->element[1].integer;
 
     struct address addr;
-    socket_get_addr(hostname, p->str_len, port, &addr);
+    socket_address_init(&addr, hostname, p->str_len, port);
 
     char key[DSN_MAX];
     socket_get_key(&addr, key);
@@ -122,13 +145,13 @@ int node_info_add_addr(struct redis_data *data)
 
     uint16_t port = data->element[1].integer;
     struct address addr;
-    socket_get_addr(hostname, p->str_len, port, &addr);
+    socket_address_init(&addr, hostname, p->str_len, port);
 
     addr_add(addr.host, addr.port);
     return 0;
 }
 
-int parse_slots_data(struct redis_data *data)
+int parse_slots(struct redis_data *data)
 {
     size_t i, h;
     long long j;
@@ -162,27 +185,45 @@ int parse_slots_data(struct redis_data *data)
     return count;
 }
 
-void slot_map_clear()
+int slot_parse_data(struct reader *r, struct mbuf *buf, int *count)
 {
-    pthread_rwlock_wrlock(&slot_map_lock);
-    memset(slot_map, 0, sizeof(slot_map));
-    pthread_rwlock_unlock(&slot_map_lock);
+    reader_feed(r, buf);
+    while (buf->pos < buf->last) {
+        if (parse(r, MODE_REQ) == -1) {
+            LOG(ERROR, "slot_map: parse cluster slots error");
+            return CORVUS_ERR;
+        }
 
-    pthread_rwlock_wrlock(&addr_list_lock);
-    memset(&addr_list, 0, sizeof(addr_list));
-    pthread_rwlock_unlock(&addr_list_lock);
-
-    struct node_info *node_info;
-
-    struct dict_iter iter = DICT_ITER_INITIALIZER;
-    DICT_FOREACH(&node_store.map, &iter) {
-        node_info = (struct node_info *)iter.value;
-        if (node_list.idx >= MAX_UPDATE_NODES) break;
-        memcpy(&node_list.nodes[node_list.idx++], node_info, sizeof(struct node_info));
+        if (reader_ready(r)) {
+            *count = parse_slots(&r->data);
+            redis_data_free(&r->data);
+            break;
+        }
     }
-    node_store.idx = 0;
-    dict_clear(&node_store.map);
-    memset(node_store.nodes, 0, sizeof(node_store.nodes));
+    return CORVUS_OK;
+}
+
+int slot_read_data(struct connection *server, int *count)
+{
+    int n, rsize;
+    struct mbuf *buf;
+    struct reader r;
+    reader_init(&r);
+
+    while (1) {
+        buf = conn_get_buf(server);
+        rsize = mbuf_read_size(buf);
+
+        if (rsize > 0) {
+            if (slot_parse_data(&r, buf, count) == CORVUS_ERR) return CORVUS_ERR;
+            if (reader_ready(&r)) return CORVUS_OK;
+            continue;
+        }
+
+        n = socket_read(server->fd, buf);
+        if (n == 0 || n == CORVUS_ERR || n == CORVUS_AGAIN) return CORVUS_ERR;
+    }
+    return CORVUS_OK;
 }
 
 int do_update_slot_map(struct connection *server)
@@ -202,18 +243,12 @@ int do_update_slot_map(struct connection *server)
         return -1;
     }
 
-    struct command *cmd = cmd_create(server->ctx);
-    cmd->server = server;
-    if(cmd_read_reply(cmd, server) != CORVUS_OK) {
+    int count = -1;
+    LOG(INFO, "updating slot map using %s:%d", server->addr.host, server->addr.port);
+    if(slot_read_data(server, &count) != CORVUS_OK) {
         LOG(ERROR, "update slot map, cmd read error");
-        cmd_free(cmd);
         return -1;
     }
-
-    LOG(INFO, "updating slot map using %s:%d", server->addr.host, server->addr.port);
-    int count = parse_slots_data(&cmd->rep_data);
-    cmd_free(cmd);
-    mbuf_destroy(server->ctx);
     return count;
 }
 
@@ -364,75 +399,55 @@ uint16_t slot_get(struct pos_array *pos)
 {
     uint32_t s, len;
     uint8_t *str;
-    uint16_t hash;
-    int h, found = 0, found_s = 0, pos_len = pos->pos_len;
-    int tag_start = -1, tag_end = -1;
-    struct pos start_pos, end_pos;
-    struct pos *p, *end = NULL, *start = pos->items, *items = pos->items;
+    int j, h, found = 0, found_s = 0;
+    struct pos *q, *p;
 
-    for (h = 0; h < pos->pos_len; h++) {
+    struct pos temp_pos[pos->pos_len];
+    struct pos_array arr;
+    memset(&arr, 0, sizeof(arr));
+    arr.items = temp_pos;
+
+    for (j = 0, h = 0; h < pos->pos_len; h++) {
         p = &pos->items[h];
         len = p->len;
         str = p->str;
 
+        q = &arr.items[j];
+        q->len = len;
+        q->str = str;
+
         for (s = 0; s < len; s++) {
             if (str[s] == '}' && found_s) {
-                tag_end = h;
-                memcpy(&end_pos, p, sizeof(end_pos));
-
-                p->len -= len - s;
                 found = 1;
-                end = p;
+                q->len -= len - s;
                 break;
             }
 
             if (str[s] == '{' && !found_s) {
                 if (s == len - 1) {
                     if (h + 1 >= pos->pos_len) goto end;
-                    if ((p+1)->len <= 0 || (p+1)->str[0] == '}') goto end;
-                    start = p + 1;
+                    if ((p + 1)->len <= 0 || (p + 1)->str[0] == '}') goto end;
                     found_s = 1;
+                    j = -1;
+                    arr.pos_len = -1;
                 } else {
-                    start = p;
-
-                    tag_start = h;
-                    memcpy(&start_pos, p, sizeof(start_pos));
-
-                    p->str += s + 1;
-                    p->len -= s + 1;
-                    if (p->str[0] == '}') goto end;
+                    q->str += s + 1;
+                    q->len -= s + 1;
+                    if (q->str[0] == '}') goto end;
                     found_s = 1;
                 }
             }
         }
+
+        if (found_s) {
+            j++;
+            arr.pos_len++;
+        }
         if (found) break;
     }
 end:
-    if (found) {
-        pos->items = start;
-        pos->pos_len = end - start + 1;
-    } else if (tag_start != -1) {
-        memcpy(&pos->items[tag_start], &start_pos, sizeof(start_pos));
-        tag_start = -1;
-    }
-
-    hash = crc16(pos) & 0x3FFF;
-
-    if (found) {
-        pos->items = items;
-        pos->pos_len = pos_len;
-
-        if (tag_end == tag_start) tag_end = -1;
-        if (tag_end != -1) {
-            memcpy(&pos->items[tag_end], &end_pos, sizeof(end_pos));
-            tag_end = -1;
-        }
-        if (tag_start != -1) {
-            memcpy(&pos->items[tag_start], &start_pos, sizeof(start_pos));
-            tag_start = -1;
-        }
-    }
-    return hash;
+    if (found) pos = &arr;
+    return crc16(pos) & 0x3FFF;
 }
 
 int slot_get_node_addr(uint16_t slot, struct address *addr)

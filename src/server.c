@@ -79,11 +79,9 @@ int server_write(struct connection *server)
 
     if (server->iov.cursor >= server->iov.len) {
         cmd_iov_free(&server->iov);
-    } else {
-        if (conn_register(server) == CORVUS_ERR) {
-            LOG(ERROR, "fail to reregister server %d", server->fd);
-            return CORVUS_ERR;
-        }
+    } else if (conn_register(server) == CORVUS_ERR) {
+        LOG(ERROR, "fail to reregister server %d", server->fd);
+        return CORVUS_ERR;
     }
 
     return CORVUS_OK;
@@ -93,10 +91,6 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
 {
     int port;
     struct address addr;
-    struct buf_ptr ptr;
-
-    memcpy(&ptr, &cmd->rep_buf[0], sizeof(ptr));
-    redis_data_free(&cmd->rep_data);
 
     if (cmd->redirected) {
         LOG(WARN, "multiple redirect error: (%d)%s:%d -> %s", cmd->slot,
@@ -124,11 +118,7 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
         return CORVUS_OK;
     }
 
-    if (conn_register(server) == CORVUS_ERR) {
-        memcpy(&cmd->rep_buf[0], &ptr, sizeof(ptr));
-        mbuf_inc_ref(cmd->rep_buf[0].buf);
-        return CORVUS_ERR;
-    }
+    if (conn_register(server) == CORVUS_ERR) return CORVUS_ERR;
 
     server_free_buf(cmd);
     cmd->server = server;
@@ -152,7 +142,7 @@ int server_read_reply(struct connection *server, struct command *cmd)
         return CORVUS_OK;
     }
 
-    if (cmd->rep_data.type != REP_ERROR) {
+    if (cmd->reply_type != REP_ERROR) {
         cmd_mark_done(cmd);
         return CORVUS_OK;
     }
@@ -160,7 +150,11 @@ int server_read_reply(struct connection *server, struct command *cmd)
     struct redirect_info info = {.type = CMD_ERR, .slot = -1};
     memset(info.addr, 0, sizeof(info.addr));
 
-    cmd_parse_redirect(cmd, &info);
+    if (cmd_parse_redirect(cmd, &info) == CORVUS_ERR) {
+        server_free_buf(cmd);
+        cmd_mark_fail(cmd);
+        return CORVUS_OK;
+    }
     switch (info.type) {
         case CMD_ERR_MOVED:
             if (server_redirect(cmd, &info) == CORVUS_ERR) return CORVUS_ERR;
@@ -189,7 +183,6 @@ int server_read(struct connection *server)
             case CORVUS_ASKING:
                 LOG(DEBUG, "recv asking");
                 server_free_buf(cmd);
-                redis_data_free(&cmd->rep_data);
                 cmd->asking = 0;
                 continue;
             case CORVUS_OK:

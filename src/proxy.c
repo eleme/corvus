@@ -8,29 +8,40 @@
 #include "client.h"
 #include "logging.h"
 
-void proxy_ready(struct connection *self, uint32_t mask)
+int proxy_accept(struct connection *proxy)
 {
     char ip[16];
-    int port;
+    int port, fd = socket_accept(proxy->fd, ip, sizeof(ip), &port);
+    if (fd == CORVUS_ERR || fd == CORVUS_AGAIN) {
+        return fd;
+    }
 
+    struct connection *client;
+    if ((client = client_create(proxy->ctx, fd)) == NULL) {
+        LOG(ERROR, "fail to create client");
+        return CORVUS_ERR;
+    }
+    if (conn_register(client) == CORVUS_ERR) {
+        LOG(ERROR, "fail to register client");
+        conn_free(client);
+        conn_recycle(proxy->ctx, client);
+        return CORVUS_ERR;
+    }
+    proxy->ctx->stats.connected_clients++;
+    return CORVUS_OK;
+}
+
+void proxy_ready(struct connection *self, uint32_t mask)
+{
     if (mask & E_READABLE) {
-        int fd = socket_accept(self->fd, ip, sizeof(ip), &port);
-        struct connection *client;
-        switch (fd) {
-            case CORVUS_ERR: break;
-            case CORVUS_AGAIN: break;
-            default:
-                if ((client = client_create(self->ctx, fd)) == NULL) {
-                    LOG(ERROR, "fail to create client");
-                    break;
-                }
-                if (conn_register(client) == CORVUS_ERR) {
-                    LOG(ERROR, "fail to register client");
-                    conn_free(client);
-                    conn_recycle(self->ctx, client);
-                }
-                self->ctx->stats.connected_clients++;
+        int status;
+        while (1) {
+            status = proxy_accept(self);
+            if (status == CORVUS_ERR) {
+                LOG(WARN, "proxy_accept error");
                 break;
+            }
+            if (status == CORVUS_AGAIN) break;
         }
         conn_register(self);
     }

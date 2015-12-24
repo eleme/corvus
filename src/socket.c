@@ -307,17 +307,14 @@ int socket_get_sockaddr(char *addr, int port, struct sockaddr_in *dest, int sock
     return CORVUS_OK;
 }
 
-void socket_get_addr(char *host, int host_len, int port, struct address *addr)
+void socket_address_init(struct address *addr, char *host, int len, int port)
 {
-    int max_len = sizeof(addr->host) / sizeof(char);
-
-    strncpy(addr->host, host, MIN(host_len, max_len));
-    if (host_len >= max_len) {
-        LOG(WARN, "hostname length exceed %d", max_len - 1);
-        addr->host[max_len - 1] = '\0';
-    } else {
-        addr->host[host_len] = '\0';
+    int size = MIN(HOST_NAME_MAX, len);
+    strncpy(addr->host, host, size);
+    if (size >= HOST_NAME_MAX) {
+        LOG(WARN, "hostname length exceed %d", HOST_NAME_MAX);
     }
+    addr->host[size] = '\0';
     addr->port = port;
 }
 
@@ -333,7 +330,7 @@ int socket_parse_addr(char *addr, struct address *address)
     if (*end != '\0' || end == colon + 1) return CORVUS_ERR;
     if (port > 0xFFFF) return CORVUS_ERR;
 
-    socket_get_addr(addr, colon - addr, port, address);
+    socket_address_init(address, addr, colon - addr, port);
     return port;
 }
 

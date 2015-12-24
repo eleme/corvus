@@ -4,12 +4,15 @@
 #include "socket.h"
 #include "parser.h"
 
+#ifndef IOV_MAX
+#define CORVUS_IOV_MAX 128
+#else
+#define CORVUS_IOV_MAX IOV_MAX
+#endif
+
 struct context;
 
 enum {
-    CMD_REQ,
-    CMD_REP,
-
     CMD_ERR,
     CMD_ERR_MOVED,
     CMD_ERR_ASK,
@@ -18,9 +21,9 @@ enum {
 STAILQ_HEAD(cmd_tqh, command);
 
 struct iov_data {
-    int cursor;
     struct iovec *data;
-    void *ptr;
+    char buf[32];
+    int cursor;
     int len;
     int max_size;
 };
@@ -47,15 +50,15 @@ struct command {
     int slot;
     int cmd_type;
     int request_type;
+    int reply_type;
+    int keys;
+    int integer_data; /* for integer response */
 
     int cmd_count;
     int cmd_fail;
     int cmd_done_count;
     struct cmd_tqh sub_cmds;
     struct command *parent;
-
-    struct redis_data req_data;
-    struct redis_data rep_data;
 
     struct iov_data iov;
 
@@ -85,7 +88,7 @@ int cmd_read_reply(struct command *cmd, struct connection *server);
 int cmd_read_request(struct command *cmd, int fd);
 void cmd_create_iovec(struct buf_ptr *start, struct buf_ptr *end, struct iov_data *iov);
 void cmd_make_iovec(struct command *cmd, struct iov_data *iov);
-void cmd_parse_redirect(struct command *cmd, struct redirect_info *info);
+int cmd_parse_redirect(struct command *cmd, struct redirect_info *info);
 void cmd_mark_done(struct command *cmd);
 void cmd_mark_fail(struct command *cmd);
 void cmd_stats(struct command *cmd);
