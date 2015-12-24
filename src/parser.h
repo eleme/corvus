@@ -7,7 +7,6 @@
 #include <stdio.h>
 
 struct mbuf;
-struct mhdr;
 
 enum {
     PARSE_BEGIN,
@@ -36,21 +35,33 @@ enum {
     REP_INTEGER,
     REP_SIMPLE_STRING,
     REP_ERROR,
+
+    MODE_REP,
+    MODE_REQ,
+};
+
+struct pos {
+    uint8_t *str;
+    uint32_t len;
 };
 
 struct pos_array {
+    struct pos *items;
     int str_len;
     int pos_len;
     int max_pos_size;
-    struct pos *items;
 };
 
 struct redis_data {
     int type;
-    long long integer;
-    struct pos_array pos;
-    size_t elements;
-    struct redis_data *element;
+    union {
+        struct pos_array pos;
+        long long integer;
+        struct {
+            struct redis_data *element;
+            size_t elements;
+        };
+    };
 };
 
 struct reader_task {
@@ -69,6 +80,7 @@ struct buf_ptr {
 
 struct reader {
     int type;
+    int redis_data_type;
     struct mbuf *buf;
 
     struct reader_task rstack[9];
@@ -83,27 +95,23 @@ struct reader {
     int integer_type;
     int sign;
     int simple_string_type;
+    long long integer;
 
     int ready;
+    int mode;
 
     struct buf_ptr start;
     struct buf_ptr end;
-};
-
-struct pos {
-    uint32_t len;
-    uint8_t *str;
 };
 
 void reader_init(struct reader *r);
 void reader_free(struct reader *r);
 void reader_feed(struct reader *r, struct mbuf *buf);
 int reader_ready(struct reader *r);
-int parse(struct reader *r);
+int parse(struct reader *r, int mode);
 struct pos *pos_get(struct pos_array *arr, int idx);
 size_t pos_str_len(struct pos *pos);
 int pos_to_str(struct pos_array *pos, char *str);
-int pos_array_compare(struct pos_array *arr, char *data, int len);
 void redis_data_free(struct redis_data *data);
 void redis_data_move(struct redis_data *lhs, struct redis_data *rhs);
 

@@ -5,6 +5,22 @@
 #include "mbuf.h"
 #include "logging.h"
 
+extern int process_type(struct reader *r);
+extern int process_array(struct reader *r);
+extern int process_string(struct reader *r);
+extern int stack_pop(struct reader *r);
+extern int stack_push(struct reader *r, int type);
+
+struct mbuf *get_buf(struct context *ctx, char *data)
+{
+    struct mbuf *buf = mbuf_get(ctx);
+    int len = strlen(data);
+
+    memcpy(buf->last, data, len);
+    buf->last += len;
+    return buf;
+}
+
 TEST(test_nested_array) {
     char data[] = "*3\r\n$3\r\nSET\r\n*1\r\n$5\r\nhello\r\n$3\r\n123\r\n";
     size_t len = strlen(data);
@@ -17,10 +33,7 @@ TEST(test_nested_array) {
     reader_init(&r);
     reader_feed(&r, buf);
 
-    if (parse(&r) == -1) {
-        printf("protocol error");
-        FAIL(NULL);
-    }
+    ASSERT(parse(&r, MODE_REQ) == 0);
 
     struct redis_data *d = &r.data;
     ASSERT(d != NULL);
@@ -70,10 +83,7 @@ TEST(test_partial_parse) {
     reader_init(&reader);
     reader_feed(&reader, buf);
 
-    if (parse(&reader) == -1) {
-        printf("Protocol Error");
-        FAIL(NULL);
-    }
+    ASSERT(parse(&reader, MODE_REQ) == 0);
 
     struct mbuf *buf2 = mbuf_get(ctx);
     LOG(DEBUG, "%d %d", size, len);
@@ -83,12 +93,9 @@ TEST(test_partial_parse) {
     buf2->last += 2;
 
     reader_feed(&reader, buf2);
-    if (parse(&reader) == -1) {
-        printf("Protocol Error");
-        FAIL(NULL);
-    }
-
+    ASSERT(parse(&reader, MODE_REQ) == 0);
     ASSERT(reader.ready);
+
     struct redis_data *d = &reader.data;
     ASSERT(d->elements == 3);
     ASSERT(d->element[0].pos.pos_len == 1);
@@ -98,7 +105,6 @@ TEST(test_partial_parse) {
     ASSERT(d->element[1].pos.items[0].len == 5);
     ASSERT(strncmp("hello", (const char *)d->element[1].pos.items[0].str, 5) == 0);
     ASSERT(d->element[2].pos.pos_len == 2);
-    LOG(DEBUG, "%d %d", d->element[2].pos.items[0].len, d->element[2].pos.items[1].len);
     ASSERT(d->element[2].pos.items[0].len == (uint32_t)size);
     ASSERT(strncmp(value, (const char *)d->element[2].pos.items[0].str, size) == 0);
     uint32_t remain = 16387 - size;
@@ -124,12 +130,12 @@ TEST(test_process_integer) {
     reader_init(&r);
     reader_feed(&r, &buf);
 
-    ASSERT(parse(&r) != -1);
+    ASSERT(parse(&r, MODE_REQ) != -1);
     ASSERT(r.ready == 1);
     ASSERT(r.data.type == REP_INTEGER);
     ASSERT(r.data.integer == 40235);
 
-    ASSERT(parse(&r) != -1);
+    ASSERT(parse(&r, MODE_REQ) != -1);
     ASSERT(r.data.integer == 231);
 
     redis_data_free(&r.data);
@@ -151,13 +157,13 @@ TEST(test_empty_array) {
     reader_init(&r);
     reader_feed(&r, &buf);
 
-    ASSERT(parse(&r) != -1);
+    ASSERT(parse(&r, MODE_REQ) != -1);
     ASSERT(r.ready == 1);
     ASSERT(r.data.type == REP_ARRAY);
     ASSERT(r.data.elements == 0);
     ASSERT(r.data.element == NULL);
 
-    ASSERT(parse(&r) != -1);
+    ASSERT(parse(&r, MODE_REQ) != -1);
 
     redis_data_free(&r.data);
     reader_free(&r);
@@ -181,7 +187,7 @@ TEST(test_parse_simple_string) {
     reader_init(&r);
     reader_feed(&r, &buf);
 
-    ASSERT(parse(&r) != -1);
+    ASSERT(parse(&r, MODE_REQ) != -1);
 
     struct mbuf buf2;
 
@@ -190,7 +196,7 @@ TEST(test_parse_simple_string) {
     buf2.end = buf2.last;
 
     reader_feed(&r, &buf2);
-    ASSERT(parse(&r) != -1);
+    ASSERT(parse(&r, MODE_REQ) != -1);
 
     reader_free(&r);
     PASS(NULL);
@@ -213,7 +219,7 @@ TEST(test_parse_error) {
     reader_init(&r);
     reader_feed(&r, &buf);
 
-    ASSERT(parse(&r) != -1);
+    ASSERT(parse(&r, MODE_REQ) != -1);
 
     struct mbuf buf2;
 
@@ -222,7 +228,7 @@ TEST(test_parse_error) {
     buf2.end = buf2.last;
 
     reader_feed(&r, &buf2);
-    ASSERT(parse(&r) != -1);
+    ASSERT(parse(&r, MODE_REQ) != -1);
 
     ASSERT(r.data.pos.str_len == 24);
     ASSERT(r.data.pos.pos_len == 2);
@@ -247,7 +253,7 @@ TEST(test_parse_null_string) {
     reader_init(&r);
     reader_feed(&r, &buf);
 
-    ASSERT(parse(&r) != -1);
+    ASSERT(parse(&r, MODE_REQ) != -1);
     reader_free(&r);
     PASS(NULL);
 }
@@ -265,7 +271,7 @@ TEST(test_parse_null_array) {
     reader_init(&r);
     reader_feed(&r, &buf);
 
-    ASSERT(parse(&r) != -1);
+    ASSERT(parse(&r, MODE_REQ) != -1);
 
     reader_free(&r);
     PASS(NULL);
@@ -284,7 +290,7 @@ TEST(test_parse_minus_integer) {
     reader_init(&r);
     reader_feed(&r, &buf);
 
-    ASSERT(parse(&r) != -1);
+    ASSERT(parse(&r, MODE_REQ) != -1);
 
     reader_free(&r);
     PASS(NULL);
@@ -303,24 +309,118 @@ TEST(test_wrong_integer) {
     reader_init(&r);
     reader_feed(&r, &buf);
 
-    ASSERT(parse(&r) == -1);
+    ASSERT(parse(&r, MODE_REQ) == -1);
 
     reader_free(&r);
     PASS(NULL);
 }
 
-TEST(test_pos_array_compare) {
-    struct pos p[2] = {
-        {.str = (uint8_t*)"hello", .len = 5},
-        {.str = (uint8_t*)"worldl", .len = 6}
-    };
-    struct pos_array arr = {
-        .str_len = 11,
-        .pos_len = 2,
-        .items = p
-    };
+TEST(test_array_pop) {
+    char data[] = "*2\r\n$3\r\nSET\r\n*1\r\n$5\r\nhello\r\n";
+    size_t len = strlen(data);
 
-    ASSERT(pos_array_compare(&arr, "helloworldl", 11) == 0);
+    struct mbuf *buf = mbuf_get(ctx);
+    memcpy(buf->last, data, len);
+    buf->last += len;
+
+    struct reader r;
+    reader_init(&r);
+    reader_feed(&r, buf);
+
+    ASSERT(parse(&r, MODE_REP) != -1);
+    ASSERT(reader_ready(&r));
+
+    mbuf_recycle(ctx, buf);
+    reader_free(&r);
+    PASS(NULL);
+}
+
+TEST(test_process_array) {
+    struct reader reader;
+    reader_init(&reader);
+
+    struct mbuf *buf = get_buf(ctx, "*2334\r\n");
+    reader_feed(&reader, buf);
+
+    ASSERT(process_type(&reader) == 0);
+    reader.mode = MODE_REP;
+    ASSERT(process_array(&reader) == 0);
+    ASSERT(buf->pos == buf->last);
+    ASSERT(reader.array_size == 2334);
+    ASSERT(reader.type == PARSE_TYPE);
+    ASSERT(reader.sidx == 1);
+
+    struct reader_task *task = &reader.rstack[reader.sidx];
+    ASSERT(task->elements == 2334);
+    ASSERT(task->data.elements == 2334);
+    ASSERT(task->data.element == NULL);
+
+    mbuf_recycle(ctx, buf);
+    reader_free(&reader);
+    PASS(NULL);
+}
+
+TEST(test_process_string) {
+    struct reader reader;
+    reader_init(&reader);
+
+    struct mbuf *buf = get_buf(ctx, "$6\r\nparser\r\n");
+    reader_feed(&reader, buf);
+
+    ASSERT(process_type(&reader) == 0);
+    reader.mode = MODE_REP;
+    ASSERT(process_string(&reader) == 0);
+    ASSERT(buf->pos + 1 == buf->last);
+    ASSERT(buf->pos[0] == '\n');
+    ASSERT(reader.string_size == 0);
+    ASSERT(reader.type == PARSE_END);
+    ASSERT(reader.sidx == 0);
+
+    struct reader_task *task = &reader.rstack[reader.sidx];
+    ASSERT(task->cur_data == NULL);
+
+    mbuf_recycle(ctx, buf);
+    reader_free(&reader);
+    PASS(NULL);
+}
+
+TEST(test_stack_pop) {
+    struct reader r;
+    reader_init(&r);
+
+    struct redis_data data[4];
+
+    r.rstack[0].data.integer = 90;
+
+    stack_pop(&r);
+    ASSERT(r.data.integer == 90);
+    ASSERT(r.sidx == 0);
+
+    stack_push(&r, REP_ARRAY);
+    ASSERT(r.sidx == 1);
+    r.rstack[1].elements = 2;
+    r.rstack[1].data.element = data;
+
+    r.rstack[1].data.element[r.rstack[1].idx++].integer = 12345;
+    r.rstack[1].elements--;
+
+    stack_push(&r, REP_ARRAY);
+    ASSERT(r.sidx == 2);
+    r.rstack[2].elements = 1;
+    r.rstack[2].data.element = data + 2;
+
+    stack_push(&r, REP_ARRAY);
+    ASSERT(r.sidx == 3);
+    r.rstack[3].elements = 1;
+    r.rstack[3].data.element = data + 3;
+
+    r.rstack[3].data.element[r.rstack[3].idx++].integer = 345;
+    r.rstack[3].elements--;
+
+    stack_pop(&r);
+    ASSERT(r.sidx == 0);
+    ASSERT(r.data.element[0].integer == 12345);
+    ASSERT(r.data.element[1].element[0].element[0].integer == 345);
     PASS(NULL);
 }
 
@@ -334,6 +434,9 @@ TEST_CASE(test_parser) {
     RUN_TEST(test_parse_null_string);
     RUN_TEST(test_parse_null_array);
     RUN_TEST(test_parse_minus_integer);
-    RUN_TEST(test_pos_array_compare);
     RUN_TEST(test_wrong_integer);
+    RUN_TEST(test_array_pop);
+    RUN_TEST(test_process_array);
+    RUN_TEST(test_process_string);
+    RUN_TEST(test_stack_pop);
 }

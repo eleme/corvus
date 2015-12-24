@@ -26,7 +26,7 @@ int socket_connect(int fd, char *addr, int port);
 int socket_read(int fd, struct mbuf *buf);
 int socket_write(int fd, struct iovec *iov, int invcnt);
 int socket_get_sockaddr(char *addr, int port, struct sockaddr_in *dest, int socktype);
-void socket_get_addr(char *host, int host_len, int port, struct address *addr);
+void socket_address_init(struct address *addr, char *host, int len, int port);
 int socket_set_nonblocking(int fd);
 int socket_set_tcpnodelay(int fd);
 int socket_set_timeout(int fd, int timeout);

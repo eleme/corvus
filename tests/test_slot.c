@@ -15,9 +15,11 @@ TEST(test_slot_get1) {
         {.len = 6, .str = (uint8_t*)"h}ello"}
     };
     struct pos_array arr = {.str_len = 12, .items = p, .pos_len = 2};
+
     uint16_t slot = slot_get(&arr);
 
     ASSERT(slot == 11694);
+    /* original pos should not be changed */
     ASSERT(strncmp((char*)p[0].str, "world{", 6) == 0);
     ASSERT(strncmp((char*)p[1].str, "h}ello", 6) == 0);
     ASSERT(p[0].len == 6);
@@ -43,7 +45,19 @@ TEST(test_slot_get2) {
     PASS(NULL);
 }
 
+TEST(test_slot_get3) {
+    struct pos p[] = {
+        {.len = 12, .str = (uint8_t*)"hello{}world"},
+    };
+    struct pos_array arr = {.str_len = 12, .items = p, .pos_len = 1};
+    uint16_t slot = slot_get(&arr);
+    ASSERT(slot == 7485);
+
+    PASS(NULL);
+}
+
 TEST_CASE(test_slot) {
     RUN_TEST(test_slot_get1);
     RUN_TEST(test_slot_get2);
+    RUN_TEST(test_slot_get3);
 }

@@ -38,7 +38,7 @@ before_script:
 script:
   - make clean || true
   - make test
-  - valgrind --leak-check=full ./tests/corvus_test --silent
+  - valgrind --error-exitcode=1 --leak-check=full ./tests/corvus_test --silent
 
   - sudo py.test -v tests/test_corvus.py
 

@@ -2,7 +2,7 @@ NAME=corvus
 CC=gcc
 PROFILE?=
 OPTIMIZATION?=-O2
-CFLAGS=-std=c99 -pedantic -Wall $(OPTIMIZATION) $(PROFILE) -g -ggdb -D_GNU_SOURCE
+CFLAGS=-std=c99 -Wall $(OPTIMIZATION) $(PROFILE) -g -ggdb -D_GNU_SOURCE
 LDFLAGS=-pthread -rdynamic $(PROFILE)
 
 BIN:=$(NAME)

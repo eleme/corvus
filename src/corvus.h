@@ -24,9 +24,6 @@
 #define THREAD_STACK_SIZE (1024*1024*4)
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
 
-#define ARRAY_CHUNK_SIZE 1024
-#define RECYCLE_SIZE 64
-
 enum thread_role {
     THREAD_UNKNOWN,
     THREAD_MAIN_WORKER,
