@@ -34,6 +34,12 @@ void server_free_buf(struct command *cmd)
     memset(&cmd->rep_buf, 0, sizeof(cmd->rep_buf));
 }
 
+void server_iov_free(struct iov_data *iov)
+{
+    iov->cursor = 0;
+    iov->len = 0;
+}
+
 void server_make_iov(struct connection *server)
 {
     struct command *cmd;
@@ -66,7 +72,7 @@ int server_write(struct connection *server)
         server_make_iov(server);
     }
     if (server->iov.len <= 0) {
-        cmd_iov_free(&server->iov);
+        server_iov_free(&server->iov);
         return CORVUS_OK;
     }
 
@@ -78,7 +84,7 @@ int server_write(struct connection *server)
     server->send_bytes += status;
 
     if (server->iov.cursor >= server->iov.len) {
-        cmd_iov_free(&server->iov);
+        server_iov_free(&server->iov);
     } else if (conn_register(server) == CORVUS_ERR) {
         LOG(ERROR, "fail to reregister server %d", server->fd);
         return CORVUS_ERR;
