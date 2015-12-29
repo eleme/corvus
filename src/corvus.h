@@ -24,7 +24,7 @@
 #define THREAD_STACK_SIZE (1024*1024*4)
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
 
-#define NAME_LEN 127
+#define CLUSTER_NAME_SIZE 127
 
 enum thread_role {
     THREAD_UNKNOWN,
@@ -78,7 +78,7 @@ struct context {
 };
 
 struct {
-    char cluster_name[NAME_LEN + 1];
+    char cluster[CLUSTER_NAME_SIZE + 1];
     uint16_t bind;
     struct node_conf node;
     int thread;

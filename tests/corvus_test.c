@@ -16,7 +16,8 @@ static void usage(const char *name)
 static int setup_cli(int argc, const char *argv[])
 {
     int i = 0;
-    manager.test_func_filter[0] = manager.case_filter[0] = 0;
+    memset(manager.test_func_filter, 0, sizeof(manager.test_func_filter));
+    memset(manager.case_filter, 0, sizeof(manager.case_filter));
     manager.silent = 0;
 
     for (i = 1; i < argc; i++) {

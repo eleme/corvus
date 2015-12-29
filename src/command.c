@@ -269,7 +269,7 @@ static int cmd_get_type(struct command *cmd, struct pos_array *pos)
 static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *latency)
 {
     return snprintf(dest, n,
-            "cluster_name:%s\r\n"
+            "cluster:%s\r\n"
             "version:%s\r\n"
             "pid:%d\r\n"
             "threads:%d\r\n"
@@ -289,7 +289,7 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             "in_use_conns:%lld\r\n"
             "free_conns:%lld\r\n"
             "remotes:%s\r\n",
-            config.cluster_name, VERSION, stats->pid, stats->threads,
+            config.cluster, VERSION, stats->pid, stats->threads,
             stats->used_cpu_sys, stats->used_cpu_user,
             stats->basic.connected_clients,
             stats->basic.completed_commands,

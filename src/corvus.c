@@ -21,7 +21,9 @@ static struct context *contexts;
 
 static void config_init()
 {
-    strncpy(config.cluster_name, "default", 7);
+    memset(config.cluster, 0, CLUSTER_NAME_SIZE + 1);
+    strncpy(config.cluster, "default", CLUSTER_NAME_SIZE);
+
     config.bind = 12345;
     memset(&config.node, 0, sizeof(struct node_conf));
     config.thread = 4;
@@ -36,8 +38,9 @@ static void config_init()
 static int config_add(char *name, char *value)
 {
     char *end;
-    if (strcmp(name, "cluster_name") == 0) {
-        if (strlen(value) != 0) strncpy(config.cluster_name, value, NAME_LEN);
+    if (strcmp(name, "cluster") == 0) {
+        if (strlen(value) <= 0) return 0;
+        strncpy(config.cluster, value, CLUSTER_NAME_SIZE);
     } else if (strcmp(name, "bind") == 0) {
         config.bind = strtoul(value, &end, 0);
         if (config.bind > 0xFFFF) return -1;
