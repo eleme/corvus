@@ -16,17 +16,18 @@ static void usage(const char *name)
 static int setup_cli(int argc, const char *argv[])
 {
     int i = 0;
-    manager.test_func_filter[0] = manager.case_filter[0] = 0;
+    memset(manager.test_func_filter, 0, sizeof(manager.test_func_filter));
+    memset(manager.case_filter, 0, sizeof(manager.case_filter));
     manager.silent = 0;
 
     for (i = 1; i < argc; i++) {
         if (0 == strcmp("-t", argv[i])) {
             if (argc <= i + 1) return -1;
-            strcpy(manager.test_func_filter, argv[i + 1]);
+            strncpy(manager.test_func_filter, argv[i + 1], 1023);
             i++;
         } else if (0 == strcmp("-s", argv[i])) {
             if (argc <= i + 1) return -1;
-            strcpy(manager.case_filter, argv[i + 1]);
+            strncpy(manager.case_filter, argv[i + 1], 1023);
             i++;
         } else if (0 == strcmp("-h", argv[i])) {
             return -1;

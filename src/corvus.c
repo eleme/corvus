@@ -17,21 +17,13 @@
 #include "stats.h"
 #include "dict.h"
 
-static struct {
-    uint16_t bind;
-    struct node_conf node;
-    int thread;
-    int loglevel;
-    int syslog;
-    char statsd_addr[DSN_MAX];
-    int metric_interval;
-    int stats;
-} config;
-
 static struct context *contexts;
 
 static void config_init()
 {
+    memset(config.cluster, 0, CLUSTER_NAME_SIZE + 1);
+    strncpy(config.cluster, "default", CLUSTER_NAME_SIZE);
+
     config.bind = 12345;
     memset(&config.node, 0, sizeof(struct node_conf));
     config.thread = 4;
@@ -46,7 +38,10 @@ static void config_init()
 static int config_add(char *name, char *value)
 {
     char *end;
-    if (strcmp(name, "bind") == 0) {
+    if (strcmp(name, "cluster") == 0) {
+        if (strlen(value) <= 0) return 0;
+        strncpy(config.cluster, value, CLUSTER_NAME_SIZE);
+    } else if (strcmp(name, "bind") == 0) {
         config.bind = strtoul(value, &end, 0);
         if (config.bind > 0xFFFF) return -1;
     } else if (strcmp(name, "syslog") == 0) {
@@ -55,7 +50,7 @@ static int config_add(char *name, char *value)
         config.thread = strtoul(value, &end, 0);
         if (config.thread <= 0) config.thread = 4;
     } else if (strcmp(name, "statsd") == 0) {
-        strcpy(config.statsd_addr, value);
+        strncpy(config.statsd_addr, value, DSN_MAX);
     } else if (strcmp(name, "metric_interval") == 0) {
         config.metric_interval = strtoul(value, &end, 0);
         if (config.metric_interval <= 0) config.metric_interval = 10;
@@ -239,16 +234,6 @@ double get_time()
     ms = tv.tv_sec * 1000;
     ms += tv.tv_usec / 1000.0;
     return ms;
-}
-
-int get_thread_num()
-{
-    return config.thread;
-}
-
-int get_bind()
-{
-    return config.bind;
 }
 
 struct context *get_contexts()
