@@ -24,6 +24,8 @@
 #define THREAD_STACK_SIZE (1024*1024*4)
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
 
+#define NAME_LEN 127
+
 enum thread_role {
     THREAD_UNKNOWN,
     THREAD_MAIN_WORKER,
@@ -75,9 +77,19 @@ struct context {
     double last_command_latency;
 };
 
+struct {
+    char cluster_name[NAME_LEN + 1];
+    uint16_t bind;
+    struct node_conf node;
+    int thread;
+    int loglevel;
+    int syslog;
+    char statsd_addr[DSN_MAX + 1];
+    int metric_interval;
+    int stats;
+} config;
+
 double get_time();
-int get_thread_num();
 struct context *get_contexts();
-int get_bind();
 
 #endif /* end of include guard: __CORVUS_H */
