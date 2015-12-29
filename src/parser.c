@@ -171,7 +171,7 @@ int process_array(struct reader *r)
 
                 if (task->data.elements > 0) {
                     if (r->mode == MODE_REQ) {
-                        for (size = 1; size * ARRAY_BASE_SIZE  < task->data.elements - 1; size *= 2);
+                        for (size = 1; size * ARRAY_BASE_SIZE  < task->data.elements; size *= 2);
                         task->data.element = calloc(size * ARRAY_BASE_SIZE, sizeof(struct redis_data));
                     } else {
                         task->data.element = NULL;
@@ -427,7 +427,10 @@ int parse(struct reader *r, int mode)
 void pos_array_free(struct pos_array *arr)
 {
     if (arr == NULL) return;
-    if (arr->items != NULL) free(arr->items);
+    if (arr->items != NULL) {
+        free(arr->items);
+        arr->items = NULL;
+    }
     memset(arr, 0, sizeof(struct pos_array));
 }
 
