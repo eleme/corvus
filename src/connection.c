@@ -1,6 +1,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "corvus.h"
 #include "socket.h"
 #include "command.h"
@@ -23,12 +24,16 @@ do {                                      \
     }                                     \
 } while (0)
 
-static int verify_server(struct connection *server, struct address *addr)
+#define TAILQ_RESET(var, field)           \
+do {                                      \
+    (var)->field.tqe_next = NULL;         \
+    (var)->field.tqe_prev = NULL;         \
+} while (0)
+
+static int verify_server(struct connection *server)
 {
     if (server->status != DISCONNECTED) return 0;
-
     if (server->fd != -1) close(server->fd);
-    memcpy(&server->addr, addr, sizeof(struct address));
 
     server->fd = conn_create_fd();
     if (server->fd == -1) {
@@ -63,7 +68,7 @@ static struct connection *conn_create_server(struct context *ctx, struct address
 
     strncpy(server->dsn, key, DSN_MAX);
     dict_set(&ctx->server_table, server->dsn, (void*)server);
-    STAILQ_INSERT_TAIL(&ctx->servers, server, next);
+    TAILQ_INSERT_TAIL(&ctx->servers, server, next);
     return server;
 }
 
@@ -71,6 +76,7 @@ void conn_init(struct connection *conn, struct context *ctx)
 {
     conn->ctx = ctx;
     conn->fd = -1;
+    conn->last_active = -1;
     conn->status = DISCONNECTED;
     conn->ready = NULL;
     conn->registered = 0;
@@ -82,6 +88,8 @@ void conn_init(struct connection *conn, struct context *ctx)
     STAILQ_INIT(&conn->waiting_queue);
     STAILQ_INIT(&conn->data);
 
+    TAILQ_RESET(conn, next);
+
     memset(&conn->iov, 0, sizeof(conn->iov));
     memset(&conn->dsn, 0, sizeof(conn->dsn));
 }
@@ -89,12 +97,10 @@ void conn_init(struct connection *conn, struct context *ctx)
 struct connection *conn_create(struct context *ctx)
 {
     struct connection *conn;
-    if (!STAILQ_EMPTY(&ctx->free_connq)) {
+    if ((conn = TAILQ_FIRST(&ctx->conns)) != NULL && conn->fd == -1) {
         LOG(DEBUG, "connection get cache");
-        conn = STAILQ_FIRST(&ctx->free_connq);
-        STAILQ_REMOVE_HEAD(&ctx->free_connq, next);
+        TAILQ_REMOVE(&ctx->conns, conn, next);
         ctx->nfree_connq--;
-        STAILQ_NEXT(conn, next) = NULL;
     } else {
         conn = malloc(sizeof(struct connection));
     }
@@ -149,8 +155,11 @@ void conn_recycle(struct context *ctx, struct connection *conn)
     }
 
     ctx->stats.conns--;
-    STAILQ_NEXT(conn, next) = NULL;
-    STAILQ_INSERT_HEAD(&ctx->free_connq, conn, next);
+    if (conn->next.tqe_next != NULL || conn->next.tqe_prev != NULL) {
+        TAILQ_REMOVE(&ctx->conns, conn, next);
+        TAILQ_RESET(conn, next);
+    }
+    TAILQ_INSERT_HEAD(&ctx->conns, conn, next);
     ctx->nfree_connq++;
 }
 
@@ -177,7 +186,7 @@ struct connection *conn_get_server_from_pool(struct context *ctx, struct address
     socket_get_key(addr, key);
     server = dict_get(&ctx->server_table, key);
     if (server != NULL) {
-        if (verify_server(server, addr) == -1) return NULL;
+        if (verify_server(server) == -1) return NULL;
         return server;
     }
 
@@ -238,11 +247,11 @@ int conn_register(struct connection *conn)
     struct context *ctx = conn->ctx;
     switch (conn->registered) {
         case 1:
-            status = event_reregister(ctx->loop, conn, E_WRITABLE | E_READABLE);
+            status = event_reregister(&ctx->loop, conn, E_WRITABLE | E_READABLE);
             if (status == -1) return CORVUS_ERR;
             break;
         case 0:
-            status = event_register(ctx->loop, conn);
+            status = event_register(&ctx->loop, conn);
             if (status == -1) return CORVUS_ERR;
             break;
     }

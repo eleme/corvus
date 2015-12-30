@@ -16,7 +16,7 @@ enum {
 };
 
 struct connection {
-    STAILQ_ENTRY(connection) next;
+    TAILQ_ENTRY(connection) next;
     struct context *ctx;
     int fd;
 
@@ -36,11 +36,12 @@ struct connection {
     long long recv_bytes;
     long long completed_commands;
 
+    int64_t last_active;
     int status;
     void (*ready)(struct connection *self, uint32_t mask);
 };
 
-STAILQ_HEAD(conn_tqh, connection);
+TAILQ_HEAD(conn_tqh, connection);
 
 void conn_init(struct connection *conn, struct context *ctx);
 struct connection *conn_create(struct context *ctx);

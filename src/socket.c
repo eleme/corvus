@@ -115,11 +115,11 @@ int socket_set_nonblocking(int fd)
 {
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags == -1) {
-        LOG(ERROR, "fcntl: %s", strerror(errno));
+        LOG(WARN, "fcntl: %s", strerror(errno));
         return -1;
     }
     if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
-        LOG(ERROR, "fail to set nonblock for fd %d: %s", fd, strerror(errno));
+        LOG(WARN, "fail to set nonblock for fd %d: %s", fd, strerror(errno));
         return -1;
     }
     return 0;
@@ -129,7 +129,7 @@ int socket_set_tcpnodelay(int fd)
 {
     int optval = 1;
     if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(int)) == -1) {
-        LOG(ERROR, "setsockopt TCP_NODELAY: %s", strerror(errno));
+        LOG(WARN, "setsockopt TCP_NODELAY: %s", strerror(errno));
         return -1;
     }
     return 0;

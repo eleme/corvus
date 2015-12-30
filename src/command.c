@@ -170,14 +170,19 @@ struct cmd_item {
     int type;
 };
 
+const char *rep_err = "-ERR Proxy error\r\n";
+const char *rep_parse_err = "-ERR Proxy fail to parse command\r\n";
+const char *rep_forward_err = "-ERR Proxy fail to forward command\r\n";
+const char *rep_redirect_err = "-ERR Proxy redirecting error\r\n";
+const char *rep_addr_err = "-ERR Proxy fail to parse server address\r\n";
+const char *rep_server_err = "-ERR Proxy fail to get server\r\n";
+const char *rep_timeout_err = "-ERR Proxy timed out\r\n";
 
-static const char *rep_err = "-ERR server error\r\n";
 static const char *rep_get = "*2\r\n$3\r\nGET\r\n";
 static const char *rep_set = "*3\r\n$3\r\nSET\r\n";
 static const char *rep_del = "*2\r\n$3\r\nDEL\r\n";
 static const char *rep_exists = "*2\r\n$6\r\nEXISTS\r\n";
 static const char *rep_ok = "+OK\r\n";
-static const char *rep_zero = ":0\r\n";
 static const char *rep_ping = "+PONG\r\n";
 
 static struct cmd_item cmds[] = {CMD_DO(CMD_BUILD_MAP)};
@@ -216,6 +221,7 @@ static void cmd_init(struct context *ctx, struct command *cmd)
     cmd->slot = -1;
     cmd->cmd_type = -1;
     cmd->request_type = -1;
+    cmd->fail_reason = (char*)rep_err;
 
     STAILQ_INIT(&cmd->sub_cmds);
 }
@@ -377,10 +383,11 @@ int cmd_forward_basic(struct command *cmd)
     if (server == NULL) return CORVUS_ERR;
     cmd->server = server;
 
+    server->last_active = time(NULL);
     STAILQ_INSERT_TAIL(&server->ready_queue, cmd, ready_next);
     if (conn_register(server) == -1) {
         LOG(ERROR, "fail to register server %d", server->fd);
-        server_eof(server);
+        server_eof(server, rep_err);
     } else {
         LOG(DEBUG, "register server event");
     }
@@ -415,12 +422,12 @@ int cmd_forward_multikey(struct command *cmd, struct redis_data *data,
         cmd_add_fragment(ncmd, &key->pos);
 
         if (cmd_apply_range(ncmd, MODE_REQ) == CORVUS_ERR) {
-            cmd_mark_fail(ncmd);
+            cmd_mark_fail(ncmd, rep_parse_err);
             continue;
         }
 
         if (cmd_forward_basic(ncmd) == CORVUS_ERR) {
-            cmd_mark_fail(ncmd);
+            cmd_mark_fail(ncmd, rep_forward_err);
         }
     }
 
@@ -457,13 +464,12 @@ int cmd_forward_mset(struct command *cmd, struct redis_data *data)
         cmd_add_fragment(ncmd, &value->pos);
 
         if (cmd_apply_range(ncmd, MODE_REQ) == CORVUS_ERR) {
-            cmd_mark_fail(ncmd);
+            cmd_mark_fail(ncmd, rep_parse_err);
             continue;
         }
 
         if (cmd_forward_basic(ncmd) == CORVUS_ERR) {
-            LOG(DEBUG, "mark fail");
-            cmd_mark_fail(ncmd);
+            cmd_mark_fail(ncmd, rep_forward_err);
         }
     }
 
@@ -509,7 +515,7 @@ void cmd_proxy_ping(struct command *cmd)
 {
     mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t *)rep_ping, 7);
     if (cmd_apply_range(cmd, MODE_REP) == CORVUS_ERR) {
-        cmd_mark_fail(cmd);
+        cmd_mark_fail(cmd, rep_parse_err);
     } else {
         cmd_mark_done(cmd);
     }
@@ -546,7 +552,7 @@ void cmd_proxy_info(struct command *cmd)
     mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t*)info, n);
     mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t*)"\r\n", 2);
     if (cmd_apply_range(cmd, MODE_REP) == CORVUS_ERR) {
-        cmd_mark_fail(cmd);
+        cmd_mark_fail(cmd, rep_parse_err);
     } else {
         cmd_mark_done(cmd);
     }
@@ -614,10 +620,8 @@ void cmd_gen_mget_iovec(struct command *cmd, struct iov_data *iov)
 
     struct command *c;
     STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
-        if (c->cmd_fail || (c->server != NULL
-                    && STAILQ_EMPTY(&c->server->data)))
-        {
-            cmd_iov_add(iov, (void*)rep_err, strlen(rep_err));
+        if (c->cmd_fail) {
+            cmd_iov_add(iov, c->fail_reason, strlen(c->fail_reason));
             continue;
         }
         cmd_create_iovec(&c->rep_buf[0], &c->rep_buf[1], iov);
@@ -627,16 +631,15 @@ void cmd_gen_mget_iovec(struct command *cmd, struct iov_data *iov)
 void cmd_gen_mset_iovec(struct command *cmd, struct iov_data *iov)
 {
     struct command *c;
-    int fail = 0;
     STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
-        if (c->cmd_fail || c->reply_type == REP_ERROR) {
-            fail = 1;
-            break;
+        if (c->cmd_fail) {
+            cmd_iov_add(iov, c->fail_reason, strlen(c->fail_reason));
+            return;
         }
-    }
-    if (fail) {
-        cmd_iov_add(iov, (void*)rep_err, strlen(rep_err));
-        return;
+        if (c->reply_type == REP_ERROR) {
+            cmd_create_iovec(&c->rep_buf[0], &c->rep_buf[1], iov);
+            return;
+        }
     }
     cmd_iov_add(iov, (void*)rep_ok, strlen(rep_ok));
 }
@@ -646,27 +649,22 @@ void cmd_gen_multikey_iovec(struct command *cmd, struct iov_data *iov)
     struct command *c;
     const char *fmt = ":%ld\r\n";
     int n = 0;
-    int count = 0, fail = 0;
+    int count = 0;
     STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
-        if (c->cmd_fail || c->reply_type == REP_ERROR) {
-            fail = 1;
-            break;
+        if (c->cmd_fail) {
+            cmd_iov_add(iov, c->fail_reason, strlen(c->fail_reason));
+            return;
+        }
+        if (c->reply_type == REP_ERROR) {
+            cmd_create_iovec(&c->rep_buf[0], &c->rep_buf[1], iov);
+            return;
         }
         if (c->integer_data == 1) {
             count++;
         }
     }
-
-    if (fail) {
-        cmd_iov_add(iov, (void*)rep_err, strlen(rep_err));
-        return;
-    }
-    if (count) {
-        n = snprintf(iov->buf, sizeof(iov->buf) - 1, fmt, count);
-        cmd_iov_add(iov, iov->buf, n);
-        return;
-    }
-    cmd_iov_add(iov, (void*)rep_zero, 4);
+    n = snprintf(iov->buf, sizeof(iov->buf) - 1, fmt, count);
+    cmd_iov_add(iov, iov->buf, n);
 }
 
 int cmd_parse_req(struct command *cmd, struct mbuf *buf)
@@ -696,12 +694,12 @@ int cmd_parse_req(struct command *cmd, struct mbuf *buf)
 
             if (cmd_parse_token(ncmd, &r->data) == -1) {
                 redis_data_free(&r->data);
-                cmd_mark_fail(ncmd);
+                cmd_mark_fail(ncmd, rep_parse_err);
                 continue;
             }
             if (cmd_forward(ncmd, &r->data) == -1) {
                 redis_data_free(&r->data);
-                cmd_mark_fail(ncmd);
+                cmd_mark_fail(ncmd, rep_forward_err);
                 continue;
             }
             redis_data_free(&r->data);
@@ -896,7 +894,7 @@ void cmd_make_iovec(struct command *cmd, struct iov_data *iov)
         if (c->cmd_fail || (c->server != NULL
                     && STAILQ_EMPTY(&c->server->data)))
         {
-            cmd_iov_add(iov, (void*)rep_err, strlen(rep_err));
+            cmd_iov_add(iov, c->fail_reason, strlen(c->fail_reason));
             continue;
         }
         switch (c->cmd_type) {
@@ -970,31 +968,36 @@ void cmd_mark_done(struct command *cmd)
 }
 
 /* rep data referenced in server should be freed before mark fail */
-void cmd_mark_fail(struct command *cmd)
+void cmd_mark_fail(struct command *cmd, const char *reason)
 {
     memset(cmd->rep_buf, 0, sizeof(cmd->rep_buf));
+    cmd->fail_reason = (char*)reason;
     cmd_mark(cmd, 1);
 }
 
 void cmd_stats(struct command *cmd)
 {
     struct context *ctx = cmd->ctx;
-    struct command *c, *sub_cmd;
+    struct command *c, *last, *first;
+    double latency;
 
     STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
         ctx->stats.completed_commands++;
-        ctx->stats.total_latency += cmd->req_time[1] - c->req_time[0];
+
+        latency = (cmd->req_time[1] - c->req_time[0]) / 1000000.0;
+        ctx->stats.total_latency += latency;
         if (STAILQ_NEXT(c, sub_cmd_next) == NULL) {
-            ctx->last_command_latency = cmd->req_time[1] - c->req_time[0];
+            ctx->last_command_latency = latency;
         }
 
         if (!STAILQ_EMPTY(&c->sub_cmds)) {
-            STAILQ_FOREACH(sub_cmd, &c->sub_cmds, sub_cmd_next) {
-                ctx->stats.remote_latency += sub_cmd->rep_time[1] - sub_cmd->rep_time[0];
-            }
+            first = STAILQ_FIRST(&c->sub_cmds);
+            last = STAILQ_LAST(&c->sub_cmds, command, sub_cmd_next);
+            latency = (last->rep_time[1] - first->rep_time[0]) / 1000000.0;
         } else {
-            ctx->stats.remote_latency += c->rep_time[1] - c->rep_time[0];
+            latency = (c->rep_time[1] - c->rep_time[0]) / 1000000.0;
         }
+        ctx->stats.remote_latency += latency;
     }
 }
 

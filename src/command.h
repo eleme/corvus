@@ -65,13 +65,15 @@ struct command {
     struct buf_ptr req_buf[2];
     struct buf_ptr rep_buf[2];
 
+    char *fail_reason;
+
     struct connection *client;
     struct connection *server;
 
     /* before read, after write*/
-    double req_time[2];
+    int64_t req_time[2];
     /* before write, after read */
-    double rep_time[2];
+    int64_t rep_time[2];
 };
 
 struct redirect_info {
@@ -79,6 +81,15 @@ struct redirect_info {
     char addr[DSN_MAX];
     int type;
 };
+
+/* error responses */
+const char *rep_err,
+      *rep_parse_err,
+      *rep_forward_err,
+      *rep_redirect_err,
+      *rep_addr_err,
+      *rep_server_err,
+      *rep_timeout_err;
 
 void cmd_map_init();
 void cmd_map_destroy();
@@ -90,7 +101,7 @@ void cmd_create_iovec(struct buf_ptr *start, struct buf_ptr *end, struct iov_dat
 void cmd_make_iovec(struct command *cmd, struct iov_data *iov);
 int cmd_parse_redirect(struct command *cmd, struct redirect_info *info);
 void cmd_mark_done(struct command *cmd);
-void cmd_mark_fail(struct command *cmd);
+void cmd_mark_fail(struct command *cmd, const char *reason);
 void cmd_stats(struct command *cmd);
 void cmd_set_stale(struct command *cmd);
 void cmd_iov_add(struct iov_data *iov, void *buf, size_t len);

@@ -11,6 +11,7 @@
 #include "connection.h"
 #include "stats.h"
 #include "dict.h"
+#include "event.h"
 
 #define VERSION "0.0.1"
 
@@ -47,10 +48,9 @@ struct context {
     uint32_t nfree_cmdq;
     struct cmd_tqh free_cmdq;
 
-    uint32_t nfree_connq;
-    struct conn_tqh free_connq;
-
-    struct connection *proxy;
+    struct connection proxy;
+    struct connection timer;
+    struct connection notifier;
 
     /* logging */
     bool syslog;
@@ -58,19 +58,20 @@ struct context {
 
     /* connection pool */
     struct dict server_table;
+    struct conn_tqh conns;
+    uint32_t nfree_connq;
 
     struct conn_tqh servers;
     struct node_conf *node_conf;
 
     /* event */
-    struct event_loop *loop;
+    struct event_loop loop;
 
     /* thread control */
     int quit;
     pthread_t thread;
     bool started;
     enum thread_role role;
-    struct connection *notifier;
 
     /* stats */
     struct basic_stats stats;
@@ -87,9 +88,11 @@ struct {
     char statsd_addr[DSN_MAX + 1];
     int metric_interval;
     int stats;
+    int64_t client_timeout;
+    int64_t server_timeout;
 } config;
 
-double get_time();
+int64_t get_time();
 struct context *get_contexts();
 
 #endif /* end of include guard: __CORVUS_H */

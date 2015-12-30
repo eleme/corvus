@@ -12,22 +12,25 @@ int proxy_accept(struct connection *proxy)
 {
     char ip[16];
     int port, fd = socket_accept(proxy->fd, ip, sizeof(ip), &port);
+    struct context *ctx = proxy->ctx;
     if (fd == CORVUS_ERR || fd == CORVUS_AGAIN) {
         return fd;
     }
 
     struct connection *client;
-    if ((client = client_create(proxy->ctx, fd)) == NULL) {
+    if ((client = client_create(ctx, fd)) == NULL) {
         LOG(ERROR, "fail to create client");
         return CORVUS_ERR;
     }
     if (conn_register(client) == CORVUS_ERR) {
         LOG(ERROR, "fail to register client");
         conn_free(client);
-        conn_recycle(proxy->ctx, client);
+        conn_recycle(ctx, client);
         return CORVUS_ERR;
     }
-    proxy->ctx->stats.connected_clients++;
+    TAILQ_INSERT_TAIL(&ctx->conns, client, next);
+
+    ctx->stats.connected_clients++;
     return CORVUS_OK;
 }
 
@@ -47,15 +50,13 @@ void proxy_ready(struct connection *self, uint32_t mask)
     }
 }
 
-struct connection *proxy_create(struct context *ctx, char *host, int port)
+int proxy_init(struct connection *proxy, struct context *ctx, char *host, int port)
 {
-    struct connection *proxy;
     int fd = socket_create_server(host, port);
-    if (fd == -1) return NULL;
+    if (fd == -1) return -1;
 
-    proxy = conn_create(ctx);
-    ctx->proxy = proxy;
+    conn_init(proxy, ctx);
     proxy->fd = fd;
     proxy->ready = proxy_ready;
-    return proxy;
+    return 0;
 }

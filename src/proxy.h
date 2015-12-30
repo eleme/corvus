@@ -4,6 +4,6 @@
 struct connection;
 struct context;
 
-struct connection *proxy_create(struct context *ctx, char *host, int port);
+int proxy_init(struct connection *proxy, struct context *ctx, char *host, int port);
 
 #endif /* end of include guard: __PROXY_H */

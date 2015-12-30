@@ -15,8 +15,8 @@ struct event_loop {
     int nevent;
 };
 
-struct event_loop *event_create(int nevent);
-void event_destory(struct event_loop *loop);
+int event_init(struct event_loop *loop, int nevent);
+void event_free(struct event_loop *loop);
 int event_register(struct event_loop *loop, struct connection *c);
 int event_reregister(struct event_loop *loop, struct connection *c, int mask);
 int event_deregister(struct event_loop *loop, struct connection *c);

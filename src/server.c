@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "server.h"
 #include "corvus.h"
 #include "event.h"
@@ -43,7 +44,7 @@ void server_iov_free(struct iov_data *iov)
 void server_make_iov(struct connection *server)
 {
     struct command *cmd;
-    double t = get_time();
+    int64_t t = get_time();
 
     while (!STAILQ_EMPTY(&server->ready_queue)) {
         cmd = STAILQ_FIRST(&server->ready_queue);
@@ -85,10 +86,13 @@ int server_write(struct connection *server)
 
     if (server->iov.cursor >= server->iov.len) {
         server_iov_free(&server->iov);
-    } else if (conn_register(server) == CORVUS_ERR) {
-        LOG(ERROR, "fail to reregister server %d", server->fd);
-        return CORVUS_ERR;
+    } else {
+        if (conn_register(server) == CORVUS_ERR) {
+            LOG(ERROR, "fail to reregister server %d", server->fd);
+            return CORVUS_ERR;
+        }
     }
+    server->last_active = time(NULL);
 
     return CORVUS_OK;
 }
@@ -102,7 +106,7 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
         LOG(WARN, "multiple redirect error: (%d)%s:%d -> %s", cmd->slot,
                 cmd->server->addr.host, cmd->server->addr.port, info->addr);
         server_free_buf(cmd);
-        cmd_mark_fail(cmd);
+        cmd_mark_fail(cmd, rep_redirect_err);
         return CORVUS_OK;
     } else {
         cmd->redirected = 1;
@@ -112,7 +116,7 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
     if (port == CORVUS_ERR) {
         LOG(WARN, "server_redirect: fail to parse addr %s", info->addr);
         server_free_buf(cmd);
-        cmd_mark_fail(cmd);
+        cmd_mark_fail(cmd, rep_addr_err);
         return CORVUS_OK;
     }
 
@@ -120,10 +124,11 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
     if (server == NULL) {
         LOG(WARN, "server_redirect: fail to get server %s", info->addr);
         server_free_buf(cmd);
-        cmd_mark_fail(cmd);
+        cmd_mark_fail(cmd, rep_server_err);
         return CORVUS_OK;
     }
 
+    server->last_active = time(NULL);
     if (conn_register(server) == CORVUS_ERR) return CORVUS_ERR;
 
     server_free_buf(cmd);
@@ -136,9 +141,6 @@ int server_read_reply(struct connection *server, struct command *cmd)
 {
     int status = cmd_read_reply(cmd, server);
     if (status != CORVUS_OK) return status;
-
-    /* after read */
-    cmd->rep_time[1] = get_time();
 
     server->completed_commands++;
     if (cmd->asking) return CORVUS_ASKING;
@@ -158,7 +160,7 @@ int server_read_reply(struct connection *server, struct command *cmd)
 
     if (cmd_parse_redirect(cmd, &info) == CORVUS_ERR) {
         server_free_buf(cmd);
-        cmd_mark_fail(cmd);
+        cmd_mark_fail(cmd, rep_redirect_err);
         return CORVUS_OK;
     }
     switch (info.type) {
@@ -181,9 +183,13 @@ int server_read(struct connection *server)
 {
     int status = CORVUS_OK;
     struct command *cmd;
+    int64_t now = get_time();
+
     while (!STAILQ_EMPTY(&server->waiting_queue)) {
         cmd = STAILQ_FIRST(&server->waiting_queue);
         status = server_read_reply(server, cmd);
+
+        cmd->rep_time[1] = now;
 
         switch (status) {
             case CORVUS_ASKING:
@@ -199,6 +205,7 @@ int server_read(struct connection *server)
         }
         break;
     }
+    server->last_active = -1;
     return status;
 }
 
@@ -206,7 +213,7 @@ void server_ready(struct connection *self, uint32_t mask)
 {
     if (mask & E_ERROR) {
         LOG(DEBUG, "error");
-        server_eof(self);
+        server_eof(self, rep_err);
         return;
     }
     if (mask & E_WRITABLE) {
@@ -214,12 +221,12 @@ void server_ready(struct connection *self, uint32_t mask)
         if (self->status == CONNECTING) self->status = CONNECTED;
         if (self->status == CONNECTED) {
             if (server_write(self) == CORVUS_ERR) {
-                server_eof(self);
+                server_eof(self, rep_err);
                 return;
             }
         } else {
             LOG(ERROR, "server not connected");
-            server_eof(self);
+            server_eof(self, rep_err);
             return;
         }
     }
@@ -230,12 +237,12 @@ void server_ready(struct connection *self, uint32_t mask)
             switch (server_read(self)) {
                 case CORVUS_ERR:
                 case CORVUS_EOF:
-                    server_eof(self);
+                    server_eof(self, rep_err);
                     return;
             }
         } else {
             LOG(WARN, "server is readable but waiting_queue is empty");
-            server_eof(self);
+            server_eof(self, rep_err);
             return;
         }
     }
@@ -249,7 +256,7 @@ struct connection *server_create(struct context *ctx, int fd)
     return server;
 }
 
-void server_eof(struct connection *server)
+void server_eof(struct connection *server, const char *reason)
 {
     LOG(WARN, "server eof");
 
@@ -262,7 +269,7 @@ void server_eof(struct connection *server)
             cmd_free(c);
         } else {
             cmd_free_reply(c);
-            cmd_mark_fail(c);
+            cmd_mark_fail(c, reason);
         }
     }
 
@@ -274,11 +281,11 @@ void server_eof(struct connection *server)
             cmd_free(c);
         } else {
             cmd_free_reply(c);
-            cmd_mark_fail(c);
+            cmd_mark_fail(c, reason);
         }
     }
 
-    event_deregister(server->ctx->loop, server);
+    event_deregister(&server->ctx->loop, server);
     /* not free connection buffer */
     conn_free(server);
     slot_create_job(SLOT_UPDATE);

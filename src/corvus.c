@@ -16,6 +16,7 @@
 #include "proxy.h"
 #include "stats.h"
 #include "dict.h"
+#include "timer.h"
 
 static struct context *contexts;
 
@@ -30,6 +31,8 @@ static void config_init()
     config.loglevel = INFO;
     config.syslog = 0;
     config.stats = 0;
+    config.client_timeout = 0;
+    config.server_timeout = 0;
 
     memset(config.statsd_addr, 0, sizeof(config.statsd_addr));
     config.metric_interval = 10;
@@ -37,22 +40,28 @@ static void config_init()
 
 static int config_add(char *name, char *value)
 {
-    char *end;
+    int timeout;
     if (strcmp(name, "cluster") == 0) {
         if (strlen(value) <= 0) return 0;
         strncpy(config.cluster, value, CLUSTER_NAME_SIZE);
     } else if (strcmp(name, "bind") == 0) {
-        config.bind = strtoul(value, &end, 0);
+        config.bind = atoi(value);
         if (config.bind > 0xFFFF) return -1;
     } else if (strcmp(name, "syslog") == 0) {
-        config.syslog = strtoul(value, &end, 0);
+        config.syslog = atoi(value);
     } else if (strcmp(name, "thread") == 0) {
-        config.thread = strtoul(value, &end, 0);
+        config.thread = atoi(value);
         if (config.thread <= 0) config.thread = 4;
+    } else if (strcmp(name, "client_timeout") == 0) {
+        timeout = atoi(value);
+        config.client_timeout = timeout < 0 ? 0 : timeout;
+    } else if (strcmp(name, "server_timeout") == 0) {
+        timeout = atoi(value);
+        config.server_timeout = timeout < 0 ? 0 : timeout;
     } else if (strcmp(name, "statsd") == 0) {
         strncpy(config.statsd_addr, value, DSN_MAX);
     } else if (strcmp(name, "metric_interval") == 0) {
-        config.metric_interval = strtoul(value, &end, 0);
+        config.metric_interval = atoi(value);
         if (config.metric_interval <= 0) config.metric_interval = 10;
     } else if (strcmp(name, "loglevel") == 0) {
         if (strcmp(value, "debug") == 0) {
@@ -134,7 +143,7 @@ static void quit()
                 slot_create_job(SLOT_UPDATER_QUIT);
                 break;
             case THREAD_MAIN_WORKER:
-                status = write(contexts[i].notifier->fd, &data, sizeof(data));
+                status = write(contexts[i].notifier.fd, &data, sizeof(data));
                 if (status == -1) {
                     LOG(ERROR, "quitting signal fail to send, force quit...");
                     exit(EXIT_FAILURE);
@@ -210,30 +219,25 @@ static void notify_ready(struct connection *conn, uint32_t mask)
 
 static int setup_notifier(struct context *ctx)
 {
-    struct connection *notifier = conn_create(ctx);
-    notifier->fd = eventfd(0, 0);
-    notifier->ready = notify_ready;
-    if (notifier->fd == -1) {
-        LOG(ERROR, "thread quit, can not create event fd");
-        return CORVUS_ERR;
-    }
-    ctx->notifier = notifier;
-    if (event_register(ctx->loop, notifier) == -1) {
-        LOG(ERROR, "thread quit, fail to register notifier");
+    conn_init(&ctx->notifier, ctx);
+    ctx->notifier.fd = eventfd(0, 0);
+    if (ctx->notifier.fd == -1) return CORVUS_ERR;
+    ctx->notifier.ready = notify_ready;
+
+    if (event_register(&ctx->loop, &ctx->notifier) == -1) {
         return CORVUS_ERR;
     }
     return CORVUS_OK;
 }
 
-double get_time()
+int64_t get_time()
 {
-    struct timeval tv;
-    double ms;
-
-    gettimeofday(&tv, NULL);
-    ms = tv.tv_sec * 1000;
-    ms += tv.tv_usec / 1000.0;
-    return ms;
+    int64_t ns;
+    struct timespec spec;
+    clock_gettime(CLOCK_MONOTONIC, &spec);
+    ns = spec.tv_sec * 1000000000;
+    ns += spec.tv_nsec;
+    return ns;
 }
 
 struct context *get_contexts()
@@ -254,8 +258,8 @@ void context_init(struct context *ctx, bool syslog, int log_level)
     log_init(ctx);
 
     STAILQ_INIT(&ctx->free_cmdq);
-    STAILQ_INIT(&ctx->free_connq);
-    STAILQ_INIT(&ctx->servers);
+    TAILQ_INIT(&ctx->servers);
+    TAILQ_INIT(&ctx->conns);
 }
 
 void context_free(struct context *ctx)
@@ -284,45 +288,60 @@ void context_free(struct context *ctx)
     }
 
     /* connection queue */
-    while (!STAILQ_EMPTY(&ctx->free_connq)) {
-        conn = STAILQ_FIRST(&ctx->free_connq);
-        STAILQ_REMOVE_HEAD(&ctx->free_connq, next);
+    while (!TAILQ_EMPTY(&ctx->conns)) {
+        conn = TAILQ_FIRST(&ctx->conns);
+        if (conn->fd != -1) {
+            conn_free(conn);
+            conn_buf_free(conn);
+        }
+        TAILQ_REMOVE(&ctx->conns, conn, next);
         free(conn);
-        ctx->nfree_connq--;
     }
 
     /* event loop */
-    event_destory(ctx->loop);
-
-    /* notifier */
-    conn_free(ctx->notifier);
-    if (ctx->notifier != NULL) free(ctx->notifier);
-
-    /* proxy */
-    conn_free(ctx->proxy);
-    if (ctx->proxy != NULL) free(ctx->proxy);
+    event_free(&ctx->loop);
 }
 
 void *main_loop(void *data)
 {
     struct context *ctx = data;
-    struct event_loop *loop = event_create(1024);
-    ctx->loop = loop;
 
-    struct connection *proxy = proxy_create(ctx, "0.0.0.0", config.bind);
-    if (proxy == NULL) {
+    if (event_init(&ctx->loop, 1024) == -1) {
+        LOG(ERROR, "Fatal: fail to create event loop.");
+        exit(EXIT_FAILURE);
+    }
+
+    if (proxy_init(&ctx->proxy, ctx, "0.0.0.0", config.bind) == -1) {
         LOG(ERROR, "Fatal: fail to create proxy.");
         exit(EXIT_FAILURE);
     }
-    event_register(loop, proxy);
+    if (event_register(&ctx->loop, &ctx->proxy) == -1) {
+        LOG(ERROR, "Fatal: fail to register proxy.");
+        exit(EXIT_FAILURE);
+    }
 
     if (setup_notifier(ctx) == CORVUS_ERR) {
         LOG(ERROR, "Fatal: fail to setup notifier.");
         exit(EXIT_FAILURE);
     }
 
+    if (config.client_timeout > 0 || config.server_timeout > 0) {
+        if (timer_init(&ctx->timer, ctx) == -1) {
+            LOG(ERROR, "Fatal: fail to init timer.");
+            exit(EXIT_FAILURE);
+        }
+        if (event_register(&ctx->loop, &ctx->timer) == -1) {
+            LOG(ERROR, "Fatal: fail to register timer.");
+            exit(EXIT_FAILURE);
+        }
+        if (timer_start(&ctx->timer) == -1) {
+            LOG(ERROR, "Fatal: fail to start timer.");
+            exit(EXIT_FAILURE);
+        }
+    }
+
     while (!ctx->quit) {
-        event_wait(loop, -1);
+        event_wait(&ctx->loop, -1);
     }
     context_free(ctx);
 
