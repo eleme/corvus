@@ -78,7 +78,7 @@ void stats_node_info_agg(struct bytes *bytes)
     int j, n, m = 0;
 
     for (int i = 0; i < config.thread; i++) {
-        STAILQ_FOREACH(server, &contexts[i].servers, next) {
+        TAILQ_FOREACH(server, &contexts[i].servers, next) {
             n = strlen(server->addr.host);
             if (n <= 0) continue;
 

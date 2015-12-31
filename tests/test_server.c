@@ -30,11 +30,12 @@ TEST(test_server_eof) {
     STAILQ_INSERT_TAIL(&server->ready_queue, cmd1, ready_next);
     STAILQ_INSERT_TAIL(&server->waiting_queue, cmd2, waiting_next);
 
-    server_eof(server);
+    server_eof(server, "test eof");
 
     /* cmd1 failed */
     ASSERT(cmd1->cmd_fail == 1);
     ASSERT(cmd1->rep_buf[0].buf == NULL && cmd1->rep_buf[0].pos == NULL);
+    ASSERT(strcmp(cmd1->fail_reason, "test eof") == 0);
 
     /* cmd2(stale) freed */
     ASSERT(cmd2->server == NULL);

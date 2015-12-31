@@ -1,5 +1,6 @@
 #include <unistd.h>
 #include <stdlib.h>
+#include <time.h>
 #include "corvus.h"
 #include "client.h"
 #include "mbuf.h"
@@ -52,6 +53,8 @@ int client_write(struct connection *client)
 
 void client_ready(struct connection *self, uint32_t mask)
 {
+    self->last_active = time(NULL);
+
     if (mask & E_ERROR) {
         LOG(DEBUG, "error");
         client_eof(self);
@@ -61,7 +64,6 @@ void client_ready(struct connection *self, uint32_t mask)
         LOG(DEBUG, "client readable");
         struct command *cmd = cmd_get_lastest(self->ctx, &self->cmd_queue);
         cmd->client = self;
-        cmd->req_time[0] = get_time();
         switch (cmd_read_request(cmd, self->fd)) {
             case CORVUS_ERR:
             case CORVUS_EOF:
@@ -97,6 +99,7 @@ struct connection *client_create(struct context *ctx, int fd)
     }
 
     client->ready = client_ready;
+    client->last_active = time(NULL);
     return client;
 }
 
@@ -113,7 +116,7 @@ void client_eof(struct connection *client)
 
     client->ctx->stats.connected_clients--;
 
-    event_deregister(client->ctx->loop, client);
+    event_deregister(&client->ctx->loop, client);
     conn_free(client);
     conn_buf_free(client);
     conn_recycle(client->ctx, client);

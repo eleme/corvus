@@ -8,46 +8,38 @@
 #include "event.h"
 #include "logging.h"
 
-struct event_loop *event_create(int nevent)
+int event_init(struct event_loop *loop, int nevent)
 {
     int epfd;
-    struct event_loop *loop;
     struct epoll_event *events;
 
     assert(nevent > 0);
 
     epfd = epoll_create(nevent);
     if (epfd < 0) {
-        return NULL;
+        return -1;
     }
 
     events = calloc(nevent, sizeof(struct epoll_event));
     if (events == NULL) {
         close(epfd);
-        return NULL;
+        return -1;
     }
 
-    loop = malloc(sizeof(struct event_loop));
-    if (loop == NULL) {
-        free(events);
-        close(epfd);
-        return NULL;
-    }
-
+    memset(loop, 0, sizeof(struct event_loop));
     loop->epfd = epfd;
     loop->events = events;
     loop->nevent = nevent;
 
-    return loop;
+    return 0;
 }
 
-void event_destory(struct event_loop *loop)
+void event_free(struct event_loop *loop)
 {
     if (loop == NULL) return;
 
     close(loop->epfd);
     free(loop->events);
-    free(loop);
 }
 
 int event_register(struct event_loop *loop, struct connection *c)

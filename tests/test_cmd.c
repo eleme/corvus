@@ -94,9 +94,46 @@ TEST(test_cmd_iov_add) {
     PASS(NULL);
 }
 
+TEST(test_cmd_free_reply) {
+    struct command *cmd = cmd_create(ctx);
+    struct connection *server = conn_create(ctx);
+    cmd->server = server;
+
+    struct mbuf *buf1 = mbuf_get(ctx),
+                *buf2 = mbuf_get(ctx),
+                *buf3 = mbuf_get(ctx);
+    STAILQ_INSERT_TAIL(&server->data, buf1, next);
+    STAILQ_INSERT_TAIL(&server->data, buf2, next);
+    STAILQ_INSERT_TAIL(&server->data, buf3, next);
+
+    cmd->rep_buf[0].buf = buf1;
+    cmd->rep_buf[1].buf = buf1;
+    mbuf_inc_ref(buf1);
+    mbuf_inc_ref(buf1);
+
+    cmd_free_reply(cmd);
+
+    ASSERT(STAILQ_FIRST(&server->data) == buf2);
+    ASSERT(cmd->rep_buf[0].buf == NULL);
+    ASSERT(cmd->rep_buf[1].buf == NULL);
+
+    cmd->rep_buf[0].buf = buf2;
+    mbuf_inc_ref(buf2);
+
+    cmd_free_reply(cmd);
+    ASSERT(STAILQ_EMPTY(&server->data));
+    ASSERT(cmd->rep_buf[0].buf == NULL);
+
+    cmd_free(cmd);
+    conn_free(server);
+    conn_recycle(ctx, server);
+    PASS(NULL);
+}
+
 TEST_CASE(test_cmd) {
     RUN_TEST(test_parse_redirect);
     RUN_TEST(test_parse_redirect_wrong_error);
     RUN_TEST(test_parse_redirect_wrong_moved);
     RUN_TEST(test_cmd_iov_add);
+    RUN_TEST(test_cmd_free_reply);
 }
