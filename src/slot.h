@@ -18,7 +18,7 @@ enum {
 
 struct node_info {
     struct address master;
-    int dsn_added;
+    int8_t dsn_added;
 };
 
 uint16_t slot_get(struct pos_array *pos);

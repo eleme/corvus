@@ -41,7 +41,7 @@ enum {
 };
 
 struct node_conf {
-    char **nodes;
+    struct address *addr;
     int len;
 };
 
@@ -68,7 +68,6 @@ struct context {
     uint32_t nfree_connq;
 
     struct conn_tqh servers;
-    struct node_conf *node_conf;
 
     /* event */
     struct event_loop loop;

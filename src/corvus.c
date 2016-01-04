@@ -72,23 +72,20 @@ static int config_add(char *name, char *value)
             config.loglevel = INFO;
         }
     } else if (strcmp(name, "node") == 0) {
-        int i;
-        if (config.node.nodes != NULL) {
-            for (i = 0; i < config.node.len; i++) {
-                free(config.node.nodes[i]);
-            }
-            free(config.node.nodes);
-            config.node.nodes = NULL;
-            config.node.len = 0;
+        if (config.node.addr != NULL) {
+            free(config.node.addr);
+            memset(&config.node, 0, sizeof(config.node));
         }
-        int len = 0, size;
         char *p = strtok(value, ",");
         while (p) {
-            size = strlen(p);
-            config.node.nodes = realloc(config.node.nodes, sizeof(char*) * (++len));
-            config.node.nodes[len - 1] = malloc(sizeof(char) * (size + 1));
-            memcpy(config.node.nodes[len - 1], p, size);
-            config.node.nodes[len - 1][size] = '\0';
+            config.node.addr = realloc(config.node.addr,
+                    sizeof(struct address) * (config.node.len + 1));
+
+            if (socket_parse_addr(p, &config.node.addr[config.node.len]) == -1) {
+                free(config.node.addr);
+                return -1;
+            }
+
             config.node.len++;
             p = strtok(NULL, ",");
         }
@@ -366,7 +363,6 @@ int main(int argc, const char *argv[])
     contexts = malloc(sizeof(struct context) * (config.thread + 1));
     for (i = 0; i <= config.thread; i++) {
         context_init(&contexts[i], config.syslog, config.loglevel);
-        contexts[i].node_conf = &config.node;
         contexts[i].role = THREAD_UNKNOWN;
     }
 
@@ -399,11 +395,7 @@ int main(int argc, const char *argv[])
 
     free(contexts);
     cmd_map_destroy();
-
-    for (i = 0; i < config.node.len; i++) {
-        free(config.node.nodes[i]);
-    }
-    free(config.node.nodes);
+    free(config.node.addr);
     if (config.syslog) closelog();
     return EXIT_SUCCESS;
 }

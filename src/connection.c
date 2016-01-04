@@ -196,21 +196,15 @@ struct connection *conn_get_server_from_pool(struct context *ctx, struct address
 
 struct connection *conn_get_raw_server(struct context *ctx)
 {
-    int i, port;
-    char *addr;
+    int i;
     struct connection *server = NULL;
-    struct address a;
 
-    for (i = 0; i < ctx->node_conf->len; i++) {
-        addr = ctx->node_conf->nodes[i];
-        port = socket_parse_addr(addr, &a);
-        if (port == -1) continue;
-
-        server = conn_get_server_from_pool(ctx, &a);
+    for (i = 0; i < config.node.len; i++) {
+        server = conn_get_server_from_pool(ctx, &config.node.addr[i]);
         if (server == NULL) continue;
         break;
     }
-    if (i >= ctx->node_conf->len) {
+    if (i >= config.node.len) {
         LOG(ERROR, "cannot connect to redis server.");
         return NULL;
     }

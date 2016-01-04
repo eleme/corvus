@@ -38,8 +38,8 @@ static pthread_rwlock_t addr_list_lock = PTHREAD_RWLOCK_INITIALIZER;
 static int slot_job = SLOT_UPDATE_UNKNOWN;
 
 static struct {
-    struct node_info nodes[MAX_UPDATE_NODES];
-    int idx;
+    struct address nodes[MAX_UPDATE_NODES];
+    int len;
 } node_list;
 
 static struct {
@@ -53,6 +53,15 @@ static struct {
     int idx;
 } node_store;
 
+void node_list_init()
+{
+    memset(&node_list, 0, sizeof(node_list));
+    for (int i = 0; i < config.node.len; i++, node_list.len++) {
+        if (node_list.len >= MAX_UPDATE_NODES) break;
+        memcpy(&node_list.nodes[i], &config.node.addr[i], sizeof(struct address));
+    }
+}
+
 void slot_map_clear()
 {
     pthread_rwlock_wrlock(&slot_map_lock);
@@ -65,15 +74,19 @@ void slot_map_clear()
 
     struct node_info *node_info;
 
+    node_list.len = 0;
+
     struct dict_iter iter = DICT_ITER_INITIALIZER;
     DICT_FOREACH(&node_store.map, &iter) {
         node_info = (struct node_info *)iter.value;
-        if (node_list.idx >= MAX_UPDATE_NODES) break;
-        memcpy(&node_list.nodes[node_list.idx++], node_info, sizeof(struct node_info));
+        if (node_list.len >= MAX_UPDATE_NODES) break;
+        memcpy(&node_list.nodes[node_list.len++], &node_info->master, sizeof(struct address));
     }
     node_store.idx = 0;
     dict_clear(&node_store.map);
     memset(node_store.nodes, 0, sizeof(node_store.nodes));
+
+    if (node_list.len <= 0) node_list_init();
 }
 
 void addr_add(char *host, uint16_t port)
@@ -252,56 +265,15 @@ int do_update_slot_map(struct connection *server)
     return count;
 }
 
-void slot_map_init(struct context *ctx)
-{
-    int i, port, count = 0;
-    char *addr;
-    struct connection server;
-    struct address address;
-    struct node_conf *conf = ctx->node_conf;
-
-    conn_init(&server, ctx);
-
-    for (i = 0; i < conf->len; i++) {
-        addr = conf->nodes[i];
-        port = socket_parse_addr(addr, &address);
-        if (port == -1) continue;
-
-        server.fd = socket_create_stream();
-        if (server.fd == -1) continue;
-
-        if (socket_set_timeout(server.fd, 5) == CORVUS_ERR) {
-            close(server.fd);
-            continue;
-        }
-
-        memcpy(&server.addr, &address, sizeof(struct address));
-        count = do_update_slot_map(&server);
-        if (count < REDIS_CLUSTER_SLOTS) {
-            conn_free(&server);
-            conn_buf_free(&server);
-            continue;
-        }
-        break;
-    }
-    conn_free(&server);
-    conn_buf_free(&server);
-    if (count == CORVUS_ERR) {
-        LOG(WARN, "can not init slot map");
-    } else {
-        LOG(INFO, "slot map inited: covered %d slots", count);
-    }
-}
-
 void slot_map_update(struct context *ctx)
 {
     int i, count = 0;
-    struct node_info *node;
+    struct address *node;
     struct connection server;
 
     conn_init(&server, ctx);
 
-    for (i = 0; i < node_list.idx; i++) {
+    for (i = 0; i < node_list.len; i++) {
         node = &node_list.nodes[i];
         server.fd = socket_create_stream();
         if (server.fd == -1) continue;
@@ -311,7 +283,7 @@ void slot_map_update(struct context *ctx)
             continue;
         }
 
-        memcpy(&server.addr, &node->master, sizeof(struct address));
+        memcpy(&server.addr, node, sizeof(struct address));
 
         count = do_update_slot_map(&server);
         if (count < REDIS_CLUSTER_SLOTS) {
@@ -321,8 +293,6 @@ void slot_map_update(struct context *ctx)
         }
         break;
     }
-    node_list.idx = 0;
-
     conn_free(&server);
     conn_buf_free(&server);
 
@@ -333,18 +303,11 @@ void slot_map_update(struct context *ctx)
     }
 }
 
-void do_update(struct context *ctx, int job)
+void do_job(struct context *ctx, int job)
 {
     slot_map_clear();
 
-    if (job == SLOT_UPDATE && node_list.idx <= 0) {
-        job = SLOT_UPDATE_INIT;
-    }
-
     switch (job) {
-        case SLOT_UPDATE_INIT:
-            slot_map_init(ctx);
-            break;
         case SLOT_UPDATE:
             slot_map_update(ctx);
             break;
@@ -377,7 +340,7 @@ void *slot_map_updater(void *data)
 
         pthread_mutex_unlock(&job_mutex);
 
-        do_update(ctx, job);
+        do_job(ctx, job);
         usleep(100000);
 
         pthread_mutex_lock(&job_mutex);
@@ -501,9 +464,10 @@ int slot_init_updater(struct context *ctx)
     pthread_attr_setstacksize(&attr, stacksize);
 
     memset(slot_map, 0, sizeof(struct node_info*) * REDIS_CLUSTER_SLOTS);
-    memset(&node_list, 0, sizeof(node_list));
     memset(&node_store, 0, sizeof(node_store));
     dict_init(&node_store.map);
+
+    node_list_init();
 
     pthread_mutex_init(&job_mutex, NULL);
     pthread_cond_init(&signal_cond, NULL);

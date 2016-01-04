@@ -70,7 +70,7 @@ int main(int argc, const char *argv[])
     struct node_conf conf = {NULL, 0};
     struct context ctx;
     context_init(&ctx, 0, ERROR);
-    ctx.node_conf = &conf;
+    memcpy(&config.node, &conf, sizeof(config.node));
     slot_init_updater(&ctx);
 
     RUN_CASE(test_slot);
