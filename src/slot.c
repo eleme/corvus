@@ -28,7 +28,7 @@ extern void context_free(struct context *ctx);
 static struct node_info *slot_map[REDIS_CLUSTER_SLOTS];
 static const char SLOTS_CMD[] = "*2\r\n$7\r\nCLUSTER\r\n$5\r\nSLOTS\r\n";
 
-static int slot_map_status;
+static int8_t in_progress = 0;
 static pthread_mutex_t job_mutex;
 static pthread_cond_t signal_cond;
 
@@ -349,7 +349,7 @@ void do_update(struct context *ctx, int job)
             slot_map_update(ctx);
             break;
         case SLOT_UPDATER_QUIT:
-            ctx->quit = 1;
+            ctx->state = CTX_QUIT;
             break;
     }
 }
@@ -364,9 +364,9 @@ void *slot_map_updater(void *data)
     pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
     pthread_mutex_lock(&job_mutex);
-    slot_map_status = SLOT_MAP_NEW;
+    in_progress = 0;
 
-    while (!ctx->quit) {
+    while (ctx->state != CTX_QUIT) {
         if (slot_job == SLOT_UPDATE_UNKNOWN) {
             pthread_cond_wait(&signal_cond, &job_mutex);
             continue;
@@ -378,9 +378,10 @@ void *slot_map_updater(void *data)
         pthread_mutex_unlock(&job_mutex);
 
         do_update(ctx, job);
+        usleep(100000);
 
         pthread_mutex_lock(&job_mutex);
-        slot_map_status = SLOT_MAP_NEW;
+        in_progress = 0;
     }
     pthread_mutex_unlock(&job_mutex);
 
@@ -474,8 +475,8 @@ void slot_get_addr_list(char *dest)
 void slot_create_job(int type)
 {
     pthread_mutex_lock(&job_mutex);
-    if (slot_map_status == SLOT_MAP_NEW) {
-        slot_map_status = SLOT_MAP_DIRTY;
+    if (!in_progress || type == SLOT_UPDATER_QUIT) {
+        in_progress = 1;
         slot_job = type;
         pthread_cond_signal(&signal_cond);
     }

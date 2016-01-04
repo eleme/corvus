@@ -42,6 +42,12 @@ int client_write(struct connection *client)
         }
     }
 
+    if (cmd->ctx->state == CTX_BEFORE_QUIT
+            || cmd->ctx->state == CTX_QUITTING)
+    {
+        return CORVUS_ERR;
+    }
+
     if (conn_register(client) == CORVUS_ERR) {
         LOG(ERROR, "fail to reregister client %d", client->fd);
         return CORVUS_ERR;

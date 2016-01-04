@@ -1,7 +1,5 @@
 #include <stdlib.h>
 #include <string.h>
-#include <sys/eventfd.h>
-#include <sys/resource.h>
 #include <sys/time.h>
 #include <errno.h>
 #include <signal.h>
@@ -131,26 +129,18 @@ static int read_conf(const char *filename)
 
 static void quit()
 {
-    int status, i;
-
     if (config.stats) stats_kill();
 
-    uint64_t data = 1;
-    for (i = 0; i <= config.thread; i++) {
+    for (int i = 0; i <= config.thread; i++) {
         if (!contexts[i].started) continue;
         switch (contexts[i].role) {
             case THREAD_SLOT_UPDATER:
                 slot_create_job(SLOT_UPDATER_QUIT);
                 break;
             case THREAD_MAIN_WORKER:
-                status = write(contexts[i].notifier.fd, &data, sizeof(data));
-                if (status == -1) {
-                    LOG(ERROR, "quitting signal fail to send, force quit...");
-                    exit(EXIT_FAILURE);
-                }
+                contexts[i].state = CTX_BEFORE_QUIT;
                 break;
-            default:
-                break;
+            case THREAD_UNKNOWN: break;
         }
     }
 }
@@ -209,27 +199,6 @@ static void setup_signal()
     sigaction(SIGSEGV, &act, NULL);
 }
 
-static void notify_ready(struct connection *conn, uint32_t mask)
-{
-    if (mask & E_READABLE) {
-        conn->ctx->quit = 1;
-        LOG(DEBUG, "existing signal received");
-    }
-}
-
-static int setup_notifier(struct context *ctx)
-{
-    conn_init(&ctx->notifier, ctx);
-    ctx->notifier.fd = eventfd(0, 0);
-    if (ctx->notifier.fd == -1) return CORVUS_ERR;
-    ctx->notifier.ready = notify_ready;
-
-    if (event_register(&ctx->loop, &ctx->notifier) == -1) {
-        return CORVUS_ERR;
-    }
-    return CORVUS_OK;
-}
-
 int64_t get_time()
 {
     int64_t ns;
@@ -254,6 +223,7 @@ void context_init(struct context *ctx, bool syslog, int log_level)
     dict_init(&ctx->server_table);
     ctx->started = false;
     ctx->role = THREAD_UNKNOWN;
+    ctx->state = CTX_UNKNOWN;
     mbuf_init(ctx);
     log_init(ctx);
 
@@ -320,27 +290,20 @@ void *main_loop(void *data)
         exit(EXIT_FAILURE);
     }
 
-    if (setup_notifier(ctx) == CORVUS_ERR) {
-        LOG(ERROR, "Fatal: fail to setup notifier.");
+    if (timer_init(&ctx->timer, ctx) == -1) {
+        LOG(ERROR, "Fatal: fail to init timer.");
+        exit(EXIT_FAILURE);
+    }
+    if (event_register(&ctx->loop, &ctx->timer) == -1) {
+        LOG(ERROR, "Fatal: fail to register timer.");
+        exit(EXIT_FAILURE);
+    }
+    if (timer_start(&ctx->timer) == -1) {
+        LOG(ERROR, "Fatal: fail to start timer.");
         exit(EXIT_FAILURE);
     }
 
-    if (config.client_timeout > 0 || config.server_timeout > 0) {
-        if (timer_init(&ctx->timer, ctx) == -1) {
-            LOG(ERROR, "Fatal: fail to init timer.");
-            exit(EXIT_FAILURE);
-        }
-        if (event_register(&ctx->loop, &ctx->timer) == -1) {
-            LOG(ERROR, "Fatal: fail to register timer.");
-            exit(EXIT_FAILURE);
-        }
-        if (timer_start(&ctx->timer) == -1) {
-            LOG(ERROR, "Fatal: fail to start timer.");
-            exit(EXIT_FAILURE);
-        }
-    }
-
-    while (!ctx->quit) {
+    while (ctx->state != CTX_QUIT) {
         event_wait(&ctx->loop, -1);
     }
     context_free(ctx);
