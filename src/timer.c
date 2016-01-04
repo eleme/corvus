@@ -39,14 +39,17 @@ void check_connections(struct context *ctx)
 {
     int64_t now = time(NULL);
 
-    struct connection *c;
-    TAILQ_FOREACH_REVERSE(c, &ctx->conns, conn_tqh, next) {
+    struct connection *c, *n;
+    c = TAILQ_LAST(&ctx->conns, conn_tqh);
+    while (c != NULL) {
+        n = TAILQ_PREV(c, conn_tqh, next);
         if (c->fd == -1) break;
         if (c->last_active > 0
                 && now - c->last_active > config.client_timeout)
         {
             client_eof(c);
         }
+        c = n;
     }
 
     TAILQ_FOREACH(c, &ctx->servers, next) {
