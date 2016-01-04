@@ -33,6 +33,13 @@ enum thread_role {
     THREAD_SLOT_UPDATER,
 };
 
+enum {
+    CTX_UNKNOWN,
+    CTX_QUIT,
+    CTX_BEFORE_QUIT,
+    CTX_QUITTING,
+};
+
 struct node_conf {
     char **nodes;
     int len;
@@ -50,7 +57,6 @@ struct context {
 
     struct connection proxy;
     struct connection timer;
-    struct connection notifier;
 
     /* logging */
     bool syslog;
@@ -68,7 +74,7 @@ struct context {
     struct event_loop loop;
 
     /* thread control */
-    int quit;
+    int state;
     pthread_t thread;
     bool started;
     enum thread_role role;

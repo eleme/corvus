@@ -11,22 +11,49 @@
 #include "server.h"
 #include "timer.h"
 
-void check_connections(struct connection *self)
+int conn_active(struct context *ctx)
+{
+    struct connection *c;
+    TAILQ_FOREACH_REVERSE(c, &ctx->conns, conn_tqh, next) {
+        if (c->fd != -1) return 1;
+    }
+    return 0;
+}
+
+void check_context(struct context *ctx)
+{
+    switch (ctx->state) {
+        case CTX_BEFORE_QUIT:
+            config.client_timeout = 1;
+            event_deregister(&ctx->loop, &ctx->proxy);
+            conn_free(&ctx->proxy);
+            ctx->state = CTX_QUITTING;
+        case CTX_QUITTING:
+            LOG(DEBUG, "do quit");
+            if (!conn_active(ctx)) ctx->state = CTX_QUIT;
+            break;
+    }
+}
+
+void check_connections(struct context *ctx)
 {
     int64_t now = time(NULL);
-    struct context *ctx = self->ctx;
 
     struct connection *c;
     TAILQ_FOREACH_REVERSE(c, &ctx->conns, conn_tqh, next) {
         if (c->fd == -1) break;
-        if (c->last_active > 0 && now - c->last_active > config.client_timeout) {
+        if (c->last_active > 0
+                && now - c->last_active > config.client_timeout)
+        {
             client_eof(c);
         }
     }
 
     TAILQ_FOREACH(c, &ctx->servers, next) {
         if (c->fd == -1) continue;
-        if (c->last_active > 0 && now - c->last_active > config.server_timeout) {
+        if (c->last_active > 0
+                && now - c->last_active > config.server_timeout)
+        {
             LOG(WARN, "server '%s:%d' timed out", c->addr.host, c->addr.port);
             server_eof(c, rep_timeout_err);
         }
@@ -43,7 +70,10 @@ void timer_ready(struct connection *self, uint32_t mask)
             }
             return;
         }
-        check_connections(self);
+        if (config.client_timeout > 0 || config.server_timeout > 0) {
+            check_connections(self->ctx);
+        }
+        check_context(self->ctx);
     }
 }
 
