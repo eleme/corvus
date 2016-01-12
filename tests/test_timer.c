@@ -8,6 +8,7 @@ TEST(test_check_connections) {
     struct connection *conn1 = conn_create(ctx);
     struct connection *conn2 = conn_create(ctx);
 
+    config.client_timeout = config.server_timeout = 5;
     conn1->last_active = 1;
     conn2->last_active = 1;
 
@@ -27,6 +28,7 @@ TEST(test_check_connections) {
     ASSERT(TAILQ_FIRST(&ctx->conns) == conn1);
     ASSERT(TAILQ_FIRST(&ctx->conns)->fd  == -1);
 
+    config.client_timeout = config.server_timeout = 0;
     PASS(NULL);
 }
 
