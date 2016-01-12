@@ -40,25 +40,29 @@ void check_connections(struct context *ctx)
     int64_t now = time(NULL);
 
     struct connection *c, *n;
-    c = TAILQ_LAST(&ctx->conns, conn_tqh);
-    while (c != NULL) {
-        n = TAILQ_PREV(c, conn_tqh, next);
-        if (c->fd == -1) break;
-        if (c->last_active > 0
-                && now - c->last_active > config.client_timeout)
-        {
-            client_eof(c);
+    if (config.client_timeout > 0) {
+        c = TAILQ_LAST(&ctx->conns, conn_tqh);
+        while (c != NULL) {
+            n = TAILQ_PREV(c, conn_tqh, next);
+            if (c->fd == -1) break;
+            if (c->last_active > 0
+                    && now - c->last_active > config.client_timeout)
+            {
+                client_eof(c);
+            }
+            c = n;
         }
-        c = n;
     }
 
-    TAILQ_FOREACH(c, &ctx->servers, next) {
-        if (c->fd == -1) continue;
-        if (c->last_active > 0
-                && now - c->last_active > config.server_timeout)
-        {
-            LOG(WARN, "server '%s:%d' timed out", c->addr.host, c->addr.port);
-            server_eof(c, rep_timeout_err);
+    if (config.server_timeout > 0) {
+        TAILQ_FOREACH(c, &ctx->servers, next) {
+            if (c->fd == -1) continue;
+            if (c->last_active > 0
+                    && now - c->last_active > config.server_timeout)
+            {
+                LOG(WARN, "server '%s:%d' timed out", c->addr.host, c->addr.port);
+                server_eof(c, rep_timeout_err);
+            }
         }
     }
 }
