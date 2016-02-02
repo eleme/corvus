@@ -13,7 +13,7 @@ static struct mbuf *_mbuf_get(struct context *ctx)
         STAILQ_REMOVE_HEAD(&ctx->free_mbufq, next);
         ctx->nfree_mbufq--;
     } else {
-        buf = (uint8_t*)malloc(ctx->mbuf_chunk_size);
+        buf = (uint8_t*)malloc(config.bufsize);
         if (buf == NULL) {
             return NULL;
         }
@@ -36,8 +36,7 @@ void mbuf_init(struct context *ctx)
     ctx->nfree_mbufq = 0;
     STAILQ_INIT(&ctx->free_mbufq);
 
-    ctx->mbuf_chunk_size = MBUF_SIZE;
-    ctx->mbuf_offset = ctx->mbuf_chunk_size - sizeof(struct mbuf);
+    ctx->mbuf_offset = config.bufsize - sizeof(struct mbuf);
 }
 
 struct mbuf *mbuf_get(struct context *ctx)

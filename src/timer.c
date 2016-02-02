@@ -48,6 +48,7 @@ void check_connections(struct context *ctx)
             if (c->last_active > 0
                     && now - c->last_active > config.client_timeout)
             {
+                LOG(WARN, "client '%s:%d' timed out", c->addr.host, c->addr.port);
                 client_eof(c);
             }
             c = n;

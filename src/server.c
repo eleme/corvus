@@ -86,11 +86,9 @@ int server_write(struct connection *server)
 
     if (server->iov.cursor >= server->iov.len) {
         server_iov_free(&server->iov);
-    } else {
-        if (conn_register(server) == CORVUS_ERR) {
-            LOG(ERROR, "fail to reregister server %d", server->fd);
-            return CORVUS_ERR;
-        }
+    } else if (conn_register(server) == CORVUS_ERR) {
+        LOG(ERROR, "fail to reregister server %d", server->fd);
+        return CORVUS_ERR;
     }
     server->last_active = time(NULL);
 

@@ -6,8 +6,6 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-#define MBUF_SIZE 16384
-
 #ifndef STAILQ_LAST
 #define STAILQ_LAST(head, type, field)                       \
     (STAILQ_EMPTY((head))                                    \

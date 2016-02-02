@@ -49,7 +49,6 @@ struct context {
     /* buffer related */
     uint32_t nfree_mbufq;
     struct mhdr free_mbufq;
-    size_t mbuf_chunk_size;
     size_t mbuf_offset;
 
     uint32_t nfree_cmdq;
@@ -95,6 +94,7 @@ struct {
     int stats;
     int64_t client_timeout;
     int64_t server_timeout;
+    int bufsize;
 } config;
 
 int64_t get_time();

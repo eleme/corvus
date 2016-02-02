@@ -16,6 +16,9 @@
 #include "dict.h"
 #include "timer.h"
 
+#define DEFAULT_BUFSIZE 16384
+#define MIN_BUFSIZE 64
+
 static struct context *contexts;
 
 static void config_init()
@@ -31,6 +34,7 @@ static void config_init()
     config.stats = 0;
     config.client_timeout = 0;
     config.server_timeout = 0;
+    config.bufsize = DEFAULT_BUFSIZE;
 
     memset(config.statsd_addr, 0, sizeof(config.statsd_addr));
     config.metric_interval = 10;
@@ -38,7 +42,7 @@ static void config_init()
 
 static int config_add(char *name, char *value)
 {
-    int timeout;
+    int val;
     if (strcmp(name, "cluster") == 0) {
         if (strlen(value) <= 0) return 0;
         strncpy(config.cluster, value, CLUSTER_NAME_SIZE);
@@ -50,12 +54,21 @@ static int config_add(char *name, char *value)
     } else if (strcmp(name, "thread") == 0) {
         config.thread = atoi(value);
         if (config.thread <= 0) config.thread = 4;
+    } else if (strcmp(name, "bufsize") == 0) {
+        val = atoi(value);
+        if (val <= 0) {
+            config.bufsize = DEFAULT_BUFSIZE;
+        } else if (val < MIN_BUFSIZE) {
+            config.bufsize = MIN_BUFSIZE;
+        } else {
+            config.bufsize = val;
+        }
     } else if (strcmp(name, "client_timeout") == 0) {
-        timeout = atoi(value);
-        config.client_timeout = timeout < 0 ? 0 : timeout;
+        val = atoi(value);
+        config.client_timeout = val < 0 ? 0 : val;
     } else if (strcmp(name, "server_timeout") == 0) {
-        timeout = atoi(value);
-        config.server_timeout = timeout < 0 ? 0 : timeout;
+        val = atoi(value);
+        config.server_timeout = val < 0 ? 0 : val;
     } else if (strcmp(name, "statsd") == 0) {
         strncpy(config.statsd_addr, value, DSN_MAX);
     } else if (strcmp(name, "metric_interval") == 0) {

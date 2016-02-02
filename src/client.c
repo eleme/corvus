@@ -13,7 +13,7 @@ int client_write(struct connection *client)
     int status;
     struct command *cmd = STAILQ_FIRST(&client->cmd_queue);
     LOG(DEBUG, "client %d %d", cmd->cmd_count, cmd->cmd_done_count);
-    if (cmd->cmd_count <= 0 || cmd->cmd_count != cmd->cmd_done_count) {
+    if (cmd->cmd_count <= 0 || !cmd->parse_done || cmd->cmd_count != cmd->cmd_done_count) {
         return CORVUS_OK;
     }
 
@@ -30,16 +30,13 @@ int client_write(struct connection *client)
         return CORVUS_ERR;
     }
 
-    while (1) {
-        status = cmd_iov_write(cmd->ctx, &cmd->iov, client->fd);
-        if (status == CORVUS_ERR) return CORVUS_ERR;
-        if (status == CORVUS_AGAIN) return CORVUS_OK;
-        if (cmd->iov.cursor >= cmd->iov.len) {
-            STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
-            cmd_stats(cmd);
-            cmd_free(cmd);
-            break;
-        }
+    status = cmd_iov_write(cmd->ctx, &cmd->iov, client->fd);
+    if (status == CORVUS_ERR) return CORVUS_ERR;
+    if (status == CORVUS_AGAIN) return CORVUS_OK;
+    if (cmd->iov.cursor >= cmd->iov.len) {
+        STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
+        cmd_stats(cmd);
+        cmd_free(cmd);
     }
 
     if (cmd->ctx->state == CTX_BEFORE_QUIT
@@ -59,6 +56,8 @@ int client_write(struct connection *client)
 
 void client_ready(struct connection *self, uint32_t mask)
 {
+    int status;
+
     self->last_active = time(NULL);
 
     if (mask & E_ERROR) {
@@ -70,11 +69,15 @@ void client_ready(struct connection *self, uint32_t mask)
         LOG(DEBUG, "client readable");
         struct command *cmd = cmd_get_lastest(self->ctx, &self->cmd_queue);
         cmd->client = self;
-        switch (cmd_read_request(cmd, self->fd)) {
-            case CORVUS_ERR:
-            case CORVUS_EOF:
-                client_eof(self);
-                return;
+        status = cmd_read_request(cmd, self->fd);
+        if (status == CORVUS_ERR || status == CORVUS_EOF) {
+            client_eof(self);
+            return;
+        }
+        if (status != CORVUS_AGAIN && conn_register(self) == CORVUS_ERR) {
+            LOG(ERROR, "fail to reregister client %d", self->fd);
+            client_eof(self);
+            return;
         }
     }
     if (mask & E_WRITABLE) {
