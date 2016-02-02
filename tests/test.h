@@ -35,6 +35,7 @@
         if (filter(#test_func, manager.test_func_filter)) {             \
             struct context ctx;                                         \
             context_init(&ctx, 0, ERROR);                               \
+            config.bufsize = 16384;                                     \
             event_init(&ctx.loop, 1024);                                \
             enum test_result res = test_func(&ctx);                     \
             context_free(&ctx);                                         \

@@ -22,6 +22,10 @@ int proxy_accept(struct connection *proxy)
         LOG(ERROR, "fail to create client");
         return CORVUS_ERR;
     }
+
+    strcpy(client->addr.host, ip);
+    client->addr.port = port;
+
     if (conn_register(client) == CORVUS_ERR) {
         LOG(ERROR, "fail to register client");
         conn_free(client);

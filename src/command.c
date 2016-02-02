@@ -850,22 +850,21 @@ int cmd_read_request(struct command *cmd, int fd)
     int n;
     struct mbuf *buf;
 
-    while (1) {
-        do {
-            buf = mbuf_queue_get(cmd->ctx, &cmd->buf_queue);
+    do {
+        buf = mbuf_queue_get(cmd->ctx, &cmd->buf_queue);
 
-            n = socket_read(fd, buf);
-            if (n == 0) return CORVUS_EOF;
-            if (n == CORVUS_ERR) return CORVUS_ERR;
-            if (n == CORVUS_AGAIN) return CORVUS_AGAIN;
+        n = socket_read(fd, buf);
+        if (n == 0) return CORVUS_EOF;
+        if (n == CORVUS_ERR) return CORVUS_ERR;
+        if (n == CORVUS_AGAIN) return CORVUS_AGAIN;
 
-            cmd->ctx->stats.recv_bytes += n;
+        cmd->ctx->stats.recv_bytes += n;
 
-            if (cmd_parse_req(cmd, buf) == CORVUS_ERR) {
-                return CORVUS_ERR;
-            }
-        } while (!reader_ready(&cmd->reader));
-    }
+        if (cmd_parse_req(cmd, buf) == CORVUS_ERR) {
+            return CORVUS_ERR;
+        }
+    } while (!reader_ready(&cmd->reader));
+    cmd->parse_done = 1;
 
     return CORVUS_OK;
 }
