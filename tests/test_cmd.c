@@ -8,7 +8,7 @@ extern int cmd_apply_range(struct command *cmd, int type);
 
 TEST(test_parse_redirect) {
     char data1[] = "-MOV";
-    char data2[] = "ED 866 127.0.0.1:8001";
+    char data2[] = "ED 11866 127.112.112.111:18001";
 
     struct command *cmd = cmd_create(ctx);
     mbuf_queue_copy(ctx, &cmd->rep_queue, (uint8_t*)data1, strlen(data1));
@@ -22,8 +22,8 @@ TEST(test_parse_redirect) {
     info.slot = -1;
 
     ASSERT(cmd_parse_redirect(cmd, &info) == CORVUS_OK);
-    ASSERT(strncmp(info.addr, "127.0.0.1:8001", 14) == 0);
-    ASSERT(info.slot == 866);
+    ASSERT(strncmp(info.addr, "127.112.112.111:18001", 21) == 0);
+    ASSERT(info.slot == 11866);
     ASSERT(info.type == CMD_ERR_MOVED);
 
     cmd_free(cmd);

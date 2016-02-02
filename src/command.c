@@ -917,7 +917,7 @@ void cmd_make_iovec(struct command *cmd, struct iov_data *iov)
 
 int cmd_parse_redirect(struct command *cmd, struct redirect_info *info)
 {
-    int n = 31;
+    int n = 63;
     char err[n + 1];
     int len = 0, size;
 
@@ -938,11 +938,7 @@ int cmd_parse_redirect(struct command *cmd, struct redirect_info *info)
         if (b == end->buf) break;
         b = STAILQ_NEXT(b, next);
     }
-    if (len <= n) {
-        err[len] = '\0';
-    } else {
-        err[n] = '\0';
-    }
+    err[len] = '\0';
 
     char name[8];
     LOG(DEBUG, "%s", err);
