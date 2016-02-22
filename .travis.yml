@@ -7,7 +7,7 @@ before_install:
   - sudo apt-get install -qq valgrind
 
 install:
-  - sudo mkdir -p /etc/redis /var/lib/redis/cluster/{8000,8001,8002}
+  - sudo mkdir -p /etc/redis /var/lib/redis/cluster/{8000,8001,8002,8003}
 
   - sudo chmod -R 777 /etc/redis
 
@@ -19,12 +19,14 @@ install:
   - sed 's/{port}/8000/' /etc/redis/redis-cluster.conf > /etc/redis/redis-cluster-8000.conf
   - sed 's/{port}/8001/' /etc/redis/redis-cluster.conf > /etc/redis/redis-cluster-8001.conf
   - sed 's/{port}/8002/' /etc/redis/redis-cluster.conf > /etc/redis/redis-cluster-8002.conf
+  - sed 's/{port}/8003/' /etc/redis/redis-cluster.conf > /etc/redis/redis-cluster-8003.conf
 
   - sudo chmod -R 700 /etc/redis
 
   - sudo redis-server /etc/redis/redis-cluster-8000.conf
   - sudo redis-server /etc/redis/redis-cluster-8001.conf
   - sudo redis-server /etc/redis/redis-cluster-8002.conf
+  - sudo redis-server /etc/redis/redis-cluster-8003.conf
 
   - sudo pip install ruskit
   - ruskit create localhost:800{0,1,2}

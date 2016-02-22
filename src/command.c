@@ -387,6 +387,7 @@ int cmd_forward_basic(struct command *cmd)
     STAILQ_INSERT_TAIL(&server->ready_queue, cmd, ready_next);
     if (conn_register(server) == -1) {
         LOG(ERROR, "fail to register server %d", server->fd);
+        /* cmd already marked failed in server_eof */
         server_eof(server, rep_err);
     } else {
         LOG(DEBUG, "register server event");
@@ -940,7 +941,7 @@ int cmd_parse_redirect(struct command *cmd, struct redirect_info *info)
     err[len] = '\0';
 
     char name[8];
-    LOG(DEBUG, "%s", err);
+    LOG(DEBUG, "parse redirect: %s", err);
 
     int r = 0;
     if (strncmp(err, "-MOVED", 5) == 0) {
@@ -953,6 +954,9 @@ int cmd_parse_redirect(struct command *cmd, struct redirect_info *info)
         info->type = CMD_ERR_ASK;
         r = sscanf(err, "%s%d%s", name, (int*)&info->slot, info->addr);
         if (r != 3) return CORVUS_ERR;
+    } else if (strncmp(err, "-CLUSTERDOWN", 12) == 0) {
+        /* -CLUSTERDOWN The cluster is down */
+        info->type = CMD_ERR_CLUSTERDOWN;
     }
     return CORVUS_OK;
 }
