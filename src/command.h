@@ -16,6 +16,7 @@ enum {
     CMD_ERR,
     CMD_ERR_MOVED,
     CMD_ERR_ASK,
+    CMD_ERR_CLUSTERDOWN,
 };
 
 STAILQ_HEAD(cmd_tqh, command);

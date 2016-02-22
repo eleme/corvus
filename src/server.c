@@ -8,6 +8,26 @@
 #include "socket.h"
 #include "slot.h"
 
+#define SERVER_RETRY_TIMES 3
+
+#define CHECK_REDIRECTED(c, info_addr, msg)                                         \
+do {                                                                                \
+    if (c->redirected >= SERVER_RETRY_TIMES) {                                      \
+        if (msg == NULL) {                                                          \
+            LOG(WARN, "mark cmd done after retrying %d times", SERVER_RETRY_TIMES); \
+            cmd_mark_done(c);                                                       \
+        } else {                                                                    \
+            LOG(WARN, "redirect error after retring %d times: (%d)%s:%d -> %s",     \
+                    SERVER_RETRY_TIMES, c->slot, c->server->addr.host,              \
+                    c->server->addr.port, info_addr);                               \
+            server_free_buf(c);                                                     \
+            cmd_mark_fail(c, msg);                                                  \
+        }                                                                           \
+        return CORVUS_OK;                                                           \
+    }                                                                               \
+    c->redirected++;                                                                \
+} while (0)
+
 static const char *req_ask = "*1\r\n$6\r\nASKING\r\n";
 
 void server_free_buf(struct command *cmd)
@@ -95,20 +115,22 @@ int server_write(struct connection *server)
     return CORVUS_OK;
 }
 
+int server_retry(struct connection *server, struct command *cmd)
+{
+    if (server == NULL) return CORVUS_ERR;
+
+    server->last_active = time(NULL);
+    if (conn_register(server) == CORVUS_ERR) return CORVUS_ERR;
+    server_free_buf(cmd);
+    cmd->server = server;
+    STAILQ_INSERT_TAIL(&server->ready_queue, cmd, ready_next);
+    return CORVUS_OK;
+}
+
 int server_redirect(struct command *cmd, struct redirect_info *info)
 {
     int port;
     struct address addr;
-
-    if (cmd->redirected) {
-        LOG(WARN, "multiple redirect error: (%d)%s:%d -> %s", cmd->slot,
-                cmd->server->addr.host, cmd->server->addr.port, info->addr);
-        server_free_buf(cmd);
-        cmd_mark_fail(cmd, rep_redirect_err);
-        return CORVUS_OK;
-    } else {
-        cmd->redirected = 1;
-    }
 
     port = socket_parse_addr(info->addr, &addr);
     if (port == CORVUS_ERR) {
@@ -126,17 +148,12 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
         return CORVUS_OK;
     }
 
-    server->last_active = time(NULL);
-    if (conn_register(server) == CORVUS_ERR) return CORVUS_ERR;
-
-    server_free_buf(cmd);
-    cmd->server = server;
-    STAILQ_INSERT_TAIL(&server->ready_queue, cmd, ready_next);
-    return CORVUS_OK;
+    return server_retry(server, cmd);
 }
 
 int server_read_reply(struct connection *server, struct command *cmd)
 {
+    struct connection *conn;
     int status = cmd_read_reply(cmd, server);
     if (status != CORVUS_OK) return status;
 
@@ -163,13 +180,21 @@ int server_read_reply(struct connection *server, struct command *cmd)
     }
     switch (info.type) {
         case CMD_ERR_MOVED:
-            if (server_redirect(cmd, &info) == CORVUS_ERR) return CORVUS_ERR;
             slot_create_job(SLOT_UPDATE);
+            CHECK_REDIRECTED(cmd, info.addr, rep_redirect_err);
+            if (server_redirect(cmd, &info) == CORVUS_ERR) return CORVUS_ERR;
             break;
         case CMD_ERR_ASK:
+            CHECK_REDIRECTED(cmd, info.addr, rep_redirect_err);
             if (server_redirect(cmd, &info) == CORVUS_ERR) return CORVUS_ERR;
             cmd->asking = 1;
             break;
+        case CMD_ERR_CLUSTERDOWN:
+            slot_create_job(SLOT_UPDATE);
+            CHECK_REDIRECTED(cmd, NULL, NULL);
+            conn = conn_get_server(cmd->ctx, cmd->slot);
+            if (conn == NULL) return CORVUS_ERR;
+            return server_retry(conn, cmd);
         default:
             cmd_mark_done(cmd);
             break;

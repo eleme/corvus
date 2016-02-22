@@ -2,9 +2,11 @@
 
 import pytest
 import redis
+import time
 
 from ruskit.cluster import Cluster, ClusterNode
 
+SLOT = 866
 PROXY_PORT = 12345
 REDIS_URI_SRC = "redis://localhost:8000"
 REDIS_URI_DST = "redis://localhost:8001"
@@ -58,6 +60,26 @@ def delete_keys(request):
         _keys[:] = []
     request.addfinalizer(fin)
     return _O()
+
+
+@pytest.fixture
+def moved(request):
+    def fin():
+        try:
+            Cluster.from_node(ClusterNode.from_uri(REDIS_URI_SRC)) \
+                .migrate_slot(ClusterNode.from_uri(REDIS_URI_DST),
+                              ClusterNode.from_uri(REDIS_URI_SRC), SLOT)
+        except redis.RedisError:
+            pass
+    request.addfinalizer(fin)
+
+
+@pytest.fixture
+def asked(request):
+    def fin():
+        for uri in (REDIS_URI_DST, REDIS_URI_SRC):
+            ClusterNode.from_uri(uri).setslot("STABLE", 866)
+    request.addfinalizer(fin)
 
 
 def test_null_key(delete_keys):
@@ -3051,34 +3073,56 @@ def test_large_value(delete_keys):
     assert len(a) == length
 
 
-def test_moved(delete_keys):
+def test_moved(delete_keys, moved):
     delete_keys.keys("hello")
 
     r.set("hello", 123)
     cluster = Cluster.from_node(ClusterNode.from_uri(REDIS_URI_SRC))
     cluster.migrate_slot(ClusterNode.from_uri(REDIS_URI_SRC),
                          ClusterNode.from_uri(REDIS_URI_DST),
-                         866)
+                         SLOT)
     # double check
     assert r.get("hello") == "123"
+    time.sleep(0.6)
     assert r.get("hello") == "123"
 
 
-def test_ask(delete_keys):
+def test_ask(delete_keys, asked):
     delete_keys.keys("hello")
 
     r.set("hello", 123)
     node1 = ClusterNode.from_uri(REDIS_URI_SRC)
     node2 = ClusterNode.from_uri(REDIS_URI_DST)
 
-    node2.setslot("MIGRATING", 866, node1.name)
-    node1.setslot("IMPORTING", 866, node2.name)
+    node1.setslot("MIGRATING", 866, node2.name)
+    node2.setslot("IMPORTING", 866, node1.name)
 
     with pytest.raises(redis.ResponseError) as excinfo:
-        node2.get("a{hello}")
-    assert "ASK 866 127.0.0.1:8000" in str(excinfo.value)
+        node1.get("a{hello}")
 
-    try:
-        assert r.get("a{hello}") is None
-    finally:
-        Cluster.from_node(node1).fix_open_slots()
+    assert "ASK 866 127.0.0.1:8001" in str(excinfo.value)
+    assert r.get("a{hello}") is None
+
+
+def test_delete_node(delete_keys):
+    delete_keys.keys("hello")
+
+    r.set("hello", 123)
+    src = ClusterNode.from_uri(REDIS_URI_SRC)
+    target = ClusterNode.from_uri("redis://127.0.0.1:8003")
+
+    cluster = Cluster.from_node(src)
+    cluster.add_node({"addr": "127.0.0.1:8003", "role": "master"})
+    cluster.wait()
+
+    cluster.migrate_slot(src, target, 866)
+    cluster.wait()
+
+    assert r.get("hello") == "123"
+
+    time.sleep(0.2)
+
+    cluster.delete_node(target)
+    cluster.wait()
+
+    assert r.get("hello") == "123"

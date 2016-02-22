@@ -12,3 +12,5 @@ corvus_test
 .DS_Store
 
 .*.sw[pon]
+
+.cache
