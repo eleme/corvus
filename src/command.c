@@ -1000,12 +1000,23 @@ void cmd_stats(struct command *cmd)
     }
 }
 
-void cmd_set_stale(struct command *cmd)
+/*
+ *               root cmd (use refcount)
+ *               /  \   \
+ * (just free) mget get set
+ *             /  \
+ *          get1  get2
+ */
+void cmd_set_stale(struct command *cmd, struct command *root)
 {
     if (STAILQ_EMPTY(&cmd->sub_cmds)) {
         if (cmd->server != NULL && cmd_in_queue(cmd, cmd->server)) {
             LOG(WARN, "command set stale");
             cmd->stale = 1;
+            if (STAILQ_EMPTY(&cmd->buf_queue)) {
+                cmd->ref = root;
+                root->refcount++;
+            }
         } else {
             cmd_free(cmd);
         }
@@ -1015,9 +1026,11 @@ void cmd_set_stale(struct command *cmd)
             c = STAILQ_FIRST(&cmd->sub_cmds);
             STAILQ_REMOVE_HEAD(&cmd->sub_cmds, sub_cmd_next);
             STAILQ_NEXT(c, sub_cmd_next) = NULL;
-            cmd_set_stale(c);
+            cmd_set_stale(c, root);
         }
-        cmd_free(cmd);
+        if (cmd != root) {
+            cmd_free(cmd);
+        }
     }
 }
 
@@ -1145,6 +1158,14 @@ void cmd_free(struct command *cmd)
         STAILQ_REMOVE_HEAD(&cmd->sub_cmds, sub_cmd_next);
         cmd_free(c);
     }
+
+    if (cmd->ref != NULL) {
+        cmd->ref->refcount--;
+        if (cmd->ref->refcount <= 0) {
+            cmd_free(cmd->ref);
+        }
+    }
+
     cmd->client = NULL;
     cmd->server = NULL;
     cmd_recycle(ctx, cmd);

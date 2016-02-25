@@ -37,6 +37,9 @@ struct command {
     struct mhdr buf_queue;
     struct mhdr rep_queue;
 
+    struct command *ref;
+    int refcount;
+
     struct context *ctx;
     struct reader reader;
 
@@ -104,7 +107,7 @@ int cmd_parse_redirect(struct command *cmd, struct redirect_info *info);
 void cmd_mark_done(struct command *cmd);
 void cmd_mark_fail(struct command *cmd, const char *reason);
 void cmd_stats(struct command *cmd);
-void cmd_set_stale(struct command *cmd);
+void cmd_set_stale(struct command *cmd, struct command *root);
 void cmd_iov_add(struct iov_data *iov, void *buf, size_t len);
 int cmd_iov_write(struct context *ctx, struct iov_data *iov, int fd);
 void cmd_iov_free(struct iov_data *iov);

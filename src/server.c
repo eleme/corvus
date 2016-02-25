@@ -82,7 +82,6 @@ void server_make_iov(struct connection *server)
         cmd->rep_time[0] = t;
 
         cmd_create_iovec(&cmd->req_buf[0], &cmd->req_buf[1], &server->iov);
-
         STAILQ_INSERT_TAIL(&server->waiting_queue, cmd, waiting_next);
     }
 }
@@ -235,7 +234,7 @@ int server_read(struct connection *server)
 void server_ready(struct connection *self, uint32_t mask)
 {
     if (mask & E_ERROR) {
-        LOG(DEBUG, "error");
+        LOG(ERROR, "server error: %s:%d %d", self->addr.host, self->addr.port, self->fd);
         server_eof(self, rep_err);
         return;
     }

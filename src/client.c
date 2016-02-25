@@ -120,7 +120,14 @@ void client_eof(struct connection *client)
     while (!STAILQ_EMPTY(&client->cmd_queue)) {
         cmd = STAILQ_FIRST(&client->cmd_queue);
         STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
-        cmd_set_stale(cmd);
+        if (STAILQ_EMPTY(&cmd->sub_cmds)) {
+            cmd_free(cmd);
+            continue;
+        }
+        cmd_set_stale(cmd, cmd);
+        if (cmd->refcount <= 0) {
+            cmd_free(cmd);
+        }
     }
 
     client->ctx->stats.connected_clients--;
