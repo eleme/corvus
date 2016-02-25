@@ -622,8 +622,14 @@ void cmd_gen_mget_iovec(struct command *cmd, struct iov_data *iov)
     struct command *c;
     STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
         if (c->cmd_fail) {
+            iov->len = 0;
             cmd_iov_add(iov, c->fail_reason, strlen(c->fail_reason));
-            continue;
+            return;
+        }
+        if (c->reply_type == REP_ERROR) {
+            iov->len = 0;
+            cmd_create_iovec(&c->rep_buf[0], &c->rep_buf[1], iov);
+            return;
         }
         cmd_create_iovec(&c->rep_buf[0], &c->rep_buf[1], iov);
     }
