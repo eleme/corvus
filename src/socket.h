@@ -30,6 +30,7 @@ void socket_address_init(struct address *addr, char *host, int len, int port);
 int socket_set_nonblocking(int fd);
 int socket_set_tcpnodelay(int fd);
 int socket_set_timeout(int fd, int timeout);
+int socket_parse_port(char *ptr, uint16_t *res);
 int socket_parse_addr(char *addr, struct address *address);
 void socket_get_key(struct address *addr, char *dst);
 

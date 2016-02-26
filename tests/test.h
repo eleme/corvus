@@ -34,8 +34,7 @@
     do {                                                                \
         if (filter(#test_func, manager.test_func_filter)) {             \
             struct context ctx;                                         \
-            context_init(&ctx, 0, ERROR);                               \
-            config.bufsize = 16384;                                     \
+            context_init(&ctx);                                         \
             event_init(&ctx.loop, 1024);                                \
             enum test_result res = test_func(&ctx);                     \
             context_free(&ctx);                                         \
@@ -196,7 +195,7 @@ static void post_case()
 
 
 struct context;
-extern void context_init(struct context *ctx, bool syslog, int log_level);
+extern void context_init(struct context *ctx);
 extern void context_free(struct context *ctx);
 
 #endif
