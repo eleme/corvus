@@ -387,6 +387,8 @@ int main(int argc, const char *argv[])
         start_worker(i);
     }
 
+    signal(SIGHUP, SIG_IGN);
+    signal(SIGPIPE, SIG_IGN);
     setup_signal();
 
     LOG(INFO, "serve at 0.0.0.0:%d", config.bind);
