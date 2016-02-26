@@ -59,6 +59,7 @@ extern TEST_CASE(test_dict);
 extern TEST_CASE(test_socket);
 extern TEST_CASE(test_client);
 extern TEST_CASE(test_timer);
+extern TEST_CASE(test_config);
 
 int main(int argc, const char *argv[])
 {
@@ -67,9 +68,13 @@ int main(int argc, const char *argv[])
         return EXIT_FAILURE;
     }
 
+    config.syslog = 0;
+    config.loglevel = ERROR;
+    config.bufsize = 16384;
+
     struct node_conf conf = {NULL, 0};
     struct context ctx;
-    context_init(&ctx, 0, ERROR);
+    context_init(&ctx);
     memcpy(&config.node, &conf, sizeof(config.node));
     slot_init_updater(&ctx);
 
@@ -82,6 +87,7 @@ int main(int argc, const char *argv[])
     RUN_CASE(test_socket);
     RUN_CASE(test_client);
     RUN_CASE(test_timer);
+    RUN_CASE(test_config);
 
     usleep(10000);
     slot_create_job(SLOT_UPDATER_QUIT);

@@ -57,10 +57,6 @@ struct context {
     struct connection proxy;
     struct connection timer;
 
-    /* logging */
-    bool syslog;
-    int log_level;
-
     /* connection pool */
     struct dict server_table;
     struct conn_tqh conns;
@@ -88,7 +84,7 @@ struct {
     struct node_conf node;
     int thread;
     int loglevel;
-    int syslog;
+    bool syslog;
     char statsd_addr[DSN_MAX + 1];
     int metric_interval;
     int stats;

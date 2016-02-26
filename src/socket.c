@@ -318,17 +318,26 @@ void socket_address_init(struct address *addr, char *host, int len, int port)
     addr->port = port;
 }
 
+int socket_parse_port(char *ptr, uint16_t *res)
+{
+    char *end;
+    int port = strtol(ptr, &end, 0);
+    if (*end != '\0' || port > 0xFFFF || port <= 0) return CORVUS_ERR;
+    *res = port;
+    return CORVUS_OK;
+}
+
 int socket_parse_addr(char *addr, struct address *address)
 {
-    unsigned long port;
-    char *colon, *end;
+    uint16_t port;
+    char *colon;
 
     colon = strchr(addr, ':');
     if (colon == NULL) return CORVUS_ERR;
 
-    port = strtoul(colon + 1, &end, 0);
-    if (*end != '\0' || end == colon + 1) return CORVUS_ERR;
-    if (port > 0xFFFF) return CORVUS_ERR;
+    if (socket_parse_port(colon + 1, &port) == CORVUS_ERR) {
+        return CORVUS_ERR;
+    }
 
     socket_address_init(address, addr, colon - addr, port);
     return port;

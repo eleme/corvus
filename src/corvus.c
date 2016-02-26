@@ -21,7 +21,7 @@
 
 static struct context *contexts;
 
-static void config_init()
+void config_init()
 {
     memset(config.cluster, 0, CLUSTER_NAME_SIZE + 1);
     strncpy(config.cluster, "default", CLUSTER_NAME_SIZE);
@@ -40,17 +40,18 @@ static void config_init()
     config.metric_interval = 10;
 }
 
-static int config_add(char *name, char *value)
+int config_add(char *name, char *value)
 {
     int val;
     if (strcmp(name, "cluster") == 0) {
         if (strlen(value) <= 0) return 0;
         strncpy(config.cluster, value, CLUSTER_NAME_SIZE);
     } else if (strcmp(name, "bind") == 0) {
-        config.bind = atoi(value);
-        if (config.bind > 0xFFFF) return -1;
+        if (socket_parse_port(value, &config.bind) == CORVUS_ERR) {
+            return CORVUS_ERR;
+        }
     } else if (strcmp(name, "syslog") == 0) {
-        config.syslog = atoi(value);
+        config.syslog = atoi(value) ? 1 : 0;
     } else if (strcmp(name, "thread") == 0) {
         config.thread = atoi(value);
         if (config.thread <= 0) config.thread = 4;
@@ -106,7 +107,7 @@ static int config_add(char *name, char *value)
     return 0;
 }
 
-static int read_conf(const char *filename)
+int read_conf(const char *filename)
 {
     FILE *fp = fopen(filename, "r");
     if (fp == NULL) {
@@ -137,7 +138,7 @@ static int read_conf(const char *filename)
     return 0;
 }
 
-static void quit()
+void quit()
 {
     if (config.stats) stats_kill();
 
@@ -155,7 +156,7 @@ static void quit()
     }
 }
 
-static void log_traceback()
+void log_traceback()
 {
     void *stack[64];
     char **symbols;
@@ -185,7 +186,7 @@ static void log_traceback()
     exit(EXIT_FAILURE);
 }
 
-static void sig_handler(int sig)
+void sig_handler(int sig)
 {
     switch (sig) {
         case SIGINT:
@@ -198,7 +199,7 @@ static void sig_handler(int sig)
     }
 }
 
-static void setup_signal()
+void setup_signal()
 {
     struct sigaction act;
     sigemptyset(&act.sa_mask);
@@ -224,18 +225,15 @@ struct context *get_contexts()
     return contexts;
 }
 
-void context_init(struct context *ctx, bool syslog, int log_level)
+void context_init(struct context *ctx)
 {
     memset(ctx, 0, sizeof(struct context));
 
-    ctx->syslog = syslog;
-    ctx->log_level = log_level;
     dict_init(&ctx->server_table);
     ctx->started = false;
     ctx->role = THREAD_UNKNOWN;
     ctx->state = CTX_UNKNOWN;
     mbuf_init(ctx);
-    log_init(ctx);
 
     STAILQ_INIT(&ctx->free_cmdq);
     TAILQ_INIT(&ctx->servers);
@@ -375,7 +373,7 @@ int main(int argc, const char *argv[])
 
     contexts = malloc(sizeof(struct context) * (config.thread + 1));
     for (i = 0; i <= config.thread; i++) {
-        context_init(&contexts[i], config.syslog, config.loglevel);
+        context_init(&contexts[i]);
         contexts[i].role = THREAD_UNKNOWN;
     }
 

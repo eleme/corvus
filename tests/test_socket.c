@@ -12,6 +12,25 @@ TEST(test_socket_address_init) {
     PASS(NULL);
 }
 
+TEST(test_parse_port) {
+    uint16_t port;
+
+    ASSERT(socket_parse_port("abcd", &port) == -1);
+    ASSERT(socket_parse_port("123455", &port) == -1);
+    ASSERT(socket_parse_port("-234", &port) == -1);
+    ASSERT(socket_parse_port("12345", &port) == 0);
+    ASSERT(port == 12345);
+
+    ASSERT(socket_parse_port("", &port) == -1);
+
+    char *d6 = ":";
+    ASSERT(socket_parse_port(d6 + 1, &port) == -1);
+
+    ASSERT(socket_parse_port("12345a", &port) == -1);
+
+    PASS(NULL);
+}
+
 TEST(test_socket_parse_addr) {
     struct address address;
     memset(&address, 0, sizeof(address));
@@ -47,6 +66,7 @@ TEST(test_socket_parse_addr_wrong) {
 
 TEST_CASE(test_socket) {
     RUN_TEST(test_socket_address_init);
+    RUN_TEST(test_parse_port);
     RUN_TEST(test_socket_parse_addr);
     RUN_TEST(test_socket_parse_addr_wrong);
 }

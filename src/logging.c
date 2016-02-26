@@ -10,21 +10,6 @@
 
 static const char *LEVEL_MAP[] = {"DEBUG", "INFO", "WARN", "ERROR"};
 static const int SYSLOG_LEVEL_MAP[] = {LOG_DEBUG, LOG_INFO, LOG_WARNING, LOG_ERR};
-static bool enable_syslog = false;
-static int log_level = INFO;
-
-void log_init(struct context *ctx)
-{
-    if (ctx->syslog) {
-        enable_syslog = true;
-    } else {
-        enable_syslog = false;
-    }
-
-    if (ctx->log_level != -1) {
-        log_level = ctx->log_level;
-    }
-}
 
 void logger(const char *file, int line, int level, const char *fmt, ...)
 {
@@ -33,7 +18,7 @@ void logger(const char *file, int line, int level, const char *fmt, ...)
     char timestamp[64];
     struct timeval now;
 
-    if (level < log_level) return;
+    if (level < config.loglevel) return;
 
     pid_t thread_id = (pid_t)syscall(SYS_gettid);
 
@@ -41,7 +26,7 @@ void logger(const char *file, int line, int level, const char *fmt, ...)
     vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
 
-    if (enable_syslog) {
+    if (config.syslog) {
         syslog(SYSLOG_LEVEL_MAP[level], "[%d] %s", (int)thread_id, msg);
     } else {
         gettimeofday(&now, NULL);
