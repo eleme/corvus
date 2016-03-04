@@ -19,7 +19,7 @@ int proxy_accept(struct connection *proxy)
 
     struct connection *client;
     if ((client = client_create(ctx, fd)) == NULL) {
-        LOG(ERROR, "fail to create client");
+        LOG(ERROR, "proxy_accept: fail to create client");
         return CORVUS_ERR;
     }
 
@@ -57,10 +57,13 @@ void proxy_ready(struct connection *self, uint32_t mask)
 int proxy_init(struct connection *proxy, struct context *ctx, char *host, int port)
 {
     int fd = socket_create_server(host, port);
-    if (fd == -1) return -1;
+    if (fd == -1) {
+        LOG(ERROR, "proxy_init: fail to create server fd");
+        return CORVUS_ERR;
+    }
 
     conn_init(proxy, ctx);
     proxy->fd = fd;
     proxy->ready = proxy_ready;
-    return 0;
+    return CORVUS_OK;
 }

@@ -3,14 +3,16 @@
 #include "corvus.h"
 #include "logging.h"
 
+#include <assert.h>
+
 static struct mbuf *_mbuf_get(struct context *ctx)
 {
     struct mbuf *mbuf;
     uint8_t *buf;
 
-    if (!STAILQ_EMPTY(&ctx->free_mbufq)) {
-        mbuf = STAILQ_FIRST(&ctx->free_mbufq);
-        STAILQ_REMOVE_HEAD(&ctx->free_mbufq, next);
+    if (!TAILQ_EMPTY(&ctx->free_mbufq)) {
+        mbuf = TAILQ_FIRST(&ctx->free_mbufq);
+        TAILQ_REMOVE(&ctx->free_mbufq, mbuf, next);
         ctx->nfree_mbufq--;
     } else {
         buf = (uint8_t*)malloc(config.bufsize);
@@ -23,7 +25,7 @@ static struct mbuf *_mbuf_get(struct context *ctx)
     return mbuf;
 }
 
-static void mbuf_free(struct context *ctx, struct mbuf *mbuf)
+void mbuf_free(struct context *ctx, struct mbuf *mbuf)
 {
     uint8_t *buf;
 
@@ -34,7 +36,7 @@ static void mbuf_free(struct context *ctx, struct mbuf *mbuf)
 void mbuf_init(struct context *ctx)
 {
     ctx->nfree_mbufq = 0;
-    STAILQ_INIT(&ctx->free_mbufq);
+    TAILQ_INIT(&ctx->free_mbufq);
 
     ctx->mbuf_offset = config.bufsize - sizeof(struct mbuf);
 }
@@ -55,9 +57,10 @@ struct mbuf *mbuf_get(struct context *ctx)
 
     mbuf->pos = mbuf->start;
     mbuf->last = mbuf->start;
+    mbuf->queue = NULL;
     mbuf->refcount = 0;
 
-    STAILQ_NEXT(mbuf, next) = NULL;
+    TAILQ_NEXT(mbuf, next) = NULL;
 
     ctx->stats.buffers++;
     return mbuf;
@@ -66,8 +69,8 @@ struct mbuf *mbuf_get(struct context *ctx)
 void mbuf_recycle(struct context *ctx, struct mbuf *mbuf)
 {
     ctx->stats.buffers--;
-    STAILQ_NEXT(mbuf, next) = NULL;
-    STAILQ_INSERT_HEAD(&ctx->free_mbufq, mbuf, next);
+    TAILQ_NEXT(mbuf, next) = NULL;
+    TAILQ_INSERT_HEAD(&ctx->free_mbufq, mbuf, next);
     ctx->nfree_mbufq++;
 }
 
@@ -84,9 +87,9 @@ uint32_t mbuf_write_size(struct mbuf *mbuf)
 void mbuf_destroy(struct context *ctx)
 {
     struct mbuf *buf;
-    while (!STAILQ_EMPTY(&ctx->free_mbufq)) {
-        buf = STAILQ_FIRST(&ctx->free_mbufq);
-        STAILQ_REMOVE_HEAD(&ctx->free_mbufq, next);
+    while (!TAILQ_EMPTY(&ctx->free_mbufq)) {
+        buf = TAILQ_FIRST(&ctx->free_mbufq);
+        TAILQ_REMOVE(&ctx->free_mbufq, buf, next);
         mbuf_free(ctx, buf);
         ctx->nfree_mbufq--;
     }
@@ -96,11 +99,12 @@ struct mbuf *mbuf_queue_get(struct context *ctx, struct mhdr *q)
 {
     struct mbuf *buf = NULL;
 
-    if (!STAILQ_EMPTY(q)) buf = STAILQ_LAST(q, mbuf, next);
+    if (!TAILQ_EMPTY(q)) buf = TAILQ_LAST(q, mhdr);
 
     if (buf == NULL || mbuf_full(buf)) {
         buf = mbuf_get(ctx);
-        STAILQ_INSERT_TAIL(q, buf, next);
+        buf->queue = q;
+        TAILQ_INSERT_TAIL(q, buf, next);
     }
     return buf;
 }
@@ -122,19 +126,35 @@ void mbuf_queue_copy(struct context *ctx, struct mhdr *q, uint8_t *data, int n)
     }
 }
 
-void mbuf_inc_ref(struct mbuf *buf)
+void mbuf_range_clear(struct context *ctx, struct buf_ptr ptr[])
 {
-    buf->refcount++;
+    struct mbuf *n, *b = ptr[0].buf;
+
+    while (b != NULL) {
+        n = TAILQ_NEXT(b, next);
+        b->refcount--;
+        if (b->refcount <= 0) {
+            TAILQ_REMOVE(b->queue, b, next);
+            mbuf_recycle(ctx, b);
+        }
+        if (b == ptr[1].buf) break;
+        b = n;
+    }
+    memset(&ptr[0], 0, sizeof(struct buf_ptr));
+    memset(&ptr[1], 0, sizeof(struct buf_ptr));
 }
 
-void mbuf_dec_ref(struct mbuf *buf)
+void mbuf_decref(struct context *ctx, struct mbuf **bufs, int n)
 {
-    buf->refcount--;
-    LOG(DEBUG, "%d dec ref", buf->refcount);
-}
-
-void mbuf_dec_ref_by(struct mbuf *buf, int count)
-{
-    buf->refcount -= count;
-    LOG(DEBUG, "%d dec ref", buf->refcount);
+    for (int i = 0; i < n; i++) {
+        if (bufs[i] == NULL) {
+            continue;
+        }
+        bufs[i]->refcount--;
+        if (bufs[i]->refcount <= 0) {
+            TAILQ_REMOVE(bufs[i]->queue, bufs[i], next);
+            mbuf_recycle(ctx, bufs[i]);
+            bufs[i] = NULL;
+        }
+    }
 }

@@ -172,7 +172,7 @@ int parse_slots(struct redis_data *data)
     struct redis_data *d;
     struct node_info *node;
 
-    if (data->elements <= 0) return -1;
+    if (data->type != REP_ARRAY || data->elements <= 0) return -1;
 
     for (i = 0; i < data->elements; i++) {
         d = &data->element[i];

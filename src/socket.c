@@ -20,9 +20,9 @@ static int set_reuseaddr(int fd)
     int optval = 1;
     if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)) == -1) {
         LOG(ERROR, "setsockopt SO_REUSEADDR: %s", strerror(errno));
-        return -1;
+        return CORVUS_ERR;
     }
-    return 0;
+    return CORVUS_OK;
 }
 
 static int set_reuseport(int fd)
@@ -30,23 +30,23 @@ static int set_reuseport(int fd)
     int optval = 1;
     if (setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(int)) == -1) {
         LOG(ERROR, "setsockopt SO_REUSEPORT: %s", strerror(errno));
-        return -1;
+        return CORVUS_ERR;
     }
-    return 0;
+    return CORVUS_OK;
 }
 
 static int _listen(int fd, struct sockaddr *sa, socklen_t len, int backlog)
 {
     if (bind(fd, sa, len) == -1) {
         LOG(ERROR, "bind: %s", strerror(errno));
-        return -1;
+        return CORVUS_ERR;
     }
 
     if (listen(fd, backlog) == -1) {
         LOG(ERROR, "listen: %s", strerror(errno));
-        return -1;
+        return CORVUS_ERR;
     }
-    return 0;
+    return CORVUS_OK;
 }
 
 static int _accept(int fd, struct sockaddr *sa, socklen_t *len)
@@ -71,8 +71,8 @@ static inline int _socket(int domain, int type, int protocol)
 {
     int fd;
     if ((fd = socket(domain, type | SOCK_CLOEXEC, protocol)) == -1) {
-        LOG(ERROR, "fail to create socket: %s", strerror(errno));
-        return -1;
+        LOG(ERROR, "socket: %s", strerror(errno));
+        return CORVUS_ERR;
     }
     return fd;
 }
@@ -85,7 +85,9 @@ static int _connect(int fd, const struct sockaddr *addr, socklen_t addrlen)
             switch (errno) {
                 case EINTR: continue;
                 case EINPROGRESS: return CORVUS_INPROGRESS;
-                default: return CORVUS_ERR;
+                default:
+                    LOG(ERROR, "connect: %s", strerror(errno));
+                    return CORVUS_ERR;
             }
         }
         break;
@@ -116,13 +118,13 @@ int socket_set_nonblocking(int fd)
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags == -1) {
         LOG(WARN, "fcntl: %s", strerror(errno));
-        return -1;
+        return CORVUS_ERR;
     }
     if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
         LOG(WARN, "fail to set nonblock for fd %d: %s", fd, strerror(errno));
-        return -1;
+        return CORVUS_ERR;
     }
-    return 0;
+    return CORVUS_OK;
 }
 
 int socket_set_tcpnodelay(int fd)
@@ -130,9 +132,9 @@ int socket_set_tcpnodelay(int fd)
     int optval = 1;
     if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(int)) == -1) {
         LOG(WARN, "setsockopt TCP_NODELAY: %s", strerror(errno));
-        return -1;
+        return CORVUS_ERR;
     }
-    return 0;
+    return CORVUS_OK;
 }
 
 int socket_set_timeout(int fd, int timeout)
@@ -157,6 +159,7 @@ int socket_create_server(char *bindaddr, int port)
     struct addrinfo *p, *servinfo;
 
     if (_getaddrinfo(bindaddr, port, &servinfo, SOCK_STREAM) == CORVUS_ERR) {
+        LOG(ERROR, "socket_create_server: fail to get address info");
         return CORVUS_ERR;
     }
 
@@ -169,31 +172,31 @@ int socket_create_server(char *bindaddr, int port)
 
     if (p == NULL || s == -1) {
         freeaddrinfo(servinfo);
-        return -1;
+        return CORVUS_ERR;
     }
 
     if (socket_set_nonblocking(s) == -1) {
         close(s);
         freeaddrinfo(servinfo);
-        return -1;
+        return CORVUS_ERR;
     }
 
     if (set_reuseaddr(s) == -1) {
         close(s);
         freeaddrinfo(servinfo);
-        return -1;
+        return CORVUS_ERR;
     }
 
     if (set_reuseport(s) == -1) {
         close(s);
         freeaddrinfo(servinfo);
-        return -1;
+        return CORVUS_ERR;
     }
 
     if (_listen(s, p->ai_addr, p->ai_addrlen, 1024) == -1) {
         close(s);
         freeaddrinfo(servinfo);
-        return -1;
+        return CORVUS_ERR;
     }
     freeaddrinfo(servinfo);
 
@@ -202,20 +205,12 @@ int socket_create_server(char *bindaddr, int port)
 
 int socket_create_stream()
 {
-    int s;
-    if ((s = _socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-        return -1;
-    }
-    return s;
+    return _socket(AF_INET, SOCK_STREAM, 0);
 }
 
 int socket_create_udp_client()
 {
-    int s;
-    if ((s = _socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
-        return -1;
-    }
-    return s;
+    return _socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 }
 
 int socket_accept(int fd, char *ip, size_t ip_len, int *port)
@@ -235,11 +230,11 @@ int socket_accept(int fd, char *ip, size_t ip_len, int *port)
 
 int socket_connect(int fd, char *addr, int port)
 {
-    int status;
-    int retval = 0;
+    int status = CORVUS_ERR;
     struct addrinfo *p, *addrs;
 
     if (_getaddrinfo(addr, port, &addrs, SOCK_STREAM) == CORVUS_ERR) {
+        LOG(ERROR, "socket_connect: fail to get address info");
         return CORVUS_ERR;
     }
 
@@ -250,10 +245,7 @@ int socket_connect(int fd, char *addr, int port)
     }
     freeaddrinfo(addrs);
 
-    if (p == NULL) {
-        retval = -1;
-    }
-    return retval;
+    return status;
 }
 
 int socket_read(int fd, struct mbuf *buf)
@@ -299,9 +291,13 @@ int socket_get_sockaddr(char *addr, int port, struct sockaddr_in *dest, int sock
 {
     struct addrinfo *addrs;
     if (_getaddrinfo(addr, port, &addrs, socktype) == CORVUS_ERR) {
+        LOG(ERROR, "socket_get_sockaddr: fail to get address info");
         return CORVUS_ERR;
     }
-    if (addrs == NULL) return CORVUS_ERR;
+    if (addrs == NULL) {
+        LOG(ERROR, "socket_get_sockaddr: fail to get address");
+        return CORVUS_ERR;
+    }
     memcpy(dest, addrs->ai_addr, addrs->ai_addrlen);
     freeaddrinfo(addrs);
     return CORVUS_OK;

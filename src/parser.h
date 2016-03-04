@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include "mbuf.h"
 
 struct mbuf;
 
@@ -71,11 +72,6 @@ struct reader_task {
     struct mbuf *prev_buf;
     struct redis_data *cur_data;
     struct redis_data data;
-};
-
-struct buf_ptr {
-    struct mbuf *buf;
-    uint8_t *pos;
 };
 
 struct reader {
