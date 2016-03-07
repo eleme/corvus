@@ -49,11 +49,7 @@ void mbuf_recycle(struct context *, struct mbuf *);
 uint32_t mbuf_read_size(struct mbuf *);
 uint32_t mbuf_write_size(struct mbuf *);
 void mbuf_destroy(struct context *ctx);
-void mbuf_inc_ref(struct mbuf *buf);
-void mbuf_dec_ref(struct mbuf *buf);
-void mbuf_dec_ref_by(struct mbuf *buf, int count);
 struct mbuf *mbuf_queue_get(struct context *ctx, struct mhdr *q);
-void mbuf_queue_copy(struct context *ctx, struct mhdr *q, uint8_t *data, int n);
 void mbuf_range_clear(struct context *ctx, struct buf_ptr ptr[]);
 void mbuf_decref(struct context *ctx, struct mbuf **bufs, int n);
 

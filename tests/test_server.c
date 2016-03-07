@@ -15,14 +15,13 @@ TEST(test_server_eof) {
     struct connection *server = server_create(ctx, fd);
     conn_register(server);
 
-    struct command cmd;
-
+    struct command *cmd = cmd_create(ctx);
     struct command *cmd1 = cmd_create(ctx);
     struct command *cmd2 = cmd_create(ctx);
 
     char *a = "test";
 
-    cmd1->parent = &cmd;
+    cmd1->parent = cmd;
     cmd1->server = cmd2->server = server;
     cmd1->cmd_count = cmd2->cmd_count = 10;
 
@@ -51,6 +50,7 @@ TEST(test_server_eof) {
     ASSERT(TAILQ_EMPTY(&server->local_data));
 
     cmd_free(cmd1);
+    cmd_free(cmd);
     conn_recycle(ctx, server);
 
     PASS(NULL);

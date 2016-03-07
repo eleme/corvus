@@ -3,8 +3,6 @@
 #include "corvus.h"
 #include "logging.h"
 
-#include <assert.h>
-
 static struct mbuf *_mbuf_get(struct context *ctx)
 {
     struct mbuf *mbuf;
@@ -107,23 +105,6 @@ struct mbuf *mbuf_queue_get(struct context *ctx, struct mhdr *q)
         TAILQ_INSERT_TAIL(q, buf, next);
     }
     return buf;
-}
-
-void mbuf_queue_copy(struct context *ctx, struct mhdr *q, uint8_t *data, int n)
-{
-    struct mbuf *buf = mbuf_queue_get(ctx, q);
-    int remain = n, wlen, size, len = 0;
-    while (remain > 0) {
-        wlen = mbuf_write_size(buf);
-        size = remain < wlen ? remain : wlen;
-        memcpy(buf->last, data + len, size);
-        buf->last += size;
-        len += size;
-        remain -= size;
-        if (wlen - size <= 0) {
-            buf = mbuf_queue_get(ctx, q);
-        }
-    }
 }
 
 void mbuf_range_clear(struct context *ctx, struct buf_ptr ptr[])

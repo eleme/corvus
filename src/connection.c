@@ -14,8 +14,6 @@
 #include <sys/socket.h>
 #include <netdb.h>
 
-#include <assert.h>
-
 #define EMPTY_CMD_QUEUE(queue, field)     \
 do {                                      \
     struct command *c;                    \
@@ -146,6 +144,9 @@ void conn_free(struct connection *conn)
     }
     conn->status = DISCONNECTED;
     conn->registered = 0;
+
+    reader_free(&conn->reader);
+    reader_init(&conn->reader);
 
     EMPTY_CMD_QUEUE(&conn->cmd_queue, cmd_next);
     EMPTY_CMD_QUEUE(&conn->ready_queue, ready_next);

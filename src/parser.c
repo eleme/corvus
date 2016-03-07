@@ -94,7 +94,7 @@ struct redis_data *redis_data_get(struct reader_task *task, int type)
             task->cur_data->type = type;
             return task->cur_data;
         default:
-            LOG(ERROR, "redis_data_get: invalid task type %d", task->type);
+            LOG(ERROR, "%s: invalid task type %d", __func__, task->type);
             return NULL;
     }
     return NULL;

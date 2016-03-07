@@ -311,17 +311,10 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
 
 int cmd_get_slot(struct redis_data *data)
 {
-    if (data->elements < 2) {
-        LOG(ERROR, "cmd_get_slot: invalid data elements %d", data->elements);
-        return CORVUS_ERR;
-    }
-    struct redis_data *cmd_key = &data->element[1];
+    ASSERT_ELEMENTS(data->elements >= 2, data);
 
-    if (cmd_key->type != REP_STRING) {
-        LOG(ERROR, "cmd_get_slot: wrong token type, expect %d got %d",
-                REP_STRING, cmd_key->type);
-        return CORVUS_ERR;
-    }
+    struct redis_data *cmd_key = &data->element[1];
+    ASSERT_TYPE(cmd_key, REP_STRING);
     return slot_get(&cmd_key->pos);
 }
 
@@ -377,25 +370,29 @@ int cmd_forward_basic(struct command *cmd)
 int cmd_forward_multikey(struct command *cmd, struct redis_data *data,
         uint8_t *prefix, size_t len)
 {
-    struct redis_data *key;
-    if (data->elements < 2) {
-        LOG(ERROR, "cmd_forward_multikey: invalid data elements %d", data->elements);
-        return CORVUS_ERR;
-    }
+    ASSERT_ELEMENTS(data->elements >= 2, data);
 
     cmd->cmd_count = data->elements - 1;
 
     size_t i;
     struct command *ncmd;
+    struct redis_data *key;
     for (i = 1; i < data->elements; i++) {
         key = &data->element[i];
 
         ncmd = cmd_create(cmd->ctx);
-        ncmd->slot = slot_get(&key->pos);
         ncmd->parent = cmd;
         ncmd->client = cmd->client;
-
         STAILQ_INSERT_TAIL(&cmd->sub_cmds, ncmd, sub_cmd_next);
+
+        if (key->type != REP_STRING) {
+            LOG(ERROR, "%s: expect data type %d got %d", __func__,
+                    REP_STRING, key->type);
+            cmd_mark_fail(ncmd, rep_forward_err);
+            continue;
+        }
+
+        ncmd->slot = slot_get(&key->pos);
 
         conn_add_data(ncmd->client, prefix, len, &ncmd->req_buf[0], NULL);
         ncmd->req_buf[0].buf->refcount++;
@@ -414,11 +411,7 @@ int cmd_forward_multikey(struct command *cmd, struct redis_data *data,
 
 int cmd_forward_mset(struct command *cmd, struct redis_data *data)
 {
-    LOG(DEBUG, "elements %d", data->elements);
-    if (data->elements < 3 || (data->elements & 1) == 0) {
-        LOG(ERROR, "cmd_forward_mset: invalid data elements %d", data->elements);
-        return CORVUS_ERR;
-    }
+    ASSERT_ELEMENTS(data->elements >= 3 && (data->elements & 1) == 1, data);
 
     cmd->cmd_count = (data->elements - 1) >> 1;
 
@@ -430,11 +423,18 @@ int cmd_forward_mset(struct command *cmd, struct redis_data *data)
         value = &data->element[i + 1];
 
         ncmd = cmd_create(cmd->ctx);
-        ncmd->slot = slot_get(&key->pos);
         ncmd->parent = cmd;
         ncmd->client = cmd->client;
-
         STAILQ_INSERT_TAIL(&cmd->sub_cmds, ncmd, sub_cmd_next);
+
+        if (key->type != REP_STRING || value->type != REP_STRING) {
+            LOG(ERROR, "%s: expect key/value data type %d got %d/%d",
+                    __func__, REP_STRING, key->type, value->type);
+            cmd_mark_fail(ncmd, rep_forward_err);
+            continue;
+        }
+
+        ncmd->slot = slot_get(&key->pos);
 
         conn_add_data(ncmd->client, (uint8_t*)rep_set, 13, &ncmd->req_buf[0], NULL);
         ncmd->req_buf[0].buf->refcount++;
@@ -454,10 +454,8 @@ int cmd_forward_mset(struct command *cmd, struct redis_data *data)
 
 int cmd_forward_eval(struct command *cmd, struct redis_data *data)
 {
-    if (data->elements < 4) {
-        LOG(ERROR, "cmd_forward_eval: invalid data elements %d", data->elements);
-        return CORVUS_ERR;
-    }
+    ASSERT_ELEMENTS(data->elements >= 4, data);
+    ASSERT_TYPE(&data->element[3], REP_STRING);
 
     cmd->slot = slot_get(&data->element[3].pos);
     return cmd_forward_basic(cmd);
@@ -477,7 +475,7 @@ int cmd_forward_complex(struct command *cmd, struct redis_data *data)
         case CMD_EVAL:
             return cmd_forward_eval(cmd, data);
         default:
-            LOG(ERROR, "unknown command type %d", cmd->cmd_type);
+            LOG(ERROR, "%s: unknown command type %d", __func__, cmd->cmd_type);
             return CORVUS_ERR;
     }
     return CORVUS_OK;
@@ -543,7 +541,7 @@ int cmd_proxy(struct command *cmd)
         case CMD_INFO:
             return cmd_info(cmd);
         default:
-            LOG(ERROR, "unknown command type %d", cmd->cmd_type);
+            LOG(ERROR, "%s: unknown command type %d", __func__, cmd->cmd_type);
             return CORVUS_ERR;
     }
     return CORVUS_OK;
@@ -568,27 +566,18 @@ int cmd_forward(struct command *cmd, struct redis_data *data)
 
 int cmd_parse_token(struct command *cmd, struct redis_data *data)
 {
-    if (data->type != REP_ARRAY) {
-        LOG(ERROR, "cmd_parse_token: invalid command");
-        return CORVUS_ERR;
-    }
-    if (data->elements <= 0) {
-        LOG(ERROR, "cmd_parse_token: invalid data elements %d", data->elements);
-        return CORVUS_ERR;
-    }
+    ASSERT_TYPE(data, REP_ARRAY);
+    ASSERT_ELEMENTS(data->elements >= 1, data);
 
     struct redis_data *f1 = &data->element[0];
-    if (f1->type != REP_STRING) {
-        LOG(ERROR, "cmd_parse_token: wrong token type, expect %d got %d",
-                REP_STRING, f1->type);
-        return CORVUS_ERR;
-    }
+
+    ASSERT_TYPE(f1, REP_STRING);
 
     cmd->request_type = cmd_get_type(cmd, &f1->pos);
     if (cmd->request_type <= 0) {
         char name[f1->pos.str_len + 1];
         pos_to_str(&f1->pos, name);
-        LOG(ERROR, "cmd_parse_token: fail to parse command %s", name);
+        LOG(ERROR, "%s: fail to parse command %s", __func__, name);
         return CORVUS_ERR;
     }
     return CORVUS_OK;
@@ -606,6 +595,10 @@ int cmd_parse_req(struct command *cmd, struct mbuf *buf)
 
     if (reader_ready(r)) {
         cmd->req_time[0] = get_time();
+
+        ASSERT_TYPE(&r->data, REP_ARRAY);
+        ASSERT_ELEMENTS(r->data.elements >= 1, &r->data);
+
         cmd->keys = r->data.elements - 1;
         cmd->parse_done = 1;
         cmd->cmd_count = 1;
