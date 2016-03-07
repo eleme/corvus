@@ -203,11 +203,11 @@ int stats_init(int interval)
 
     if (pthread_create(&stats_thread, &attr, stats_daemon, NULL) != 0) {
         LOG(ERROR, "can't initialize stats thread");
-        return -1;
+        return CORVUS_ERR;
     }
     LOG(INFO, "starting stats thread");
 
-    return 0;
+    return CORVUS_OK;
 }
 
 void stats_kill()
@@ -228,7 +228,9 @@ int stats_resolve_addr(char *addr)
     struct address a;
 
     memset(&dest, 0, sizeof(struct sockaddr_in));
-    if (socket_parse_addr(addr, &a) == -1) return -1;
-    if (socket_get_sockaddr(a.host, a.port, &dest, SOCK_DGRAM) == -1) return -1;
-    return 0;
+    if (socket_parse_addr(addr, &a) == CORVUS_ERR) {
+        LOG(ERROR, "stats_resolve_addr: fail to parse addr %s", addr);
+        return CORVUS_ERR;
+    }
+    return socket_get_sockaddr(a.host, a.port, &dest, SOCK_DGRAM);
 }

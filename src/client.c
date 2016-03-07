@@ -8,45 +8,80 @@
 #include "logging.h"
 #include "event.h"
 
-int client_write(struct connection *client)
+int client_read(struct connection *client)
 {
     int status;
-    struct command *cmd = STAILQ_FIRST(&client->cmd_queue);
-    LOG(DEBUG, "client %d %d", cmd->cmd_count, cmd->cmd_done_count);
-    if (cmd->cmd_count <= 0 || !cmd->parse_done || cmd->cmd_count != cmd->cmd_done_count) {
-        return CORVUS_OK;
-    }
+    struct command *cmd;
 
-    if (cmd->iov.len <= 0) {
+    do {
+        cmd = cmd_get(client);
+        if (cmd == NULL) {
+            LOG(ERROR, "client_read: fail to create command from client %d", client->fd);
+            return CORVUS_ERR;
+        }
+
+        cmd->client = client;
+        status = cmd_read(cmd, client, MODE_REQ);
+    } while (status == CORVUS_OK);
+
+    return status;
+}
+
+void client_make_iov(struct connection *client)
+{
+    struct command *cmd;
+    int64_t t = get_time();
+
+    while (!STAILQ_EMPTY(&client->cmd_queue)) {
+        cmd = STAILQ_FIRST(&client->cmd_queue);
+        LOG(DEBUG, "client make iov %d %d", cmd->cmd_count, cmd->cmd_done_count);
+        if (cmd->cmd_count != cmd->cmd_done_count) {
+            break;
+        }
+        STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
+        STAILQ_NEXT(cmd, cmd_next) = NULL;
+
         /* before write */
-        cmd->req_time[1] = get_time();
-        cmd_make_iovec(cmd, &cmd->iov);
-    }
+        cmd->req_time[1] = t;
 
-    if (cmd->iov.len <= 0) {
-        LOG(WARN, "no data to write");
-        STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
-        cmd_free(cmd);
-        return CORVUS_ERR;
-    }
+        cmd_make_iovec(cmd, &client->iov);
 
-    status = cmd_iov_write(cmd->ctx, &cmd->iov, client->fd);
-    if (status == CORVUS_ERR) return CORVUS_ERR;
-    if (status == CORVUS_AGAIN) return CORVUS_OK;
-    if (cmd->iov.cursor >= cmd->iov.len) {
-        STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
         cmd_stats(cmd);
         cmd_free(cmd);
     }
+    LOG(DEBUG, "client make iov %d", client->iov.len);
+}
 
-    if (cmd->ctx->state == CTX_BEFORE_QUIT
-            || cmd->ctx->state == CTX_QUITTING)
-    {
+int client_write(struct connection *client)
+{
+    if (!STAILQ_EMPTY(&client->cmd_queue)) {
+        client_make_iov(client);
+    }
+
+    if (client->iov.len <= 0) {
+        cmd_iov_reset(&client->iov);
+        return CORVUS_OK;
+    }
+
+    int status = conn_write(client, 1);
+
+    if (status == CORVUS_ERR) {
+        LOG(ERROR, "client_write: client %d fail to write iov", client->fd);
+        return CORVUS_ERR;
+    }
+    if (status == CORVUS_AGAIN) return CORVUS_OK;
+
+    if (client->iov.cursor >= client->iov.len) {
+        cmd_iov_reset(&client->iov);
+    }
+    if (conn_register(client) == CORVUS_ERR) {
+        LOG(ERROR, "client_write: fail to reregister client %d", client->fd);
         return CORVUS_ERR;
     }
 
-    if (conn_register(client) == CORVUS_ERR) {
-        LOG(ERROR, "fail to reregister client %d", client->fd);
+    if (client->ctx->state == CTX_BEFORE_QUIT
+            || client->ctx->state == CTX_QUITTING)
+    {
         return CORVUS_ERR;
     }
 
@@ -67,15 +102,9 @@ void client_ready(struct connection *self, uint32_t mask)
     }
     if (mask & E_READABLE) {
         LOG(DEBUG, "client readable");
-        struct command *cmd = cmd_get_lastest(self->ctx, &self->cmd_queue);
-        cmd->client = self;
-        status = cmd_read_request(cmd, self->fd);
+
+        status = client_read(self);
         if (status == CORVUS_ERR || status == CORVUS_EOF) {
-            client_eof(self);
-            return;
-        }
-        if (status != CORVUS_AGAIN && conn_register(self) == CORVUS_ERR) {
-            LOG(ERROR, "fail to reregister client %d", self->fd);
             client_eof(self);
             return;
         }
@@ -120,20 +149,21 @@ void client_eof(struct connection *client)
     while (!STAILQ_EMPTY(&client->cmd_queue)) {
         cmd = STAILQ_FIRST(&client->cmd_queue);
         STAILQ_REMOVE_HEAD(&client->cmd_queue, cmd_next);
-        if (STAILQ_EMPTY(&cmd->sub_cmds)) {
-            cmd_free(cmd);
-            continue;
-        }
-        cmd_set_stale(cmd, cmd);
-        if (cmd->refcount <= 0) {
-            cmd_free(cmd);
-        }
+        cmd_set_stale(cmd);
     }
 
     client->ctx->stats.connected_clients--;
 
     event_deregister(&client->ctx->loop, client);
-    conn_free(client);
-    conn_buf_free(client);
-    conn_recycle(client->ctx, client);
+
+    // don't care response any more
+    cmd_iov_clear(client->ctx, &client->iov);
+    cmd_iov_reset(&client->iov);
+
+    // request may not write
+    if (client->refcount <= 0) {
+        conn_free(client);
+        conn_buf_free(client);
+        conn_recycle(client->ctx, client);
+    }
 }

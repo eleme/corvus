@@ -247,6 +247,7 @@ void context_free(struct context *ctx)
     struct dict_iter iter = DICT_ITER_INITIALIZER;
     DICT_FOREACH(&ctx->server_table, &iter) {
         conn = (struct connection*)(iter.value);
+        cmd_iov_free(&conn->iov);
         conn_free(conn);
         conn_buf_free(conn);
         free(conn);
@@ -268,6 +269,7 @@ void context_free(struct context *ctx)
     /* connection queue */
     while (!TAILQ_EMPTY(&ctx->conns)) {
         conn = TAILQ_FIRST(&ctx->conns);
+        cmd_iov_free(&conn->iov);
         if (conn->fd != -1) {
             conn_free(conn);
             conn_buf_free(conn);
@@ -392,7 +394,7 @@ int main(int argc, const char *argv[])
     LOG(INFO, "serve at 0.0.0.0:%d", config.bind);
 
     if (strlen(config.statsd_addr) > 0) {
-        if (stats_resolve_addr(config.statsd_addr) == -1) {
+        if (stats_resolve_addr(config.statsd_addr) == CORVUS_ERR) {
             LOG(WARN, "fail to resolve statsd address");
         } else {
             config.stats = 1;

@@ -32,34 +32,44 @@ do {                                      \
 
 static int verify_server(struct connection *server)
 {
-    if (server->status != DISCONNECTED) return 0;
-    if (server->fd != -1) close(server->fd);
+    if (server->status != DISCONNECTED) {
+        return CORVUS_OK;
+    }
+
+    if (server->fd != -1) {
+        close(server->fd);
+    }
 
     server->fd = conn_create_fd();
     if (server->fd == -1) {
         LOG(ERROR, "verify_server: fail to create fd");
         conn_free(server);
-        return -1;
+        return CORVUS_ERR;
     }
 
-    if (conn_connect(server) == -1) {
-        LOG(ERROR, "fail to connect %s:%d", server->addr.host, server->addr.port);
+    if (conn_connect(server) == CORVUS_ERR) {
+        LOG(ERROR, "verify_server: fail to connect %s:%d",
+                server->addr.host, server->addr.port);
         conn_free(server);
-        return -1;
+        return CORVUS_ERR;
     }
     server->registered = 0;
-    return 0;
+    return CORVUS_OK;
 }
 
 static struct connection *conn_create_server(struct context *ctx, struct address *addr, char *key)
 {
     int fd = conn_create_fd();
-    if (fd == -1) return NULL;
+    if (fd == -1) {
+        LOG(ERROR, "conn_create_server: fail to create fd");
+        return NULL;
+    }
     struct connection *server = server_create(ctx, fd);
     memcpy(&server->addr, addr, sizeof(server->addr));
 
-    if (conn_connect(server) == -1) {
-        LOG(ERROR, "fail to connect %s:%d", server->addr.host, server->addr.port);
+    if (conn_connect(server) == CORVUS_ERR) {
+        LOG(ERROR, "conn_create_server: fail to connect %s:%d",
+                server->addr.host, server->addr.port);
         conn_free(server);
         conn_buf_free(server);
         conn_recycle(ctx, server);
@@ -76,6 +86,7 @@ void conn_init(struct connection *conn, struct context *ctx)
 {
     conn->ctx = ctx;
     conn->fd = -1;
+    conn->refcount = 0;
     conn->last_active = -1;
     conn->status = DISCONNECTED;
     conn->ready = NULL;
@@ -86,12 +97,14 @@ void conn_init(struct connection *conn, struct context *ctx)
     STAILQ_INIT(&conn->cmd_queue);
     STAILQ_INIT(&conn->ready_queue);
     STAILQ_INIT(&conn->waiting_queue);
-    STAILQ_INIT(&conn->data);
+    TAILQ_INIT(&conn->data);
+    TAILQ_INIT(&conn->local_data);
 
     TAILQ_RESET(conn, next);
 
-    memset(&conn->iov, 0, sizeof(conn->iov));
     memset(&conn->dsn, 0, sizeof(conn->dsn));
+
+    reader_init(&conn->reader);
 }
 
 struct connection *conn_create(struct context *ctx)
@@ -103,6 +116,7 @@ struct connection *conn_create(struct context *ctx)
         ctx->nfree_connq--;
     } else {
         conn = malloc(sizeof(struct connection));
+        memset(&conn->iov, 0, sizeof(conn->iov));
     }
     conn_init(conn, ctx);
     ctx->stats.conns++;
@@ -111,14 +125,14 @@ struct connection *conn_create(struct context *ctx)
 
 int conn_connect(struct connection *conn)
 {
-    int status = -1;
+    int status;
     status = socket_connect(conn->fd, conn->addr.host, conn->addr.port);
     switch (status) {
-        case CORVUS_ERR: conn->status = DISCONNECTED; return -1;
+        case CORVUS_ERR: conn->status = DISCONNECTED; return CORVUS_ERR;
         case CORVUS_INPROGRESS: conn->status = CONNECTING; break;
         case CORVUS_OK: conn->status = CONNECTED; break;
     }
-    return 0;
+    return CORVUS_OK;
 }
 
 void conn_free(struct connection *conn)
@@ -131,7 +145,8 @@ void conn_free(struct connection *conn)
     conn->status = DISCONNECTED;
     conn->registered = 0;
 
-    cmd_iov_free(&conn->iov);
+    reader_free(&conn->reader);
+    reader_init(&conn->reader);
 
     EMPTY_CMD_QUEUE(&conn->cmd_queue, cmd_next);
     EMPTY_CMD_QUEUE(&conn->ready_queue, ready_next);
@@ -141,16 +156,21 @@ void conn_free(struct connection *conn)
 void conn_buf_free(struct connection *conn)
 {
     struct mbuf *buf;
-    while (!STAILQ_EMPTY(&conn->data)) {
-        buf = STAILQ_FIRST(&conn->data);
-        STAILQ_REMOVE_HEAD(&conn->data, next);
+    while (!TAILQ_EMPTY(&conn->data)) {
+        buf = TAILQ_FIRST(&conn->data);
+        TAILQ_REMOVE(&conn->data, buf, next);
+        mbuf_recycle(conn->ctx, buf);
+    }
+    while (!TAILQ_EMPTY(&conn->local_data)) {
+        buf = TAILQ_FIRST(&conn->local_data);
+        TAILQ_REMOVE(&conn->local_data, buf, next);
         mbuf_recycle(conn->ctx, buf);
     }
 }
 
 void conn_recycle(struct context *ctx, struct connection *conn)
 {
-    if (!STAILQ_EMPTY(&conn->data)) {
+    if (!TAILQ_EMPTY(&conn->data)) {
         LOG(WARN, "connection recycle, data buffer not empty");
     }
 
@@ -166,14 +186,16 @@ void conn_recycle(struct context *ctx, struct connection *conn)
 int conn_create_fd()
 {
     int fd = socket_create_stream();
-    if (fd == -1) return -1;
+    if (fd == -1) {
+        LOG(ERROR, "conn_create_fd: fail to create socket");
+        return CORVUS_ERR;
+    }
     if (socket_set_nonblocking(fd) == -1) {
-        LOG(ERROR, "fail to set nonblocking");
-        return -1;
+        LOG(ERROR, "fail to set nonblocking on fd %d", fd);
+        return CORVUS_ERR;
     }
     if (socket_set_tcpnodelay(fd) == -1) {
-        LOG(ERROR, "fail to set tcpnodelay");
-        return -1;
+        LOG(WARN, "fail to set tcpnodelay on fd %d", fd);
     }
     return fd;
 }
@@ -186,7 +208,7 @@ struct connection *conn_get_server_from_pool(struct context *ctx, struct address
     socket_get_key(addr, key);
     server = dict_get(&ctx->server_table, key);
     if (server != NULL) {
-        if (verify_server(server) == -1) return NULL;
+        if (verify_server(server) == CORVUS_ERR) return NULL;
         return server;
     }
 
@@ -204,8 +226,8 @@ struct connection *conn_get_raw_server(struct context *ctx)
         if (server == NULL) continue;
         break;
     }
-    if (i >= config.node.len) {
-        LOG(ERROR, "cannot connect to redis server.");
+    if (server == NULL) {
+        LOG(ERROR, "conn_get_raw_server: cannot connect to redis server.");
         return NULL;
     }
     return server;
@@ -226,28 +248,94 @@ struct mbuf *conn_get_buf(struct connection *conn)
 {
     struct mbuf *buf = NULL;
 
-    if (!STAILQ_EMPTY(&conn->data)) buf = STAILQ_LAST(&conn->data, mbuf, next);
+    if (!TAILQ_EMPTY(&conn->data)) buf = TAILQ_LAST(&conn->data, mhdr);
 
     if (buf == NULL || buf->pos >= buf->end) {
         buf = mbuf_get(conn->ctx);
-        STAILQ_INSERT_TAIL(&conn->data, buf, next);
+        buf->queue = &conn->data;
+        TAILQ_INSERT_TAIL(&conn->data, buf, next);
     }
     return buf;
 }
 
 int conn_register(struct connection *conn)
 {
-    int status;
     struct context *ctx = conn->ctx;
     switch (conn->registered) {
         case 1:
-            status = event_reregister(&ctx->loop, conn, E_WRITABLE | E_READABLE);
-            if (status == -1) return CORVUS_ERR;
-            break;
+            return event_reregister(&ctx->loop, conn, E_WRITABLE | E_READABLE);
         case 0:
-            status = event_register(&ctx->loop, conn);
-            if (status == -1) return CORVUS_ERR;
-            break;
+            return event_register(&ctx->loop, conn);
     }
     return CORVUS_OK;
+}
+
+void conn_add_data(struct connection *conn, uint8_t *data, int n,
+        struct buf_ptr *start, struct buf_ptr *end)
+{
+    struct mhdr *queue = &conn->local_data;
+    struct context *ctx = conn->ctx;
+    struct mbuf *buf = mbuf_queue_get(ctx, queue);
+    int remain = n, wlen, size, len = 0;
+
+    if (remain > 0 && start != NULL) {
+        start->pos = buf->last;
+        start->buf = buf;
+    }
+
+    while (remain > 0) {
+        wlen = mbuf_write_size(buf);
+        size = remain < wlen ? remain : wlen;
+        memcpy(buf->last, data + len, size);
+        buf->last += size;
+        len += size;
+        remain -= size;
+        if (remain <= 0 && end != NULL) {
+            end->pos = buf->last;
+            end->buf = buf;
+        }
+        if (wlen - size <= 0) {
+            buf = mbuf_queue_get(ctx, queue);
+        }
+    }
+}
+
+int conn_write(struct connection *conn, int clear)
+{
+    ssize_t remain = 0, status, bytes = 0, count = 0;
+
+    int i, n = 0;
+    struct iovec *vec = conn->iov.data + conn->iov.cursor;
+    struct mbuf **bufs = conn->iov.buf_ptr + conn->iov.cursor;
+
+    while (n < conn->iov.len - conn->iov.cursor) {
+        if (n >= CORVUS_IOV_MAX || bytes >= SSIZE_MAX) break;
+        bytes += vec[n++].iov_len;
+    }
+
+    status = socket_write(conn->fd, vec, n);
+    if (status == CORVUS_AGAIN || status == CORVUS_ERR) return status;
+
+    conn->ctx->stats.send_bytes += status;
+
+    if (status < bytes) {
+        for (i = 0; i < n; i++) {
+            count += vec[i].iov_len;
+            if (count > status) {
+                remain = vec[i].iov_len - (count - status);
+                vec[i].iov_base = (char*)vec[i].iov_base + remain;
+                vec[i].iov_len -= remain;
+                break;
+            }
+        }
+        n = i;
+    }
+
+    conn->iov.cursor += n;
+
+    if (clear) {
+        mbuf_decref(conn->ctx, bufs, n);
+    }
+
+    return status;
 }

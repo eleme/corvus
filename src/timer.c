@@ -92,7 +92,7 @@ int timer_start(struct connection *timer)
 
     if (clock_gettime(CLOCK_REALTIME, &now) == -1) {
         LOG(ERROR, "timer: fail to get current time");
-        return -1;
+        return CORVUS_ERR;
     }
 
     spec.it_value.tv_sec = now.tv_sec;
@@ -102,9 +102,9 @@ int timer_start(struct connection *timer)
 
     if (timerfd_settime(timer->fd, TFD_TIMER_ABSTIME, &spec, NULL) == -1) {
         LOG(ERROR, "timer fail to settime: %s", strerror(errno));
-        return -1;
+        return CORVUS_ERR;
     }
-    return 0;
+    return CORVUS_OK;
 }
 
 int timer_init(struct connection *timer, struct context *ctx)
@@ -114,9 +114,9 @@ int timer_init(struct connection *timer, struct context *ctx)
     int fd = timerfd_create(CLOCK_REALTIME, TFD_NONBLOCK | TFD_CLOEXEC);
     if (fd == -1) {
         LOG(ERROR, "fail to create timerfd: %s", strerror(errno));
-        return -1;
+        return CORVUS_ERR;
     }
     timer->fd = fd;
     timer->ready = timer_ready;
-    return 0;
+    return CORVUS_OK;
 }

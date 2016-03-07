@@ -188,19 +188,18 @@ static const char *rep_ping = "+PONG\r\n";
 static struct cmd_item cmds[] = {CMD_DO(CMD_BUILD_MAP)};
 static struct dict command_map;
 
-static inline uint8_t *cmd_get_data(struct mbuf *b, struct buf_ptr *start,
-        struct buf_ptr *end, int *len)
+static inline uint8_t *cmd_get_data(struct mbuf *b, struct buf_ptr ptr[], int *len)
 {
     uint8_t *data;
-    if (b == start->buf && b == end->buf) {
-        data = start->pos;
-        *len = end->pos - start->pos;
-    } else if (b == start->buf) {
-        data = start->pos;
-        *len = b->last - start->pos;
-    } else if (b == end->buf) {
+    if (b == ptr[0].buf && b == ptr[1].buf) {
+        data = ptr[0].pos;
+        *len = ptr[1].pos - ptr[0].pos;
+    } else if (b == ptr[0].buf) {
+        data = ptr[0].pos;
+        *len = b->last - ptr[0].pos;
+    } else if (b == ptr[1].buf) {
         data = b->start;
-        *len = end->pos - b->start;
+        *len = ptr[1].pos - b->start;
     } else {
         data = b->start;
         *len = b->last - b->start;
@@ -213,15 +212,12 @@ static void cmd_init(struct context *ctx, struct command *cmd)
     memset(cmd, 0, sizeof(struct command));
 
     cmd->ctx = ctx;
-    reader_init(&cmd->reader);
-
-    STAILQ_INIT(&cmd->buf_queue);
-    STAILQ_INIT(&cmd->rep_queue);
 
     cmd->slot = -1;
     cmd->cmd_type = -1;
     cmd->request_type = -1;
     cmd->fail_reason = (char*)rep_err;
+    cmd->cmd_count = -1;
 
     STAILQ_INIT(&cmd->sub_cmds);
 }
@@ -267,7 +263,9 @@ static int cmd_get_type(struct command *cmd, struct pos_array *pos)
     key[pos->str_len] = '\0';
 
     struct cmd_item *item = dict_get(&command_map, key);
-    if (item == NULL) return -1;
+    if (item == NULL) {
+        return CORVUS_ERR;
+    }
     cmd->cmd_type = item->value;
     return item->type;
 }
@@ -311,62 +309,29 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             stats->remote_nodes);
 }
 
-int cmd_apply_range(struct command *cmd, int type)
+int cmd_get_slot(struct redis_data *data)
 {
-    struct mbuf *first, *last;
-    struct buf_ptr *start, *end;
+    ASSERT_ELEMENTS(data->elements >= 2, data);
 
-    switch (type) {
-        case MODE_REQ:
-            if (STAILQ_EMPTY(&cmd->buf_queue)) return CORVUS_ERR;
-            first = STAILQ_FIRST(&cmd->buf_queue);
-            last = STAILQ_LAST(&cmd->buf_queue, mbuf, next);
-            start = &cmd->req_buf[0];
-            end = &cmd->req_buf[1];
-            break;
-        case MODE_REP:
-            if (STAILQ_EMPTY(&cmd->rep_queue)) return CORVUS_ERR;
-            first = STAILQ_FIRST(&cmd->rep_queue);
-            last = STAILQ_LAST(&cmd->rep_queue, mbuf, next);
-            start = &cmd->rep_buf[0];
-            end = &cmd->rep_buf[1];
-            break;
-        default:
-            return CORVUS_ERR;
-    }
-
-    start->buf = first;
-    start->pos = first->pos;
-    end->buf = last;
-    end->pos = last->last;
-    return CORVUS_OK;
+    struct redis_data *cmd_key = &data->element[1];
+    ASSERT_TYPE(cmd_key, REP_STRING);
+    return slot_get(&cmd_key->pos);
 }
 
-void cmd_add_fragment(struct command *cmd, struct pos_array *data)
+void cmd_add_fragment(struct command *cmd, struct pos_array *data,
+        struct buf_ptr *start, struct buf_ptr *end)
 {
     char buf[32];
     int n = snprintf(buf, sizeof(buf), "$%d\r\n", data->str_len);
-    mbuf_queue_copy(cmd->ctx, &cmd->buf_queue, (uint8_t*)buf, n);
+    conn_add_data(cmd->client, (uint8_t*)buf, n, start, NULL);
 
     int i;
     struct pos *p;
     for (i = 0; i < data->pos_len; i++) {
         p = &data->items[i];
-        mbuf_queue_copy(cmd->ctx, &cmd->buf_queue, p->str, p->len);
+        conn_add_data(cmd->client, p->str, p->len, NULL, NULL);
     }
-    mbuf_queue_copy(cmd->ctx, &cmd->buf_queue, (uint8_t*)"\r\n", 2);
-}
-
-int cmd_get_slot(struct redis_data *data)
-{
-    if (data->elements < 2) return -1;
-    struct redis_data *cmd_key = &data->element[1];
-
-    if (cmd_key->type != REP_STRING) return -1;
-    struct pos_array *pos = &cmd_key->pos;
-    if (pos == NULL) return -1;
-
-    return slot_get(pos);
+    conn_add_data(cmd->client, (uint8_t*)"\r\n", 2, NULL, end);
 }
 
 int cmd_forward_basic(struct command *cmd)
@@ -376,55 +341,64 @@ int cmd_forward_basic(struct command *cmd)
     struct context *ctx = cmd->ctx;
 
     slot = cmd->slot;
-    if (slot == -1) return CORVUS_ERR;
+    if (slot == -1) {
+        LOG(ERROR, "cmd_forward_basic: slot %d is invalid", slot);
+        return CORVUS_ERR;
+    }
 
-    LOG(DEBUG, "slot %d", slot);
     server = conn_get_server(ctx, slot);
-    if (server == NULL) return CORVUS_ERR;
+    if (server == NULL) {
+        LOG(ERROR, "cmd_forward_basic: fail to get server with slot %d", slot);
+        return CORVUS_ERR;
+    }
     cmd->server = server;
 
     server->last_active = time(NULL);
+
+    LOG(DEBUG, "command with slot %d ready", slot);
+
     STAILQ_INSERT_TAIL(&server->ready_queue, cmd, ready_next);
     if (conn_register(server) == -1) {
-        LOG(ERROR, "fail to register server %d", server->fd);
+        LOG(ERROR, "cmd_forward_basic: fail to register server %d", server->fd);
         /* cmd already marked failed in server_eof */
         server_eof(server, rep_err);
-    } else {
-        LOG(DEBUG, "register server event");
     }
     return CORVUS_OK;
 }
 
-/* mget, del exists */
+/* mget, del, exists */
 int cmd_forward_multikey(struct command *cmd, struct redis_data *data,
         uint8_t *prefix, size_t len)
 {
-    struct redis_data *key;
-    if (data->elements < 2) {
-        LOG(ERROR, "protocol error");
-        return -1;
-    }
+    ASSERT_ELEMENTS(data->elements >= 2, data);
 
     cmd->cmd_count = data->elements - 1;
 
     size_t i;
     struct command *ncmd;
+    struct redis_data *key;
     for (i = 1; i < data->elements; i++) {
         key = &data->element[i];
 
         ncmd = cmd_create(cmd->ctx);
-        ncmd->slot = slot_get(&key->pos);
         ncmd->parent = cmd;
         ncmd->client = cmd->client;
-
         STAILQ_INSERT_TAIL(&cmd->sub_cmds, ncmd, sub_cmd_next);
 
-        mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, prefix, len);
-        cmd_add_fragment(ncmd, &key->pos);
-
-        if (cmd_apply_range(ncmd, MODE_REQ) == CORVUS_ERR) {
-            cmd_mark_fail(ncmd, rep_parse_err);
+        if (key->type != REP_STRING) {
+            LOG(ERROR, "%s: expect data type %d got %d", __func__,
+                    REP_STRING, key->type);
+            cmd_mark_fail(ncmd, rep_forward_err);
             continue;
+        }
+
+        ncmd->slot = slot_get(&key->pos);
+
+        conn_add_data(ncmd->client, prefix, len, &ncmd->req_buf[0], NULL);
+        ncmd->req_buf[0].buf->refcount++;
+        cmd_add_fragment(ncmd, &key->pos, NULL, &ncmd->req_buf[1]);
+        if (ncmd->req_buf[1].buf != ncmd->req_buf[0].buf) {
+            ncmd->req_buf[1].buf->refcount++;
         }
 
         if (cmd_forward_basic(ncmd) == CORVUS_ERR) {
@@ -432,17 +406,12 @@ int cmd_forward_multikey(struct command *cmd, struct redis_data *data,
         }
     }
 
-    return 0;
+    return CORVUS_OK;
 }
 
 int cmd_forward_mset(struct command *cmd, struct redis_data *data)
 {
-    LOG(DEBUG, "elements %d", data->elements);
-    if (data->elements < 3 || (data->elements & 1) == 0) {
-        LOG(ERROR, "protocol error");
-        return -1;
-    }
-    LOG(DEBUG, "process mset");
+    ASSERT_ELEMENTS(data->elements >= 3 && (data->elements & 1) == 1, data);
 
     cmd->cmd_count = (data->elements - 1) >> 1;
 
@@ -454,19 +423,25 @@ int cmd_forward_mset(struct command *cmd, struct redis_data *data)
         value = &data->element[i + 1];
 
         ncmd = cmd_create(cmd->ctx);
-        ncmd->slot = slot_get(&key->pos);
         ncmd->parent = cmd;
         ncmd->client = cmd->client;
-
         STAILQ_INSERT_TAIL(&cmd->sub_cmds, ncmd, sub_cmd_next);
 
-        mbuf_queue_copy(ncmd->ctx, &ncmd->buf_queue, (uint8_t*)rep_set, 13);
-        cmd_add_fragment(ncmd, &key->pos);
-        cmd_add_fragment(ncmd, &value->pos);
-
-        if (cmd_apply_range(ncmd, MODE_REQ) == CORVUS_ERR) {
-            cmd_mark_fail(ncmd, rep_parse_err);
+        if (key->type != REP_STRING || value->type != REP_STRING) {
+            LOG(ERROR, "%s: expect key/value data type %d got %d/%d",
+                    __func__, REP_STRING, key->type, value->type);
+            cmd_mark_fail(ncmd, rep_forward_err);
             continue;
+        }
+
+        ncmd->slot = slot_get(&key->pos);
+
+        conn_add_data(ncmd->client, (uint8_t*)rep_set, 13, &ncmd->req_buf[0], NULL);
+        ncmd->req_buf[0].buf->refcount++;
+        cmd_add_fragment(ncmd, &key->pos, NULL, NULL);
+        cmd_add_fragment(ncmd, &value->pos, NULL, &ncmd->req_buf[1]);
+        if (ncmd->req_buf[1].buf != ncmd->req_buf[0].buf) {
+            ncmd->req_buf[1].buf->refcount++;
         }
 
         if (cmd_forward_basic(ncmd) == CORVUS_ERR) {
@@ -474,12 +449,13 @@ int cmd_forward_mset(struct command *cmd, struct redis_data *data)
         }
     }
 
-    return 0;
+    return CORVUS_OK;
 }
 
 int cmd_forward_eval(struct command *cmd, struct redis_data *data)
 {
-    if (data->elements < 4) return -1;
+    ASSERT_ELEMENTS(data->elements >= 4, data);
+    ASSERT_TYPE(&data->element[3], REP_STRING);
 
     cmd->slot = slot_get(&data->element[3].pos);
     return cmd_forward_basic(cmd);
@@ -489,40 +465,37 @@ int cmd_forward_complex(struct command *cmd, struct redis_data *data)
 {
     switch (cmd->cmd_type) {
         case CMD_MGET:
-            if (cmd_forward_multikey(cmd, data, (uint8_t*)rep_get, 13) == -1)
-                return -1;
-            break;
+            return cmd_forward_multikey(cmd, data, (uint8_t*)rep_get, 13);
         case CMD_MSET:
-            if (cmd_forward_mset(cmd, data) == -1) return -1;
-            break;
+            return cmd_forward_mset(cmd, data);
         case CMD_DEL:
-            if (cmd_forward_multikey(cmd, data, (uint8_t*)rep_del, 13) == -1)
-                return -1;
-            break;
+            return cmd_forward_multikey(cmd, data, (uint8_t*)rep_del, 13);
         case CMD_EXISTS:
-            if (cmd_forward_multikey(cmd, data, (uint8_t*)rep_exists, 16) == -1)
-                return -1;
-            break;
+            return cmd_forward_multikey(cmd, data, (uint8_t*)rep_exists, 16);
         case CMD_EVAL:
-            if (cmd_forward_eval(cmd, data) == -1) return -1;
-            break;
+            return cmd_forward_eval(cmd, data);
         default:
-            return -1;
+            LOG(ERROR, "%s: unknown command type %d", __func__, cmd->cmd_type);
+            return CORVUS_ERR;
     }
-    return 0;
+    return CORVUS_OK;
 }
 
-void cmd_proxy_ping(struct command *cmd)
+int cmd_ping(struct command *cmd)
 {
-    mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t *)rep_ping, 7);
-    if (cmd_apply_range(cmd, MODE_REP) == CORVUS_ERR) {
-        cmd_mark_fail(cmd, rep_parse_err);
-    } else {
-        cmd_mark_done(cmd);
+    conn_add_data(cmd->client, (uint8_t*)rep_ping, 7,
+            &cmd->rep_buf[0], &cmd->rep_buf[1]);
+
+    cmd->rep_buf[0].buf->refcount++;
+    if (cmd->rep_buf[1].buf != cmd->rep_buf[0].buf) {
+        cmd->rep_buf[1].buf->refcount++;
     }
+
+    cmd_mark_done(cmd);
+    return CORVUS_OK;
 }
 
-void cmd_proxy_info(struct command *cmd)
+int cmd_info(struct command *cmd)
 {
     int i, n = 0, size = 0;
     struct stats stats;
@@ -549,223 +522,244 @@ void cmd_proxy_info(struct command *cmd)
     char head[size + 1];
     snprintf(head, sizeof(head), fmt, n);
 
-    mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t*)head, size);
-    mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t*)info, n);
-    mbuf_queue_copy(cmd->ctx, &cmd->rep_queue, (uint8_t*)"\r\n", 2);
-    if (cmd_apply_range(cmd, MODE_REP) == CORVUS_ERR) {
-        cmd_mark_fail(cmd, rep_parse_err);
-    } else {
-        cmd_mark_done(cmd);
+    conn_add_data(cmd->client, (uint8_t*)head, size, &cmd->rep_buf[0], NULL);
+    cmd->rep_buf[0].buf->refcount++;
+    conn_add_data(cmd->client, (uint8_t*)info, n, NULL, NULL);
+    conn_add_data(cmd->client, (uint8_t*)"\r\n", 2, NULL, &cmd->rep_buf[1]);
+    if (cmd->rep_buf[1].buf != cmd->rep_buf[0].buf) {
+        cmd->rep_buf[1].buf->refcount++;
     }
+    cmd_mark_done(cmd);
+    return CORVUS_OK;
 }
 
 int cmd_proxy(struct command *cmd)
 {
     switch (cmd->cmd_type) {
         case CMD_PING:
-            cmd_proxy_ping(cmd);
-            break;
+            return cmd_ping(cmd);
         case CMD_INFO:
-            cmd_proxy_info(cmd);
-            break;
+            return cmd_info(cmd);
         default:
-            return -1;
+            LOG(ERROR, "%s: unknown command type %d", __func__, cmd->cmd_type);
+            return CORVUS_ERR;
     }
-    return 0;
+    return CORVUS_OK;
 }
 
 int cmd_forward(struct command *cmd, struct redis_data *data)
 {
+    LOG(DEBUG, "forward command %d", cmd->cmd_type);
     switch (cmd->request_type) {
         case CMD_BASIC:
             cmd->slot = cmd_get_slot(data);
-            if (cmd_forward_basic(cmd) == -1) return -1;
-            break;
+            return cmd_forward_basic(cmd);
         case CMD_COMPLEX:
-            if (cmd_forward_complex(cmd, data) == -1) return -1;
-            break;
+            return cmd_forward_complex(cmd, data);
         case CMD_PROXY:
-            if (cmd_proxy(cmd) == -1) return -1;
-            break;
+            return cmd_proxy(cmd);
         case CMD_UNIMPL:
-            return -1;
+            return CORVUS_ERR;
     }
-    return 0;
+    return CORVUS_OK;
 }
 
 int cmd_parse_token(struct command *cmd, struct redis_data *data)
 {
-    struct pos *p;
-    if (data->type != REP_ARRAY) return -1;
-    if (data->elements <= 0) return -1;
+    ASSERT_TYPE(data, REP_ARRAY);
+    ASSERT_ELEMENTS(data->elements >= 1, data);
 
     struct redis_data *f1 = &data->element[0];
-    if (f1->type != REP_STRING) return -1;
-    p = &f1->pos.items[0];
+
+    ASSERT_TYPE(f1, REP_STRING);
 
     cmd->request_type = cmd_get_type(cmd, &f1->pos);
-    if (cmd->request_type < 0) {
-        LOG(WARN, "wrong command type, command %.*s", p->len, p->str);
-        return -1;
+    if (cmd->request_type <= 0) {
+        char name[f1->pos.str_len + 1];
+        pos_to_str(&f1->pos, name);
+        LOG(ERROR, "%s: fail to parse command %s", __func__, name);
+        return CORVUS_ERR;
     }
-    return 0;
-}
-
-void cmd_gen_mget_iovec(struct command *cmd, struct iov_data *iov)
-{
-    const char *fmt = "*%ld\r\n";
-    int n;
-
-    n = snprintf(iov->buf, sizeof(iov->buf) - 1, fmt, cmd->keys);
-    cmd_iov_add(iov, iov->buf, n);
-
-    struct command *c;
-    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
-        if (c->cmd_fail) {
-            iov->len = 0;
-            cmd_iov_add(iov, c->fail_reason, strlen(c->fail_reason));
-            return;
-        }
-        if (c->reply_type == REP_ERROR) {
-            iov->len = 0;
-            cmd_create_iovec(&c->rep_buf[0], &c->rep_buf[1], iov);
-            return;
-        }
-        cmd_create_iovec(&c->rep_buf[0], &c->rep_buf[1], iov);
-    }
-}
-
-void cmd_gen_mset_iovec(struct command *cmd, struct iov_data *iov)
-{
-    struct command *c;
-    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
-        if (c->cmd_fail) {
-            cmd_iov_add(iov, c->fail_reason, strlen(c->fail_reason));
-            return;
-        }
-        if (c->reply_type == REP_ERROR) {
-            cmd_create_iovec(&c->rep_buf[0], &c->rep_buf[1], iov);
-            return;
-        }
-    }
-    cmd_iov_add(iov, (void*)rep_ok, strlen(rep_ok));
-}
-
-void cmd_gen_multikey_iovec(struct command *cmd, struct iov_data *iov)
-{
-    struct command *c;
-    const char *fmt = ":%ld\r\n";
-    int n = 0;
-    int count = 0;
-    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
-        if (c->cmd_fail) {
-            cmd_iov_add(iov, c->fail_reason, strlen(c->fail_reason));
-            return;
-        }
-        if (c->reply_type == REP_ERROR) {
-            cmd_create_iovec(&c->rep_buf[0], &c->rep_buf[1], iov);
-            return;
-        }
-        if (c->integer_data == 1) {
-            count++;
-        }
-    }
-    n = snprintf(iov->buf, sizeof(iov->buf) - 1, fmt, count);
-    cmd_iov_add(iov, iov->buf, n);
+    return CORVUS_OK;
 }
 
 int cmd_parse_req(struct command *cmd, struct mbuf *buf)
 {
-    struct command *ncmd;
-    struct reader *r = &cmd->reader;
+    struct reader *r = &cmd->client->reader;
     reader_feed(r, buf);
 
-    while (buf->pos < buf->last) {
-        if (parse(r, MODE_REQ) == -1) return CORVUS_ERR;
+    if (parse(r, MODE_REQ) == CORVUS_ERR) {
+        LOG(ERROR, "cmd_pares_req: parse_error");
+        return CORVUS_ERR;
+    }
 
-        if (reader_ready(r)) {
-            ncmd = cmd_create(cmd->ctx);
-            ncmd->req_time[0] = get_time();
-            ncmd->parent = cmd;
-            ncmd->client = cmd->client;
-            ncmd->keys = r->data.elements - 1;
+    if (reader_ready(r)) {
+        cmd->req_time[0] = get_time();
 
-            memcpy(&ncmd->req_buf[0], &r->start, sizeof(r->start));
-            memset(&r->start, 0, sizeof(r->start));
+        ASSERT_TYPE(&r->data, REP_ARRAY);
+        ASSERT_ELEMENTS(r->data.elements >= 1, &r->data);
 
-            memcpy(&ncmd->req_buf[1], &r->end, sizeof(r->end));
-            memset(&r->end, 0, sizeof(r->end));
+        cmd->keys = r->data.elements - 1;
+        cmd->parse_done = 1;
+        cmd->cmd_count = 1;
 
-            STAILQ_INSERT_TAIL(&cmd->sub_cmds, ncmd, sub_cmd_next);
-            cmd->cmd_count++;
+        memcpy(&cmd->req_buf[0], &r->start, sizeof(r->start));
+        memset(&r->start, 0, sizeof(r->start));
 
-            if (cmd_parse_token(ncmd, &r->data) == -1) {
-                redis_data_free(&r->data);
-                cmd_mark_fail(ncmd, rep_parse_err);
-                continue;
-            }
-            if (cmd_forward(ncmd, &r->data) == -1) {
-                redis_data_free(&r->data);
-                cmd_mark_fail(ncmd, rep_forward_err);
-                continue;
-            }
+        memcpy(&cmd->req_buf[1], &r->end, sizeof(r->end));
+        memset(&r->end, 0, sizeof(r->end));
+
+        if (cmd_parse_token(cmd, &r->data) == CORVUS_ERR) {
             redis_data_free(&r->data);
+            cmd_mark_fail(cmd, rep_parse_err);
+            return CORVUS_OK;
         }
+        if (cmd_forward(cmd, &r->data) == CORVUS_ERR) {
+            redis_data_free(&r->data);
+            cmd_mark_fail(cmd, rep_forward_err);
+            return CORVUS_OK;
+        }
+        redis_data_free(&r->data);
     }
     return CORVUS_OK;
 }
 
 int cmd_parse_rep(struct command *cmd, struct mbuf *buf)
 {
-    struct reader *r = &cmd->reader;
+    struct reader *r = &cmd->server->reader;
     reader_feed(r, buf);
 
-    while (buf->pos < buf->last) {
-        if (parse(r, MODE_REP) == -1) {
-            LOG(ERROR, "cmd_parse_rep, parse error");
-            return CORVUS_ERR;
+    if (parse(r, MODE_REP) == CORVUS_ERR) {
+        LOG(ERROR, "cmd_parse_rep: parse error");
+        return CORVUS_ERR;
+    }
+
+    memcpy(&cmd->rep_buf[0], &r->start, sizeof(r->start));
+
+    if (reader_ready(r)) {
+        cmd->reply_type = r->redis_data_type;
+        if (cmd->reply_type == REP_INTEGER) {
+            cmd->integer_data = r->integer;
+            r->integer = 0;
         }
 
-        if (cmd->rep_buf[0].buf == NULL && r->start.buf != NULL) {
-            memcpy(&cmd->rep_buf[0], &r->start, sizeof(r->start));
-            memset(&r->start, 0, sizeof(r->start));
-        }
+        memcpy(&cmd->rep_buf[1], &r->end, sizeof(r->end));
+        memset(&r->start, 0, sizeof(r->start));
+        memset(&r->end, 0, sizeof(r->end));
+        r->redis_data_type = REP_UNKNOWN;
 
-        if (reader_ready(r)) {
-            cmd->reply_type = r->redis_data_type;
-            r->redis_data_type = REP_UNKNOWN;
-            if (cmd->reply_type == REP_INTEGER) {
-                cmd->integer_data = r->integer;
-                r->integer = 0;
-            }
-
-            memcpy(&cmd->rep_buf[1], &r->end, sizeof(r->end));
-            memset(&r->end, 0, sizeof(r->end));
-            redis_data_free(&r->data);
-            break;
-        }
+        redis_data_free(&r->data);
     }
     return CORVUS_OK;
 }
 
-void cmd_mark(struct command *cmd, int fail)
+void cmd_gen_mget_iovec(struct command *cmd, struct iov_data *iov)
 {
-    struct command *parent = cmd->parent, *root = NULL;
-    if (fail) cmd->cmd_fail = 1;
-    while (parent != NULL) {
-        parent->cmd_done_count++;
-        if (parent->cmd_count == parent->cmd_done_count) {
-            root = parent;
-            parent = parent->parent;
+    struct command *c, *temp;
+    int n, setted = 0;
+
+    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
+        if (c->cmd_fail) {
+            temp = c;
+            cmd_iov_add(iov, c->fail_reason, strlen(c->fail_reason), NULL);
+            setted = 1;
+            break;
+        }
+        if (c->reply_type == REP_ERROR) {
+            temp = c;
+            cmd_create_iovec(c->rep_buf, iov);
+            setted = 1;
+            break;
+        }
+    }
+    if (setted) {
+        STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
+            if (c == temp || c->cmd_fail) continue;
+            mbuf_range_clear(cmd->ctx, c->rep_buf);
+        }
+    } else {
+        const char *fmt = "*%ld\r\n";
+        n = snprintf(iov->buf, sizeof(iov->buf) - 1, fmt, cmd->keys);
+        cmd_iov_add(iov, iov->buf, n, NULL);
+        STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
+            cmd_create_iovec(c->rep_buf, iov);
+        }
+    }
+}
+
+void cmd_gen_mset_iovec(struct command *cmd, struct iov_data *iov)
+{
+    struct command *c;
+    int setted = 0;
+    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
+        if (c->cmd_fail && !setted) {
+            cmd_iov_add(iov, c->fail_reason, strlen(c->fail_reason), NULL);
+            setted = 1;
             continue;
         }
-        break;
+        if (c->reply_type == REP_ERROR && !setted) {
+            cmd_create_iovec(c->rep_buf, iov);
+            setted = 1;
+            continue;
+        }
+
+        if (!c->cmd_fail) {
+            mbuf_range_clear(cmd->ctx, c->rep_buf);
+        }
     }
-    if (parent == NULL && root != NULL
-            && root->cmd_count == root->cmd_done_count)
-    {
-        if (conn_register(root->client) == -1) {
-            LOG(INFO, "fail to reregister client %d", root->client->fd);
+    if (setted) return;
+    cmd_iov_add(iov, (void*)rep_ok, strlen(rep_ok), NULL);
+}
+
+void cmd_gen_multikey_iovec(struct command *cmd, struct iov_data *iov)
+{
+    struct command *c;
+    int n = 0, count = 0, setted = 0;
+    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
+        if (c->cmd_fail && !setted) {
+            cmd_iov_add(iov, c->fail_reason, strlen(c->fail_reason), NULL);
+            setted = 1;
+            continue;
+        }
+        if (c->reply_type == REP_ERROR && !setted) {
+            cmd_create_iovec(c->rep_buf, iov);
+            setted = 1;
+            continue;
+        }
+        if (!c->cmd_fail && c->reply_type != REP_ERROR && c->integer_data == 1) {
+            count++;
+        }
+        if (!c->cmd_fail) {
+            mbuf_range_clear(cmd->ctx, c->rep_buf);
+        }
+    }
+
+    if (setted) return;
+
+    const char *fmt = ":%ld\r\n";
+    n = snprintf(iov->buf, sizeof(iov->buf) - 1, fmt, count);
+    cmd_iov_add(iov, iov->buf, n, NULL);
+}
+
+void cmd_mark(struct command *cmd, int fail)
+{
+    LOG(DEBUG, "mark cmd %p", cmd);
+    struct command *root = NULL;
+    if (fail) cmd->cmd_fail = 1;
+
+    if (cmd->parent == NULL) {
+        cmd->cmd_done_count = 1;
+        root = cmd;
+    } else {
+        cmd->parent->cmd_done_count++;
+        if (cmd->parent->cmd_done_count == cmd->parent->cmd_count) {
+            root = cmd->parent;
+        }
+    }
+
+    if (root != NULL) {
+        if (conn_register(root->client) == CORVUS_ERR) {
+            LOG(ERROR, "fail to reregister client %d", root->client->fd);
             client_eof(root->client);
         }
     }
@@ -804,90 +798,78 @@ struct command *cmd_create(struct context *ctx)
     return cmd;
 }
 
-struct command *cmd_get_lastest(struct context *ctx, struct cmd_tqh *q)
+struct command *cmd_get(struct connection *client)
 {
     struct command *cmd;
-    int new_cmd = 0;
+    int reuse = 0;
 
-    if (!STAILQ_EMPTY(q)) {
-        cmd = STAILQ_LAST(q, command, cmd_next);
-        if (cmd->parse_done) {
-            new_cmd = 1;
+    if (!STAILQ_EMPTY(&client->cmd_queue)) {
+        cmd = STAILQ_LAST(&client->cmd_queue, command, cmd_next);
+        if (!cmd->parse_done) {
+            reuse = 1;
         }
-    } else {
-        new_cmd = 1;
     }
 
-    if (new_cmd) {
-        cmd = cmd_create(ctx);
-        STAILQ_INSERT_TAIL(q, cmd, cmd_next);
+    if (!reuse) {
+        cmd = cmd_create(client->ctx);
+        STAILQ_INSERT_TAIL(&client->cmd_queue, cmd, cmd_next);
     }
     return cmd;
 }
 
-int cmd_read_reply(struct command *cmd, struct connection *server)
+int cmd_read(struct command *cmd, struct connection *conn, int mode)
 {
-    int n, rsize;
+    int n, rsize, status;
     struct mbuf *buf;
 
     while (1) {
-        buf = conn_get_buf(server);
+        buf = conn_get_buf(conn);
         rsize = mbuf_read_size(buf);
 
-        if (rsize > 0) {
-            if (cmd_parse_rep(cmd, buf) == -1) return CORVUS_ERR;
-            if (reader_ready(&cmd->reader)) return CORVUS_OK;
-            continue;
+        if (rsize <= 0) {
+            n = socket_read(conn->fd, buf);
+            if (n == 0) return CORVUS_EOF;
+            if (n == CORVUS_ERR) return CORVUS_ERR;
+            if (n == CORVUS_AGAIN) return CORVUS_AGAIN;
+            cmd->ctx->stats.recv_bytes += n;
+            conn->recv_bytes += n;
         }
 
-        n = socket_read(server->fd, buf);
-        if (n == 0) return CORVUS_EOF;
-        if (n == CORVUS_ERR) return CORVUS_ERR;
-        if (n == CORVUS_AGAIN) return CORVUS_AGAIN;
-
-        cmd->ctx->stats.recv_bytes += n;
-        server->recv_bytes += n;
+        switch (mode) {
+            case MODE_REQ:
+                status = cmd_parse_req(cmd, buf);
+                break;
+            case MODE_REP:
+                status = cmd_parse_rep(cmd, buf);
+                break;
+            default:
+                LOG(ERROR, "cmd_read: unknown reading mode %d", mode);
+                return CORVUS_ERR;
+        }
+        if (status == CORVUS_ERR) return CORVUS_ERR;
+        if (reader_ready(&conn->reader)) break;
     }
 
     return CORVUS_OK;
 }
 
-int cmd_read_request(struct command *cmd, int fd)
-{
-    int n;
-    struct mbuf *buf;
-
-    do {
-        buf = mbuf_queue_get(cmd->ctx, &cmd->buf_queue);
-
-        n = socket_read(fd, buf);
-        if (n == 0) return CORVUS_EOF;
-        if (n == CORVUS_ERR) return CORVUS_ERR;
-        if (n == CORVUS_AGAIN) return CORVUS_AGAIN;
-
-        cmd->ctx->stats.recv_bytes += n;
-
-        if (cmd_parse_req(cmd, buf) == CORVUS_ERR) {
-            return CORVUS_ERR;
-        }
-    } while (!reader_ready(&cmd->reader));
-    cmd->parse_done = 1;
-
-    return CORVUS_OK;
-}
-
-void cmd_create_iovec(struct buf_ptr *start, struct buf_ptr *end, struct iov_data *iov)
+void cmd_create_iovec(struct buf_ptr ptr[], struct iov_data *iov)
 {
     uint8_t *data;
     int len;
-    struct mbuf *b = start->buf;
+    struct mbuf *buf, *b = ptr[0].buf;
 
     while (b != NULL) {
-        data = cmd_get_data(b, start, end, &len);
-        cmd_iov_add(iov, (void*)data, len);
+        data = cmd_get_data(b, ptr, &len);
+        if (b == ptr[0].buf || b == ptr[1].buf) {
+            buf = b;
+        } else {
+            buf = NULL;
+        }
+        cmd_iov_add(iov, (void*)data, len, buf);
 
-        if (b == end->buf) break;
-        b = STAILQ_NEXT(b, next);
+        if (b == ptr[1].buf) break;
+        b = TAILQ_NEXT(b, next);
     }
 }
 
@@ -895,29 +877,24 @@ void cmd_create_iovec(struct buf_ptr *start, struct buf_ptr *end, struct iov_dat
 void cmd_make_iovec(struct command *cmd, struct iov_data *iov)
 {
     LOG(DEBUG, "cmd count %d", cmd->cmd_count);
-    struct command *c;
-    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
-        if (c->cmd_fail || (c->server != NULL
-                    && STAILQ_EMPTY(&c->server->data)))
-        {
-            cmd_iov_add(iov, c->fail_reason, strlen(c->fail_reason));
-            continue;
-        }
-        switch (c->cmd_type) {
-            case CMD_MGET:
-                cmd_gen_mget_iovec(c, iov);
-                break;
-            case CMD_MSET:
-                cmd_gen_mset_iovec(c, iov);
-                break;
-            case CMD_DEL:
-            case CMD_EXISTS:
-                cmd_gen_multikey_iovec(c, iov);
-                break;
-            default:
-                cmd_create_iovec(&c->rep_buf[0], &c->rep_buf[1], iov);
-                break;
-        }
+    if (cmd->cmd_fail) {
+        cmd_iov_add(iov, cmd->fail_reason, strlen(cmd->fail_reason), NULL);
+        return;
+    }
+    switch (cmd->cmd_type) {
+        case CMD_MGET:
+            cmd_gen_mget_iovec(cmd, iov);
+            break;
+        case CMD_MSET:
+            cmd_gen_mset_iovec(cmd, iov);
+            break;
+        case CMD_DEL:
+        case CMD_EXISTS:
+            cmd_gen_multikey_iovec(cmd, iov);
+            break;
+        default:
+            cmd_create_iovec(cmd->rep_buf, iov);
+            break;
     }
 }
 
@@ -927,22 +904,19 @@ int cmd_parse_redirect(struct command *cmd, struct redirect_info *info)
     char err[n + 1];
     int len = 0, size;
 
-    struct buf_ptr *start = &cmd->rep_buf[0];
-    struct buf_ptr *end = &cmd->rep_buf[1];
-
     uint8_t *p;
 
-    struct mbuf *b = start->buf;
+    struct mbuf *b = cmd->rep_buf[0].buf;
     while (b != NULL) {
-        p = cmd_get_data(b, start, end, &size);
+        p = cmd_get_data(b, cmd->rep_buf, &size);
 
         size = MIN(size, n - len);
         memcpy(err + len, p, size);
         len += size;
         if (len >= n) break;
 
-        if (b == end->buf) break;
-        b = STAILQ_NEXT(b, next);
+        if (b == cmd->rep_buf[1].buf) break;
+        b = TAILQ_NEXT(b, next);
     }
     err[len] = '\0';
 
@@ -954,12 +928,18 @@ int cmd_parse_redirect(struct command *cmd, struct redirect_info *info)
         /* -MOVED 16383 127.0.0.1:8001 */
         info->type = CMD_ERR_MOVED;
         r = sscanf(err, "%s%d%s", name, (int*)&info->slot, info->addr);
-        if (r != 3) return CORVUS_ERR;
+        if (r != 3) {
+            LOG(ERROR, "cmd_parse_redirect: fail to parse moved response: %s", err);
+            return CORVUS_ERR;
+        }
     } else if (strncmp(err, "-ASK", 3) == 0) {
         /* -ASK 16383 127.0.0.1:8001 */
         info->type = CMD_ERR_ASK;
         r = sscanf(err, "%s%d%s", name, (int*)&info->slot, info->addr);
-        if (r != 3) return CORVUS_ERR;
+        if (r != 3) {
+            LOG(ERROR, "cmd_parse_redirect: fail to parse ask response: %s", err);
+            return CORVUS_ERR;
+        }
     } else if (strncmp(err, "-CLUSTERDOWN", 12) == 0) {
         /* -CLUSTERDOWN The cluster is down */
         info->type = CMD_ERR_CLUSTERDOWN;
@@ -983,68 +963,54 @@ void cmd_mark_fail(struct command *cmd, const char *reason)
 void cmd_stats(struct command *cmd)
 {
     struct context *ctx = cmd->ctx;
-    struct command *c, *last, *first;
+    struct command *last, *first;
     double latency;
 
-    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
-        ctx->stats.completed_commands++;
+    ctx->stats.completed_commands++;
 
-        latency = (cmd->req_time[1] - c->req_time[0]) / 1000000.0;
-        ctx->stats.total_latency += latency;
-        if (STAILQ_NEXT(c, sub_cmd_next) == NULL) {
-            ctx->last_command_latency = latency;
-        }
+    latency = (cmd->req_time[1] - cmd->req_time[0]) / 1000000.0;
+    ctx->stats.total_latency += latency;
+    ctx->last_command_latency = latency;
 
-        if (!STAILQ_EMPTY(&c->sub_cmds)) {
-            first = STAILQ_FIRST(&c->sub_cmds);
-            last = STAILQ_LAST(&c->sub_cmds, command, sub_cmd_next);
-            latency = (last->rep_time[1] - first->rep_time[0]) / 1000000.0;
-        } else {
-            latency = (c->rep_time[1] - c->rep_time[0]) / 1000000.0;
-        }
-        ctx->stats.remote_latency += latency;
+    if (!STAILQ_EMPTY(&cmd->sub_cmds)) {
+        first = STAILQ_FIRST(&cmd->sub_cmds);
+        last = STAILQ_LAST(&cmd->sub_cmds, command, sub_cmd_next);
+        latency = (last->rep_time[1] - first->rep_time[0]) / 1000000.0;
+    } else {
+        latency = (cmd->rep_time[1] - cmd->rep_time[0]) / 1000000.0;
     }
+    ctx->stats.remote_latency += latency;
 }
 
-/*
- *               root cmd (use refcount)
- *               /  \   \
- * (just free) mget get set
- *             /  \
- *          get1  get2
- */
-void cmd_set_stale(struct command *cmd, struct command *root)
+void cmd_set_stale(struct command *cmd)
 {
-    if (STAILQ_EMPTY(&cmd->sub_cmds)) {
-        if (cmd->server != NULL && cmd_in_queue(cmd, cmd->server)) {
-            LOG(WARN, "command set stale");
-            cmd->stale = 1;
-            if (STAILQ_EMPTY(&cmd->buf_queue)) {
-                cmd->ref = root;
-                root->refcount++;
-            }
-        } else {
-            cmd_free(cmd);
-        }
-    } else {
-        struct command *c;
+    struct command *c;
+    if (!STAILQ_EMPTY(&cmd->sub_cmds)) {
         while (!STAILQ_EMPTY(&cmd->sub_cmds)) {
             c = STAILQ_FIRST(&cmd->sub_cmds);
             STAILQ_REMOVE_HEAD(&cmd->sub_cmds, sub_cmd_next);
             STAILQ_NEXT(c, sub_cmd_next) = NULL;
-            cmd_set_stale(c, root);
+            cmd_set_stale(c);
         }
-        if (cmd != root) {
-            cmd_free(cmd);
-        }
+        assert(cmd->rep_buf[0].buf == NULL);
+        cmd_free(cmd);
+    } else if (cmd->server != NULL && cmd_in_queue(cmd, cmd->server)) {
+        LOG(DEBUG, "command set stale");
+        cmd->stale = 1;
+        cmd->ref = cmd->client;
+        cmd->client->refcount++;
+    } else {
+        mbuf_range_clear(cmd->ctx, cmd->rep_buf);
+        cmd_free(cmd);
     }
 }
 
-void cmd_iov_add(struct iov_data *iov, void *buf, size_t len)
+void cmd_iov_add(struct iov_data *iov, void *buf, size_t len, struct mbuf *b)
 {
     if (iov->cursor >= CORVUS_IOV_MAX) {
         iov->len -= iov->cursor;
         memmove(iov->data, iov->data + iov->cursor, iov->len * sizeof(struct iovec));
+        memmove(iov->buf_ptr, iov->buf_ptr + iov->cursor, iov->len * sizeof(struct buf_ptr*));
         iov->cursor = 0;
     }
 
@@ -1052,112 +1018,47 @@ void cmd_iov_add(struct iov_data *iov, void *buf, size_t len)
         iov->max_size *= 2;
         if (iov->max_size == 0) iov->max_size = CORVUS_IOV_MAX;
         iov->data = realloc(iov->data, sizeof(struct iovec) * iov->max_size);
+        iov->buf_ptr = realloc(iov->buf_ptr, sizeof(struct buf_ptr*) * iov->max_size);
     }
 
     iov->data[iov->len].iov_base = buf;
     iov->data[iov->len].iov_len = len;
+    iov->buf_ptr[iov->len] = b;
     iov->len++;
 }
 
-int cmd_iov_write(struct context *ctx, struct iov_data *iov, int fd)
+void cmd_iov_reset(struct iov_data *iov)
 {
-    ssize_t remain = 0, status, bytes = 0, count = 0;
+    iov->cursor = 0;
+    iov->len = 0;
+}
 
-    int i, n = 0;
-    struct iovec *vec = iov->data + iov->cursor;
+void cmd_iov_clear(struct context *ctx, struct iov_data *iov)
+{
+    struct mbuf **bufs = iov->buf_ptr + iov->cursor;
+    int n = iov->len - iov->cursor;
 
-    while (n < iov->len - iov->cursor) {
-        if (n >= CORVUS_IOV_MAX || bytes >= SSIZE_MAX) break;
-        bytes += vec[n++].iov_len;
-    }
-
-    status = socket_write(fd, vec, n);
-    if (status == CORVUS_AGAIN || status == CORVUS_ERR) return status;
-
-    ctx->stats.send_bytes += status;
-
-    if (status < bytes) {
-        for (i = 0; i < n; i++) {
-            count += vec[i].iov_len;
-            if (count > status) {
-                remain = vec[i].iov_len - (count - status);
-                vec[i].iov_base = (char*)vec[i].iov_base + remain;
-                vec[i].iov_len -= remain;
-                break;
-            }
-        }
-        iov->cursor += i;
-    } else {
-        iov->cursor += n;
-    }
-
-    return status;
+    mbuf_decref(ctx, bufs, n);
 }
 
 void cmd_iov_free(struct iov_data *iov)
 {
     if (iov->data != NULL) free(iov->data);
+    if (iov->buf_ptr != NULL) free(iov->buf_ptr);
     iov->data = NULL;
+    iov->buf_ptr = NULL;
     iov->max_size = 0;
     iov->cursor = 0;
     iov->len = 0;
 }
 
-void cmd_free_reply(struct command *cmd)
-{
-    if (cmd->server == NULL) return;
-    if (cmd->rep_buf[0].buf == NULL) return;
-
-    if (cmd->server != NULL && STAILQ_EMPTY(&cmd->server->data)) {
-        memset(&cmd->rep_buf, 0, sizeof(cmd->rep_buf));
-        return;
-    }
-
-    struct mbuf *b, *buf;
-    b = cmd->rep_buf[0].buf;
-    while (b != NULL) {
-        if (b == cmd->rep_buf[0].buf && b == cmd->rep_buf[1].buf) {
-            mbuf_dec_ref_by(b, 2);
-        } else if (b == cmd->rep_buf[0].buf || b == cmd->rep_buf[1].buf) {
-            mbuf_dec_ref(b);
-        }
-
-        buf = STAILQ_NEXT(b, next);
-        if (b->refcount <= 0) {
-            STAILQ_REMOVE(&cmd->server->data, b, mbuf, next);
-            STAILQ_NEXT(b, next) = NULL;
-            mbuf_recycle(cmd->ctx, b);
-        }
-        if (b == cmd->rep_buf[1].buf) break;
-        b = buf;
-    }
-    memset(&cmd->rep_buf, 0, sizeof(cmd->rep_buf));
-}
-
 void cmd_free(struct command *cmd)
 {
-    struct mbuf *buf;
     struct command *c;
     struct context *ctx = cmd->ctx;
 
-    cmd_iov_free(&cmd->iov);
-
-    reader_free(&cmd->reader);
-    reader_init(&cmd->reader);
-
-    cmd_free_reply(cmd);
-
-    while (!STAILQ_EMPTY(&cmd->rep_queue)) {
-        buf = STAILQ_FIRST(&cmd->rep_queue);
-        STAILQ_REMOVE_HEAD(&cmd->rep_queue, next);
-        mbuf_recycle(ctx, buf);
-    }
-
-    while (!STAILQ_EMPTY(&cmd->buf_queue)) {
-        buf = STAILQ_FIRST(&cmd->buf_queue);
-        STAILQ_REMOVE_HEAD(&cmd->buf_queue, next);
-        mbuf_recycle(ctx, buf);
-    }
+    mbuf_range_clear(ctx, cmd->req_buf);
+    memset(cmd->req_buf, 0, sizeof(cmd->req_buf));
 
     while (!STAILQ_EMPTY(&cmd->sub_cmds)) {
         c = STAILQ_FIRST(&cmd->sub_cmds);
@@ -1168,8 +1069,11 @@ void cmd_free(struct command *cmd)
     if (cmd->ref != NULL) {
         cmd->ref->refcount--;
         if (cmd->ref->refcount <= 0) {
-            cmd_free(cmd->ref);
+            conn_free(cmd->ref);
+            conn_buf_free(cmd->ref);
+            conn_recycle(ctx, cmd->ref);
         }
+        cmd->ref = NULL;
     }
 
     cmd->client = NULL;

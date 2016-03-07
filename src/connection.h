@@ -20,16 +20,21 @@ struct connection {
     struct context *ctx;
     int fd;
 
+    int refcount;
+
     struct address addr;
     char dsn[DSN_MAX + 1];
 
     int registered;
+
+    struct reader reader;
 
     struct cmd_tqh cmd_queue;
     struct cmd_tqh ready_queue;
     struct cmd_tqh waiting_queue;
 
     struct mhdr data;
+    struct mhdr local_data;
     struct iov_data iov;
 
     long long send_bytes;
@@ -54,5 +59,8 @@ struct connection *conn_get_server(struct context *ctx, uint16_t slot);
 struct mbuf *conn_get_buf(struct connection *conn);
 int conn_create_fd();
 int conn_register(struct connection *conn);
+void conn_add_data(struct connection *conn, uint8_t *data, int n,
+        struct buf_ptr *start, struct buf_ptr *end);
+int conn_write(struct connection *conn, int clear);
 
 #endif /* end of include guard: __CONNECTION_H */

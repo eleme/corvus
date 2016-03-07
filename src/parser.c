@@ -12,7 +12,7 @@
 do {                                                           \
     if (c < '0' || c > '9') {                                  \
         LOG(WARN, "protocol error, '%c' not between 0-9", c);  \
-        return -1;                                             \
+        return CORVUS_ERR;                                     \
     }                                                          \
     v *= 10;                                                   \
     v += c - '0';                                              \
@@ -46,13 +46,16 @@ int stack_pop(struct reader *r)
 
 int stack_push(struct reader *r, int type)
 {
-    if (r->sidx > 8) return -1;
+    if (r->sidx > 8) {
+        LOG(ERROR, "invalid array recursive depth %d", r->sidx);
+        return CORVUS_ERR;
+    }
     struct reader_task *task = &r->rstack[++r->sidx];
     memset(task, 0, sizeof(struct reader_task));
     task->elements = -1;
     task->type = type;
     task->data.type = type;
-    return 0;
+    return CORVUS_OK;
 }
 
 struct pos *pos_array_push(struct pos_array *arr, int len, uint8_t *p)
@@ -90,6 +93,9 @@ struct redis_data *redis_data_get(struct reader_task *task, int type)
             task->cur_data = &task->data.element[task->idx++];
             task->cur_data->type = type;
             return task->cur_data;
+        default:
+            LOG(ERROR, "%s: invalid task type %d", __func__, task->type);
+            return NULL;
     }
     return NULL;
 }
@@ -102,7 +108,9 @@ int process_type(struct reader *r)
             r->array_type = PARSE_ARRAY_BEGIN;
             r->type = PARSE_ARRAY;
             r->redis_data_type = REP_ARRAY;
-            if (stack_push(r, REP_ARRAY) == -1) return -1;
+            if (stack_push(r, REP_ARRAY) == CORVUS_ERR) {
+                return CORVUS_ERR;
+            }
             break;
         case '$':
             r->string_size = 0;
@@ -127,6 +135,7 @@ int process_type(struct reader *r)
             r->redis_data_type = REP_ERROR;
             break;
         default:
+            LOG(ERROR, "unknown command type '%c'", *r->buf->pos);
             return -1;
     }
     r->buf->pos += 1;
@@ -141,7 +150,10 @@ int process_array(struct reader *r)
     char c;
 
     struct reader_task *task = &r->rstack[r->sidx];
-    if (task->type != REP_ARRAY) return -1;
+    if (task->type != REP_ARRAY) {
+        LOG(ERROR, "process_array: task type %d is not array", task->type);
+        return CORVUS_ERR;
+    }
 
     for (; r->buf->pos < r->buf->last; r->buf->pos++) {
         p = r->buf->pos;
@@ -167,7 +179,10 @@ int process_array(struct reader *r)
                 break;
             case PARSE_ARRAY_END:
                 r->buf->pos++;
-                if (*p != '\n') return -1;
+                if (*p != '\n') {
+                    LOG(ERROR, "process_array: unexpected charactor %c", *p);
+                    return CORVUS_ERR;
+                }
 
                 if (task->data.elements > 0) {
                     if (r->mode == MODE_REQ) {
@@ -183,10 +198,10 @@ int process_array(struct reader *r)
                         case 1: r->type = PARSE_TYPE; break;
                     }
                 }
-                return 0;
+                return CORVUS_OK;
         }
     }
-    return 0;
+    return CORVUS_OK;
 }
 
 int process_string(struct reader *r)
@@ -203,7 +218,10 @@ int process_string(struct reader *r)
 
     if (r->mode == MODE_REQ) {
         data = redis_data_get(task, REP_STRING);
-        if (data == NULL) return -1;
+        if (data == NULL) {
+            LOG(ERROR, "process_string: fail to get data");
+            return CORVUS_ERR;
+        }
         arr = &data->pos;
     }
 
@@ -249,7 +267,10 @@ int process_string(struct reader *r)
             case PARSE_STRING_END:
                 task->cur_data = NULL;
                 r->buf->pos++;
-                if (*p != '\n') return -1;
+                if (*p != '\n') {
+                    LOG(ERROR, "process_string: unexpected charactor %c", *p);
+                    return CORVUS_ERR;
+                }
                 if (task->elements <= 0) {
                     switch (stack_pop(r)) {
                         case 0: r->buf->pos--; r->type = PARSE_END; break;
@@ -258,10 +279,10 @@ int process_string(struct reader *r)
                 } else {
                     r->type = PARSE_TYPE;
                 }
-                return 0;
+                return CORVUS_OK;
         }
     }
-    return 0;
+    return CORVUS_OK;
 }
 
 int process_integer(struct reader *r)
@@ -275,7 +296,10 @@ int process_integer(struct reader *r)
 
     if (r->mode == MODE_REQ) {
         data = redis_data_get(task, REP_INTEGER);
-        if (data == NULL) return -1;
+        if (data == NULL) {
+            LOG(ERROR, "process_integer: fail to get data");
+            return CORVUS_ERR;
+        }
     }
 
     for (; r->buf->pos < r->buf->last; r->buf->pos++) {
@@ -300,7 +324,10 @@ int process_integer(struct reader *r)
             case PARSE_INTEGER_END:
                 task->cur_data = NULL;
                 r->buf->pos++;
-                if (*p != '\n') return -1;
+                if (*p != '\n') {
+                    LOG(ERROR, "process_integer: unexpected charactor %c", *p);
+                    return CORVUS_ERR;
+                }
                 if (task->elements <= 0) {
                     switch (stack_pop(r)) {
                         case 0: r->buf->pos--; r->type = PARSE_END; break;
@@ -309,10 +336,10 @@ int process_integer(struct reader *r)
                 } else {
                     r->type = PARSE_TYPE;
                 }
-                return 0;
+                return CORVUS_OK;
         }
     }
-    return 0;
+    return CORVUS_OK;
 }
 
 int process_simple_string(struct reader *r, int type)
@@ -327,7 +354,10 @@ int process_simple_string(struct reader *r, int type)
 
     if (r->mode == MODE_REQ) {
         data = redis_data_get(task, type);
-        if (data == NULL) return -1;
+        if (data == NULL) {
+            LOG(ERROR, "process_simple_string: fail to get data");
+            return CORVUS_ERR;
+        }
 
         arr = &data->pos;
         if (task->prev_buf != r->buf) {
@@ -357,7 +387,10 @@ int process_simple_string(struct reader *r, int type)
                 task->cur_data = NULL;
                 task->prev_buf = NULL;
                 r->buf->pos++;
-                if (*p != '\n') return -1;
+                if (*p != '\n') {
+                    LOG(ERROR, "process_simple_string: unexpected charactor %c", *p);
+                    return CORVUS_ERR;
+                }
                 if (task->elements <= 0) {
                     switch (stack_pop(r)) {
                         case 0: r->buf->pos--; r->type = PARSE_END; break;
@@ -366,10 +399,10 @@ int process_simple_string(struct reader *r, int type)
                 } else {
                     r->type = PARSE_TYPE;
                 }
-                return 0;
+                return CORVUS_OK;
         }
     }
-    return 0;
+    return CORVUS_OK;
 }
 
 int parse(struct reader *r, int mode)
@@ -379,6 +412,7 @@ int parse(struct reader *r, int mode)
         switch (r->type) {
             case PARSE_BEGIN:
                 buf = r->buf;
+                buf->refcount++;
                 reader_init(r);
                 r->buf = buf;
                 r->mode = mode;
@@ -386,42 +420,57 @@ int parse(struct reader *r, int mode)
                 r->type = PARSE_TYPE;
                 r->start.buf = r->buf;
                 r->start.pos = r->buf->pos;
-                mbuf_inc_ref(r->buf);
                 break;
             case PARSE_TYPE:
-                if (process_type(r) == -1) return -1;
+                if (process_type(r) == CORVUS_ERR) {
+                    return CORVUS_ERR;
+                }
                 break;
             case PARSE_ARRAY:
-                if (process_array(r) == -1) return -1;
+                if (process_array(r) == CORVUS_ERR) {
+                    return CORVUS_ERR;
+                }
                 break;
             case PARSE_STRING:
-                if (process_string(r) == -1) return -1;
+                if (process_string(r) == CORVUS_ERR) {
+                    return CORVUS_ERR;
+                }
                 break;
             case PARSE_INTEGER:
-                if (process_integer(r) == -1) return -1;
+                if (process_integer(r) == CORVUS_ERR) {
+                    return CORVUS_ERR;
+                }
                 break;
             case PARSE_SIMPLE_STRING:
-                if (process_simple_string(r, REP_SIMPLE_STRING) == -1)
-                    return -1;
+                if (process_simple_string(r, REP_SIMPLE_STRING) == CORVUS_ERR) {
+                    return CORVUS_ERR;
+                }
                 break;
             case PARSE_ERROR:
-                if (process_simple_string(r, REP_ERROR) == -1)
-                    return -1;
+                if (process_simple_string(r, REP_ERROR) == CORVUS_ERR) {
+                    return CORVUS_ERR;
+                }
                 break;
             case PARSE_END:
-                if (*r->buf->pos != '\n') return -1;
+                if (*r->buf->pos != '\n') {
+                    LOG(ERROR, "parse: unexpected charactor %c", &r->buf->pos);
+                    return CORVUS_ERR;
+                }
                 r->buf->pos++;
                 r->type = PARSE_BEGIN;
                 r->ready = 1;
                 r->end.buf = r->buf;
                 r->end.pos = r->buf->pos;
-                mbuf_inc_ref(r->buf);
-                return 0;
+                if (r->buf != r->start.buf) {
+                    r->buf->refcount++;
+                }
+                return CORVUS_OK;
             default:
-                return -1;
+                LOG(ERROR, "parse: unknown parse type");
+                return CORVUS_ERR;
         }
     }
-    return 0;
+    return CORVUS_OK;
 }
 
 void pos_array_free(struct pos_array *arr)
@@ -491,7 +540,10 @@ int pos_to_str(struct pos_array *pos, char *str)
 {
     int i, cur_len = 0;
     int length = pos->str_len;
-    if (length <= 0) return CORVUS_ERR;
+    if (length <= 0) {
+        LOG(ERROR, "pos_to_str: string length %d <= 0", length);
+        return CORVUS_ERR;
+    }
 
     for (i = 0; i < pos->pos_len; i++) {
         memcpy(str + cur_len, pos->items[i].str, pos->items[i].len);

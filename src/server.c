@@ -9,6 +9,8 @@
 #include "slot.h"
 
 #define SERVER_RETRY_TIMES 3
+#define SERVER_NULL -1
+#define SERVER_REGISTER_ERROR -2
 
 #define CHECK_REDIRECTED(c, info_addr, msg)                                         \
 do {                                                                                \
@@ -20,7 +22,7 @@ do {                                                                            
             LOG(WARN, "redirect error after retring %d times: (%d)%s:%d -> %s",     \
                     SERVER_RETRY_TIMES, c->slot, c->server->addr.host,              \
                     c->server->addr.port, info_addr);                               \
-            server_free_buf(c);                                                     \
+            server_data_clear(c);                                                   \
             cmd_mark_fail(c, msg);                                                  \
         }                                                                           \
         return CORVUS_OK;                                                           \
@@ -30,35 +32,20 @@ do {                                                                            
 
 static const char *req_ask = "*1\r\n$6\r\nASKING\r\n";
 
-void server_free_buf(struct command *cmd)
+void server_data_clear(struct command *cmd)
 {
-    struct mbuf *b, *buf;
-    b = cmd->rep_buf[0].buf;
+    struct mbuf *n, *b = cmd->rep_buf[0].buf;
     while (b != NULL) {
-        if (b == cmd->rep_buf[0].buf && b == cmd->rep_buf[1].buf) {
-            mbuf_dec_ref_by(b, 2);
-        } else if (b == cmd->rep_buf[0].buf || b == cmd->rep_buf[1].buf) {
-            mbuf_dec_ref(b);
-        }
-
-        buf = STAILQ_NEXT(b, next);
-        if (b->refcount <= 0 && (b != cmd->rep_buf[1].buf
-                    || cmd->rep_buf[1].pos >= b->last))
-        {
-            STAILQ_REMOVE(&cmd->server->data, b, mbuf, next);
-            STAILQ_NEXT(b, next) = NULL;
+        n = TAILQ_NEXT(b, next);
+        b->refcount--;
+        if (b->refcount <= 0 && b->pos >= b->last) {
+            TAILQ_REMOVE(b->queue, b, next);
             mbuf_recycle(cmd->ctx, b);
         }
         if (b == cmd->rep_buf[1].buf) break;
-        b = buf;
+        b = n;
     }
-    memset(&cmd->rep_buf, 0, sizeof(cmd->rep_buf));
-}
-
-void server_iov_free(struct iov_data *iov)
-{
-    iov->cursor = 0;
-    iov->len = 0;
+    memset(cmd->rep_buf, 0, sizeof(cmd->rep_buf));
 }
 
 void server_make_iov(struct connection *server)
@@ -77,11 +64,11 @@ void server_make_iov(struct connection *server)
         }
 
         if (cmd->asking) {
-            cmd_iov_add(&server->iov, (void*)req_ask, strlen(req_ask));
+            cmd_iov_add(&server->iov, (void*)req_ask, strlen(req_ask), NULL);
         }
         cmd->rep_time[0] = t;
 
-        cmd_create_iovec(&cmd->req_buf[0], &cmd->req_buf[1], &server->iov);
+        cmd_create_iovec(cmd->req_buf, &server->iov);
         STAILQ_INSERT_TAIL(&server->waiting_queue, cmd, waiting_next);
     }
 }
@@ -92,21 +79,24 @@ int server_write(struct connection *server)
         server_make_iov(server);
     }
     if (server->iov.len <= 0) {
-        server_iov_free(&server->iov);
+        cmd_iov_reset(&server->iov);
         return CORVUS_OK;
     }
 
-    int status = cmd_iov_write(server->ctx, &server->iov, server->fd);
+    int status = conn_write(server, 0);
 
-    if (status == CORVUS_ERR) return CORVUS_ERR;
+    if (status == CORVUS_ERR) {
+        LOG(ERROR, "server_write: server %d fail to write iov", server->fd);
+        return CORVUS_ERR;
+    }
     if (status == CORVUS_AGAIN) return CORVUS_OK;
 
     server->send_bytes += status;
 
     if (server->iov.cursor >= server->iov.len) {
-        server_iov_free(&server->iov);
+        cmd_iov_reset(&server->iov);
     } else if (conn_register(server) == CORVUS_ERR) {
-        LOG(ERROR, "fail to reregister server %d", server->fd);
+        LOG(ERROR, "server_write: fail to reregister server %d", server->fd);
         return CORVUS_ERR;
     }
     server->last_active = time(NULL);
@@ -114,16 +104,37 @@ int server_write(struct connection *server)
     return CORVUS_OK;
 }
 
-int server_retry(struct connection *server, struct command *cmd)
+int _server_retry(struct connection *server, struct command *cmd)
 {
-    if (server == NULL) return CORVUS_ERR;
-
+    if (server == NULL) {
+        server_data_clear(cmd);
+        cmd_mark_fail(cmd, rep_server_err);
+        return SERVER_NULL;
+    }
+    if (conn_register(server) == CORVUS_ERR) {
+        return SERVER_REGISTER_ERROR;
+    }
     server->last_active = time(NULL);
-    if (conn_register(server) == CORVUS_ERR) return CORVUS_ERR;
-    server_free_buf(cmd);
+    server_data_clear(cmd);
     cmd->server = server;
     STAILQ_INSERT_TAIL(&server->ready_queue, cmd, ready_next);
     return CORVUS_OK;
+}
+
+int server_retry(struct command *cmd)
+{
+    struct connection *server = conn_get_server(cmd->ctx, cmd->slot);
+
+    switch (_server_retry(server, cmd)) {
+        case SERVER_NULL:
+            LOG(WARN, "server_retry: slot %d fail to get server", cmd->slot);
+            return CORVUS_OK;
+        case SERVER_REGISTER_ERROR:
+            LOG(ERROR, "server_retry: fail to reregister connection %d", server->fd);
+            return CORVUS_ERR;
+        default:
+            return CORVUS_OK;
+    }
 }
 
 int server_redirect(struct command *cmd, struct redirect_info *info)
@@ -134,33 +145,35 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
     port = socket_parse_addr(info->addr, &addr);
     if (port == CORVUS_ERR) {
         LOG(WARN, "server_redirect: fail to parse addr %s", info->addr);
-        server_free_buf(cmd);
+        server_data_clear(cmd);
         cmd_mark_fail(cmd, rep_addr_err);
         return CORVUS_OK;
     }
 
     struct connection *server = conn_get_server_from_pool(cmd->ctx, &addr);
-    if (server == NULL) {
-        LOG(WARN, "server_redirect: fail to get server %s", info->addr);
-        server_free_buf(cmd);
-        cmd_mark_fail(cmd, rep_server_err);
-        return CORVUS_OK;
-    }
 
-    return server_retry(server, cmd);
+    switch (_server_retry(server, cmd)) {
+        case SERVER_NULL:
+            LOG(WARN, "server_redirect: fail to get server %s", info->addr);
+            return CORVUS_OK;
+        case SERVER_REGISTER_ERROR:
+            LOG(ERROR, "server_redirect: fail to reregister connection %d", server->fd);
+            return CORVUS_ERR;
+        default:
+            return CORVUS_OK;
+    }
 }
 
 int server_read_reply(struct connection *server, struct command *cmd)
 {
-    struct connection *conn;
-    int status = cmd_read_reply(cmd, server);
+    int status = cmd_read(cmd, server, MODE_REP);
     if (status != CORVUS_OK) return status;
 
     server->completed_commands++;
     if (cmd->asking) return CORVUS_ASKING;
 
     if (cmd->stale) {
-        server_free_buf(cmd);
+        server_data_clear(cmd);
         return CORVUS_OK;
     }
 
@@ -173,7 +186,7 @@ int server_read_reply(struct connection *server, struct command *cmd)
     memset(info.addr, 0, sizeof(info.addr));
 
     if (cmd_parse_redirect(cmd, &info) == CORVUS_ERR) {
-        server_free_buf(cmd);
+        server_data_clear(cmd);
         cmd_mark_fail(cmd, rep_redirect_err);
         return CORVUS_OK;
     }
@@ -181,19 +194,15 @@ int server_read_reply(struct connection *server, struct command *cmd)
         case CMD_ERR_MOVED:
             slot_create_job(SLOT_UPDATE);
             CHECK_REDIRECTED(cmd, info.addr, rep_redirect_err);
-            if (server_redirect(cmd, &info) == CORVUS_ERR) return CORVUS_ERR;
-            break;
+            return server_redirect(cmd, &info);
         case CMD_ERR_ASK:
             CHECK_REDIRECTED(cmd, info.addr, rep_redirect_err);
-            if (server_redirect(cmd, &info) == CORVUS_ERR) return CORVUS_ERR;
             cmd->asking = 1;
-            break;
+            return server_redirect(cmd, &info);
         case CMD_ERR_CLUSTERDOWN:
             slot_create_job(SLOT_UPDATE);
             CHECK_REDIRECTED(cmd, NULL, NULL);
-            conn = conn_get_server(cmd->ctx, cmd->slot);
-            if (conn == NULL) return CORVUS_ERR;
-            return server_retry(conn, cmd);
+            return server_retry(cmd);
         default:
             cmd_mark_done(cmd);
             break;
@@ -216,7 +225,7 @@ int server_read(struct connection *server)
         switch (status) {
             case CORVUS_ASKING:
                 LOG(DEBUG, "recv asking");
-                server_free_buf(cmd);
+                server_data_clear(cmd);
                 cmd->asking = 0;
                 continue;
             case CORVUS_OK:
@@ -290,7 +299,6 @@ void server_eof(struct connection *server, const char *reason)
         if (c->stale) {
             cmd_free(c);
         } else {
-            cmd_free_reply(c);
             cmd_mark_fail(c, reason);
         }
     }
@@ -299,16 +307,18 @@ void server_eof(struct connection *server, const char *reason)
         c = STAILQ_FIRST(&server->waiting_queue);
         STAILQ_REMOVE_HEAD(&server->waiting_queue, waiting_next);
         STAILQ_NEXT(c, waiting_next) = NULL;
+        mbuf_range_clear(server->ctx, c->rep_buf);
         if (c->stale) {
             cmd_free(c);
         } else {
-            cmd_free_reply(c);
             cmd_mark_fail(c, reason);
         }
     }
 
     event_deregister(&server->ctx->loop, server);
-    /* not free connection buffer */
+
+    // drop all unsent requests
+    cmd_iov_reset(&server->iov);
     conn_free(server);
     slot_create_job(SLOT_UPDATE);
 }

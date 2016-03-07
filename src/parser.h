@@ -5,6 +5,38 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include "mbuf.h"
+
+#define ASSERT_TYPE(data, tp)                                            \
+do {                                                                     \
+    if ((data)->type != tp) {                                            \
+        LOG(ERROR, "%s: expect data type %d got %d",                     \
+                __func__, tp, (data)->type);                             \
+        return CORVUS_ERR;                                               \
+    }                                                                    \
+} while (0)
+
+#define ASSERT_ELEMENTS(condition, redis_data)                           \
+do {                                                                     \
+    struct pos_array *pos;                                               \
+    if (!(condition)) {                                                  \
+        ASSERT_TYPE(redis_data, REP_ARRAY);                              \
+                                                                         \
+        if ((redis_data)->elements >= 1) {                               \
+            ASSERT_TYPE(&(redis_data)->element[0], REP_STRING);          \
+                                                                         \
+            pos = &(redis_data)->element[0].pos;                         \
+            char name[pos->str_len + 1];                                 \
+            pos_to_str(pos, name);                                       \
+            LOG(ERROR, "%s: invalid data elements %d for command `%s`",  \
+                    __func__, (redis_data)->elements, name);             \
+        } else {                                                         \
+            LOG(ERROR, "%s: invalid command", __func__);                 \
+        }                                                                \
+        return CORVUS_ERR;                                               \
+    }                                                                    \
+} while (0)
+
 
 struct mbuf;
 
@@ -73,11 +105,6 @@ struct reader_task {
     struct redis_data data;
 };
 
-struct buf_ptr {
-    struct mbuf *buf;
-    uint8_t *pos;
-};
-
 struct reader {
     int type;
     int redis_data_type;
@@ -110,7 +137,6 @@ void reader_feed(struct reader *r, struct mbuf *buf);
 int reader_ready(struct reader *r);
 int parse(struct reader *r, int mode);
 struct pos *pos_get(struct pos_array *arr, int idx);
-size_t pos_str_len(struct pos *pos);
 int pos_to_str(struct pos_array *pos, char *str);
 void redis_data_free(struct redis_data *data);
 void redis_data_move(struct redis_data *lhs, struct redis_data *rhs);

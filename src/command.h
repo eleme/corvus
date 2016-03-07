@@ -23,6 +23,7 @@ STAILQ_HEAD(cmd_tqh, command);
 
 struct iov_data {
     struct iovec *data;
+    struct mbuf **buf_ptr;
     char buf[32];
     int cursor;
     int len;
@@ -34,14 +35,9 @@ struct command {
     STAILQ_ENTRY(command) ready_next;
     STAILQ_ENTRY(command) waiting_next;
     STAILQ_ENTRY(command) sub_cmd_next;
-    struct mhdr buf_queue;
-    struct mhdr rep_queue;
-
-    struct command *ref;
-    int refcount;
 
     struct context *ctx;
-    struct reader reader;
+    struct connection *ref;
 
     int parse_done;
 
@@ -63,8 +59,6 @@ struct command {
     int cmd_done_count;
     struct cmd_tqh sub_cmds;
     struct command *parent;
-
-    struct iov_data iov;
 
     struct buf_ptr req_buf[2];
     struct buf_ptr rep_buf[2];
@@ -98,20 +92,19 @@ const char *rep_err,
 void cmd_map_init();
 void cmd_map_destroy();
 struct command *cmd_create(struct context *ctx);
-struct command *cmd_get_lastest(struct context *ctx, struct cmd_tqh *q);
-int cmd_read_reply(struct command *cmd, struct connection *server);
-int cmd_read_request(struct command *cmd, int fd);
-void cmd_create_iovec(struct buf_ptr *start, struct buf_ptr *end, struct iov_data *iov);
+struct command *cmd_get(struct connection *client);
+int cmd_read(struct command *cmd, struct connection *conn, int mode);
+void cmd_create_iovec(struct buf_ptr ptr[], struct iov_data *iov);
 void cmd_make_iovec(struct command *cmd, struct iov_data *iov);
 int cmd_parse_redirect(struct command *cmd, struct redirect_info *info);
 void cmd_mark_done(struct command *cmd);
 void cmd_mark_fail(struct command *cmd, const char *reason);
 void cmd_stats(struct command *cmd);
-void cmd_set_stale(struct command *cmd, struct command *root);
-void cmd_iov_add(struct iov_data *iov, void *buf, size_t len);
-int cmd_iov_write(struct context *ctx, struct iov_data *iov, int fd);
+void cmd_set_stale(struct command *cmd);
+void cmd_iov_add(struct iov_data *iov, void *buf, size_t len, struct mbuf *b);
+void cmd_iov_reset(struct iov_data *iov);
+void cmd_iov_clear(struct context *ctx, struct iov_data *iov);
 void cmd_iov_free(struct iov_data *iov);
-void cmd_free_reply(struct command *cmd);
 void cmd_free(struct command *cmd);
 
 #endif /* end of include guard: __COMMAND_H */

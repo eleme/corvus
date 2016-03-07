@@ -119,8 +119,6 @@ struct node_info *node_info_get(struct address *addr)
 
 struct node_info *node_info_find(struct redis_data *data)
 {
-    struct node_info *node = NULL;
-
     if (data->elements != 2) return NULL;
 
     struct pos_array *p = &data->element[0].pos;
@@ -137,7 +135,7 @@ struct node_info *node_info_find(struct redis_data *data)
     char key[DSN_MAX];
     socket_get_key(&addr, key);
 
-    node = dict_get(&node_store.map, key);
+    struct node_info *node = dict_get(&node_store.map, key);
     if (node == NULL) {
         node = node_info_get(&addr);
         if (node == NULL) return NULL;
@@ -148,13 +146,18 @@ struct node_info *node_info_find(struct redis_data *data)
 
 int node_info_add_addr(struct redis_data *data)
 {
-    if (data->elements != 2) return -1;
+    if (data->elements != 2) return CORVUS_ERR;
+
+    ASSERT_TYPE(&data->element[0], REP_STRING);
+    ASSERT_TYPE(&data->element[1], REP_INTEGER);
 
     struct pos_array *p = &data->element[0].pos;
-    if (p->str_len <= 0) return -1;
+    if (p->str_len <= 0) return CORVUS_ERR;
 
     char hostname[p->str_len + 1];
-    if (pos_to_str(p, hostname) == CORVUS_ERR) return -1;
+    if (pos_to_str(p, hostname) == CORVUS_ERR) {
+        return CORVUS_ERR;
+    }
 
     uint16_t port = data->element[1].integer;
     struct address addr;
@@ -172,15 +175,19 @@ int parse_slots(struct redis_data *data)
     struct redis_data *d;
     struct node_info *node;
 
-    if (data->elements <= 0) return -1;
+    ASSERT_TYPE(data, REP_ARRAY);
+    if (data->elements <= 0) return CORVUS_ERR;
 
     for (i = 0; i < data->elements; i++) {
         d = &data->element[i];
 
-        if (d->elements < 3) return -1;
+        if (d->elements < 3) return CORVUS_ERR;
 
         node = node_info_find(&d->element[2]);
-        if (node == NULL) return -1;
+        if (node == NULL) return CORVUS_ERR;
+
+        ASSERT_TYPE(&d->element[0], REP_INTEGER);
+        ASSERT_TYPE(&d->element[1], REP_INTEGER);
 
         for (j = d->element[0].integer; j < d->element[1].integer + 1; j++) {
             count++;
@@ -189,7 +196,9 @@ int parse_slots(struct redis_data *data)
 
         if (!node->dsn_added && d->elements - 3 > 0) {
             for (h = 3; h < d->elements; h++) {
-                if (node_info_add_addr(&d->element[h]) == -1) return -1;
+                if (node_info_add_addr(&d->element[h]) == CORVUS_ERR) {
+                    return CORVUS_ERR;
+                }
             }
             node->dsn_added = 1;
         }
@@ -244,7 +253,7 @@ int do_update_slot_map(struct connection *server)
     if (conn_connect(server) == CORVUS_ERR) return CORVUS_ERR;
     if (server->status != CONNECTED) {
         LOG(ERROR, "update slot map, server not connected: %s", strerror(errno));
-        return -1;
+        return CORVUS_ERR;
     }
 
     struct iovec iov;
@@ -253,14 +262,14 @@ int do_update_slot_map(struct connection *server)
 
     if (socket_write(server->fd, &iov, 1) <= 0) {
         LOG(ERROR, "update slot map, socket write: %s", strerror(errno));
-        return -1;
+        return CORVUS_ERR;
     }
 
     int count = -1;
     LOG(INFO, "updating slot map using %s:%d", server->addr.host, server->addr.port);
     if(slot_read_data(server, &count) != CORVUS_OK) {
         LOG(ERROR, "update slot map, cmd read error");
-        return -1;
+        return CORVUS_ERR;
     }
     return count;
 }
@@ -474,7 +483,7 @@ int slot_init_updater(struct context *ctx)
 
     if (pthread_create(&thread, &attr, slot_map_updater, (void*)ctx) != 0) {
         LOG(ERROR, "can't initialize slot updating thread");
-        return -1;
+        return CORVUS_ERR;
     }
     LOG(INFO, "starting slot updating thread");
 
