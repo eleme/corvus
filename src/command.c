@@ -857,16 +857,11 @@ void cmd_create_iovec(struct buf_ptr ptr[], struct iov_data *iov)
 {
     uint8_t *data;
     int len;
-    struct mbuf *buf, *b = ptr[0].buf;
+    struct mbuf *b = ptr[0].buf;
 
     while (b != NULL) {
         data = cmd_get_data(b, ptr, &len);
-        if (b == ptr[0].buf || b == ptr[1].buf) {
-            buf = b;
-        } else {
-            buf = NULL;
-        }
-        cmd_iov_add(iov, (void*)data, len, buf);
+        cmd_iov_add(iov, (void*)data, len, b);
 
         if (b == ptr[1].buf) break;
         b = TAILQ_NEXT(b, next);
