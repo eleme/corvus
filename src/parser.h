@@ -45,16 +45,21 @@ enum {
     PARSE_TYPE,
     PARSE_ARRAY,
     PARSE_ARRAY_BEGIN,
+    PARSE_ARRAY_LENGTH,
     PARSE_ARRAY_END,
     PARSE_STRING,
     PARSE_STRING_BEGIN,
+    PARSE_STRING_LENGTH,
     PARSE_STRING_ENTITY,
     PARSE_STRING_END,
     PARSE_INTEGER,
     PARSE_INTEGER_BEGIN,
+    PARSE_INTEGER_LENGTH,
     PARSE_INTEGER_END,
     PARSE_SIMPLE_STRING,
     PARSE_SIMPLE_STRING_BEGIN,
+    PARSE_SIMPLE_STRING_TYPE,
+    PARSE_SIMPLE_STRING_LENGTH,
     PARSE_SIMPLE_STRING_END,
     PARSE_ERROR,
     PARSE_END,
@@ -85,6 +90,7 @@ struct pos_array {
 };
 
 struct redis_data {
+    struct buf_ptr buf[2];
     int type;
     union {
         struct pos_array pos;

@@ -1,6 +1,5 @@
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <ctype.h>
 #include <limits.h>
@@ -367,8 +366,7 @@ int cmd_forward_basic(struct command *cmd)
 }
 
 /* mget, del, exists */
-int cmd_forward_multikey(struct command *cmd, struct redis_data *data,
-        uint8_t *prefix, size_t len)
+int cmd_forward_multikey(struct command *cmd, struct redis_data *data, const char *prefix)
 {
     ASSERT_ELEMENTS(data->elements >= 2, data);
 
@@ -394,12 +392,10 @@ int cmd_forward_multikey(struct command *cmd, struct redis_data *data,
 
         ncmd->slot = slot_get(&key->pos);
 
-        conn_add_data(ncmd->client, prefix, len, &ncmd->req_buf[0], NULL);
-        ncmd->req_buf[0].buf->refcount++;
-        cmd_add_fragment(ncmd, &key->pos, NULL, &ncmd->req_buf[1]);
-        if (ncmd->req_buf[1].buf != ncmd->req_buf[0].buf) {
-            ncmd->req_buf[1].buf->refcount++;
-        }
+        // no need to increase buf refcount
+        memcpy(&ncmd->req_buf[0], &key->buf[0], sizeof(key->buf[0]));
+        memcpy(&ncmd->req_buf[1], &key->buf[1], sizeof(key->buf[1]));
+        ncmd->prefix = (char*)prefix;
 
         if (cmd_forward_basic(ncmd) == CORVUS_ERR) {
             cmd_mark_fail(ncmd, rep_forward_err);
@@ -436,13 +432,10 @@ int cmd_forward_mset(struct command *cmd, struct redis_data *data)
 
         ncmd->slot = slot_get(&key->pos);
 
-        conn_add_data(ncmd->client, (uint8_t*)rep_set, 13, &ncmd->req_buf[0], NULL);
-        ncmd->req_buf[0].buf->refcount++;
-        cmd_add_fragment(ncmd, &key->pos, NULL, NULL);
-        cmd_add_fragment(ncmd, &value->pos, NULL, &ncmd->req_buf[1]);
-        if (ncmd->req_buf[1].buf != ncmd->req_buf[0].buf) {
-            ncmd->req_buf[1].buf->refcount++;
-        }
+        // no need to increase buf refcount
+        memcpy(&ncmd->req_buf[0], &key->buf[0], sizeof(key->buf[0]));
+        memcpy(&ncmd->req_buf[1], &value->buf[1], sizeof(value->buf[1]));
+        ncmd->prefix = (char*)rep_set;
 
         if (cmd_forward_basic(ncmd) == CORVUS_ERR) {
             cmd_mark_fail(ncmd, rep_forward_err);
@@ -465,13 +458,13 @@ int cmd_forward_complex(struct command *cmd, struct redis_data *data)
 {
     switch (cmd->cmd_type) {
         case CMD_MGET:
-            return cmd_forward_multikey(cmd, data, (uint8_t*)rep_get, 13);
+            return cmd_forward_multikey(cmd, data, rep_get);
         case CMD_MSET:
             return cmd_forward_mset(cmd, data);
         case CMD_DEL:
-            return cmd_forward_multikey(cmd, data, (uint8_t*)rep_del, 13);
+            return cmd_forward_multikey(cmd, data, rep_del);
         case CMD_EXISTS:
-            return cmd_forward_multikey(cmd, data, (uint8_t*)rep_exists, 16);
+            return cmd_forward_multikey(cmd, data, rep_exists);
         case CMD_EVAL:
             return cmd_forward_eval(cmd, data);
         default:
@@ -981,18 +974,18 @@ void cmd_set_stale(struct command *cmd)
 {
     struct command *c;
     if (!STAILQ_EMPTY(&cmd->sub_cmds)) {
+        cmd->refcount = cmd->cmd_count;
         while (!STAILQ_EMPTY(&cmd->sub_cmds)) {
             c = STAILQ_FIRST(&cmd->sub_cmds);
             STAILQ_REMOVE_HEAD(&cmd->sub_cmds, sub_cmd_next);
             STAILQ_NEXT(c, sub_cmd_next) = NULL;
+            c->cmd_ref = cmd;
             cmd_set_stale(c);
         }
-        assert(cmd->rep_buf[0].buf == NULL);
-        cmd_free(cmd);
     } else if (cmd->server != NULL && cmd_in_queue(cmd, cmd->server)) {
         LOG(DEBUG, "command set stale");
         cmd->stale = 1;
-        cmd->ref = cmd->client;
+        cmd->conn_ref = cmd->client;
         cmd->client->refcount++;
     } else {
         mbuf_range_clear(cmd->ctx, cmd->rep_buf);
@@ -1052,8 +1045,9 @@ void cmd_free(struct command *cmd)
     struct command *c;
     struct context *ctx = cmd->ctx;
 
-    mbuf_range_clear(ctx, cmd->req_buf);
-    memset(cmd->req_buf, 0, sizeof(cmd->req_buf));
+    if (cmd->parent == NULL) {
+        mbuf_range_clear(ctx, cmd->req_buf);
+    }
 
     while (!STAILQ_EMPTY(&cmd->sub_cmds)) {
         c = STAILQ_FIRST(&cmd->sub_cmds);
@@ -1061,14 +1055,22 @@ void cmd_free(struct command *cmd)
         cmd_free(c);
     }
 
-    if (cmd->ref != NULL) {
-        cmd->ref->refcount--;
-        if (cmd->ref->refcount <= 0) {
-            conn_free(cmd->ref);
-            conn_buf_free(cmd->ref);
-            conn_recycle(ctx, cmd->ref);
+    if (cmd->cmd_ref != NULL) {
+        cmd->cmd_ref->refcount--;
+        if (cmd->cmd_ref->refcount <= 0) {
+            cmd_free(cmd->cmd_ref);
         }
-        cmd->ref = NULL;
+        cmd->cmd_ref = NULL;
+    }
+
+    if (cmd->conn_ref != NULL) {
+        cmd->conn_ref->refcount--;
+        if (cmd->conn_ref->refcount <= 0) {
+            conn_free(cmd->conn_ref);
+            conn_buf_free(cmd->conn_ref);
+            conn_recycle(ctx, cmd->conn_ref);
+        }
+        cmd->conn_ref = NULL;
     }
 
     cmd->client = NULL;

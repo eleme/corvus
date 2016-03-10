@@ -138,7 +138,6 @@ int process_type(struct reader *r)
             LOG(ERROR, "unknown command type '%c'", *r->buf->pos);
             return -1;
     }
-    r->buf->pos += 1;
     return 0;
 }
 
@@ -155,10 +154,13 @@ int process_array(struct reader *r)
         return CORVUS_ERR;
     }
 
-    for (; r->buf->pos < r->buf->last; r->buf->pos++) {
+    while (r->buf->pos < r->buf->last) {
         p = r->buf->pos;
         switch (r->array_type) {
             case PARSE_ARRAY_BEGIN:
+                r->array_type = PARSE_ARRAY_LENGTH;
+                break;
+            case PARSE_ARRAY_LENGTH:
                 c = *p;
                 switch (c) {
                     case '-': r->sign = -1; break;
@@ -200,6 +202,7 @@ int process_array(struct reader *r)
                 }
                 return CORVUS_OK;
         }
+        r->buf->pos++;
     }
     return CORVUS_OK;
 }
@@ -225,11 +228,17 @@ int process_string(struct reader *r)
         arr = &data->pos;
     }
 
-    for (; r->buf->pos < r->buf->last; r->buf->pos++) {
+    while (r->buf->pos < r->buf->last) {
         p = r->buf->pos;
-
         switch (r->string_type) {
             case PARSE_STRING_BEGIN:
+                if (data != NULL) {
+                    data->buf[0].buf = r->buf;
+                    data->buf[0].pos = r->buf->pos;
+                }
+                r->string_type = PARSE_STRING_LENGTH;
+                break;
+            case PARSE_STRING_LENGTH:
                 c = *p;
                 switch (c) {
                     case '-': r->sign = -1; break;
@@ -267,6 +276,12 @@ int process_string(struct reader *r)
             case PARSE_STRING_END:
                 task->cur_data = NULL;
                 r->buf->pos++;
+
+                if (data != NULL) {
+                    data->buf[1].buf = r->buf;
+                    data->buf[1].pos = r->buf->pos;
+                }
+
                 if (*p != '\n') {
                     LOG(ERROR, "process_string: unexpected charactor %c", *p);
                     return CORVUS_ERR;
@@ -281,6 +296,7 @@ int process_string(struct reader *r)
                 }
                 return CORVUS_OK;
         }
+        r->buf->pos++;
     }
     return CORVUS_OK;
 }
@@ -302,10 +318,13 @@ int process_integer(struct reader *r)
         }
     }
 
-    for (; r->buf->pos < r->buf->last; r->buf->pos++) {
+    while (r->buf->pos < r->buf->last) {
         p = r->buf->pos;
         switch (r->integer_type) {
             case PARSE_INTEGER_BEGIN:
+                r->integer_type = PARSE_INTEGER_LENGTH;
+                break;
+            case PARSE_INTEGER_LENGTH:
                 c = *p;
                 switch (c) {
                     case '-': r->sign = -1; break;
@@ -338,6 +357,7 @@ int process_integer(struct reader *r)
                 }
                 return CORVUS_OK;
         }
+        r->buf->pos++;
     }
     return CORVUS_OK;
 }
@@ -362,18 +382,29 @@ int process_simple_string(struct reader *r, int type)
         arr = &data->pos;
         if (task->prev_buf != r->buf) {
             pos = pos_array_push(arr, 0, NULL);
+            if (task->prev_buf != NULL) {
+                pos->str = r->buf->pos;
+                pos->len = 0;
+            }
             task->prev_buf = r->buf;
-            pos->str = r->buf->pos;
-            pos->len = 0;
         } else {
             pos = &arr->items[arr->pos_len - 1];
         }
     }
 
-    for (; r->buf->pos < r->buf->last; r->buf->pos++) {
+    while (r->buf->pos < r->buf->last) {
         p = r->buf->pos;
         switch (r->simple_string_type) {
             case PARSE_SIMPLE_STRING_BEGIN:
+                r->simple_string_type = PARSE_SIMPLE_STRING_TYPE;
+                break;
+            case PARSE_SIMPLE_STRING_TYPE:
+                if (pos != NULL) {
+                    pos->str = p;
+                    pos->len = 0;
+                }
+                r->simple_string_type = PARSE_SIMPLE_STRING_LENGTH;
+            case PARSE_SIMPLE_STRING_LENGTH:
                 c = *p;
                 if (c == '\r') {
                     if (task->elements > 0) task->elements--;
@@ -401,6 +432,7 @@ int process_simple_string(struct reader *r, int type)
                 }
                 return CORVUS_OK;
         }
+        r->buf->pos++;
     }
     return CORVUS_OK;
 }
