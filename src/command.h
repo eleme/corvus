@@ -37,13 +37,18 @@ struct command {
     STAILQ_ENTRY(command) sub_cmd_next;
 
     struct context *ctx;
-    struct connection *ref;
+
+    struct connection *conn_ref;
+    struct command *cmd_ref;
+    int refcount;
 
     int parse_done;
 
     /* redirect */
     int asking;
     int redirected;
+
+    char *prefix;
 
     int stale;
 

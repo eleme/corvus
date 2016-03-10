@@ -68,6 +68,9 @@ void server_make_iov(struct connection *server)
         }
         cmd->rep_time[0] = t;
 
+        if (cmd->prefix != NULL) {
+            cmd_iov_add(&server->iov, (void*)cmd->prefix, strlen(cmd->prefix), NULL);
+        }
         cmd_create_iovec(cmd->req_buf, &server->iov);
         STAILQ_INSERT_TAIL(&server->waiting_queue, cmd, waiting_next);
     }
