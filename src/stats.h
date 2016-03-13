@@ -5,7 +5,7 @@
 #include "socket.h"
 
 #define ADDR_MAX 1024
-#define ADDR_LIST_MAX (ADDR_MAX * DSN_MAX)
+#define ADDR_LIST_MAX (ADDR_MAX * DSN_LEN)
 
 struct basic_stats {
     long long connected_clients;
@@ -19,6 +19,7 @@ struct basic_stats {
     long long buffers;
     long long cmds;
     long long conns;
+    long long conn_info;
 };
 
 struct stats {
@@ -36,6 +37,7 @@ struct stats {
     long long free_buffers;
     long long free_cmds;
     long long free_conns;
+    long long free_conn_info;
 };
 
 int stats_init(int interval);

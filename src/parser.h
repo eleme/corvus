@@ -91,7 +91,7 @@ struct pos_array {
 
 struct redis_data {
     struct buf_ptr buf[2];
-    int type;
+    int8_t type;
     union {
         struct pos_array pos;
         long long integer;
@@ -103,7 +103,7 @@ struct redis_data {
 };
 
 struct reader_task {
-    int type;
+    int8_t type;
     int elements;
     size_t idx;
     struct mbuf *prev_buf;
@@ -112,26 +112,22 @@ struct reader_task {
 };
 
 struct reader {
-    int type;
-    int redis_data_type;
     struct mbuf *buf;
 
+    int8_t type;
+    int8_t item_type;
+    int8_t redis_data_type;
+    int8_t sign;
+
     struct reader_task rstack[9];
-    int sidx;
+    int8_t sidx;
 
     struct redis_data data;
 
-    int array_size;
-    int array_type;
-    int string_size;
-    int string_type;
-    int integer_type;
-    int sign;
-    int simple_string_type;
-    long long integer;
+    long long item_size;
 
-    int ready;
-    int mode;
+    bool ready;
+    int8_t mode;
 
     struct buf_ptr start;
     struct buf_ptr end;

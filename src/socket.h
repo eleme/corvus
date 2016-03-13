@@ -5,16 +5,13 @@
 #include <limits.h>
 #include "mbuf.h"
 
-#ifndef HOST_NAME_MAX
-#define HOST_NAME_MAX 255
-#endif
-
-#define DSN_MAX (HOST_NAME_MAX + 8)
+#define IP_LEN 45
+#define DSN_LEN (IP_LEN + 8)
 
 struct iovec;
 
 struct address {
-    char host[HOST_NAME_MAX + 1];
+    char ip[IP_LEN + 1];
     uint16_t port;
 };
 
@@ -32,6 +29,9 @@ int socket_set_tcpnodelay(int fd);
 int socket_set_timeout(int fd, int timeout);
 int socket_parse_port(char *ptr, uint16_t *res);
 int socket_parse_addr(char *addr, struct address *address);
+int socket_parse_ip(char *addr, struct address *address);
 void socket_get_key(struct address *addr, char *dst);
+int socket_create_eventfd();
+int socket_trigger_event(int evfd);
 
 #endif /* end of include guard: __SOCKET_H */

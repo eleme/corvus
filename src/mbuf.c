@@ -114,7 +114,7 @@ void mbuf_range_clear(struct context *ctx, struct buf_ptr ptr[])
     while (b != NULL) {
         n = TAILQ_NEXT(b, next);
         b->refcount--;
-        if (b->refcount <= 0) {
+        if (b->refcount <= 0 && b->pos >= b->last) {
             TAILQ_REMOVE(b->queue, b, next);
             mbuf_recycle(ctx, b);
         }

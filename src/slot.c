@@ -89,17 +89,17 @@ void slot_map_clear()
     if (node_list.len <= 0) node_list_init();
 }
 
-void addr_add(char *host, uint16_t port)
+void addr_add(char *ip, uint16_t port)
 {
     int n;
     pthread_rwlock_wrlock(&addr_list_lock);
     if (addr_list.bytes > 0) {
-        if (addr_list.bytes + DSN_MAX + 1 <= ADDR_LIST_MAX) {
+        if (addr_list.bytes + DSN_LEN + 1 <= ADDR_LIST_MAX) {
             addr_list.addrs[addr_list.bytes++] = ',';
         }
     }
-    if (ADDR_LIST_MAX - addr_list.bytes >= DSN_MAX) {
-        n = snprintf(addr_list.addrs + addr_list.bytes, DSN_MAX, "%s:%d", host, port);
+    if (ADDR_LIST_MAX - addr_list.bytes >= DSN_LEN) {
+        n = snprintf(addr_list.addrs + addr_list.bytes, DSN_LEN, "%s:%d", ip, port);
         addr_list.bytes += n;
     }
     pthread_rwlock_unlock(&addr_list_lock);
@@ -111,28 +111,40 @@ struct node_info *node_info_get(struct address *addr)
     struct node_info *node = &node_store.nodes[node_store.idx++];
     memset(node, 0, sizeof(struct node_info));
 
-    addr_add(addr->host, addr->port);
+    addr_add(addr->ip, addr->port);
 
     memcpy(&node->master, addr, sizeof(struct address));
     return node;
 }
 
-struct node_info *node_info_find(struct redis_data *data)
+int node_get_addr(struct redis_data *data, struct address *addr)
 {
-    if (data->elements != 2) return NULL;
+    if (data->elements != 2) return CORVUS_ERR;
+
+    ASSERT_TYPE(&data->element[0], REP_STRING);
+    ASSERT_TYPE(&data->element[1], REP_INTEGER);
 
     struct pos_array *p = &data->element[0].pos;
-    if (p->str_len <= 0) return NULL;
+    if (p->str_len <= 0) return CORVUS_ERR;
 
-    char hostname[p->str_len + 1];
-    if (pos_to_str(p, hostname) == CORVUS_ERR) return NULL;
+    char ip[p->str_len + 1];
+    if (pos_to_str(p, ip) == CORVUS_ERR) {
+        return CORVUS_ERR;
+    }
 
     uint16_t port = data->element[1].integer;
+    socket_address_init(addr, ip, p->str_len, port);
+    return CORVUS_OK;
+}
 
+struct node_info *node_info_find(struct redis_data *data)
+{
     struct address addr;
-    socket_address_init(&addr, hostname, p->str_len, port);
+    if (node_get_addr(data, &addr) == CORVUS_ERR) {
+        return NULL;
+    }
 
-    char key[DSN_MAX];
+    char key[DSN_LEN + 1];
     socket_get_key(&addr, key);
 
     struct node_info *node = dict_get(&node_store.map, key);
@@ -146,25 +158,13 @@ struct node_info *node_info_find(struct redis_data *data)
 
 int node_info_add_addr(struct redis_data *data)
 {
-    if (data->elements != 2) return CORVUS_ERR;
-
-    ASSERT_TYPE(&data->element[0], REP_STRING);
-    ASSERT_TYPE(&data->element[1], REP_INTEGER);
-
-    struct pos_array *p = &data->element[0].pos;
-    if (p->str_len <= 0) return CORVUS_ERR;
-
-    char hostname[p->str_len + 1];
-    if (pos_to_str(p, hostname) == CORVUS_ERR) {
+    struct address addr;
+    if (node_get_addr(data, &addr) == CORVUS_ERR) {
         return CORVUS_ERR;
     }
 
-    uint16_t port = data->element[1].integer;
-    struct address addr;
-    socket_address_init(&addr, hostname, p->str_len, port);
-
-    addr_add(addr.host, addr.port);
-    return 0;
+    addr_add(addr.ip, addr.port);
+    return CORVUS_OK;
 }
 
 int parse_slots(struct redis_data *data)
@@ -229,16 +229,15 @@ int slot_read_data(struct connection *server, int *count)
 {
     int n, rsize;
     struct mbuf *buf;
-    struct reader r;
-    reader_init(&r);
+    struct reader *r = &server->info->reader;
 
     while (1) {
         buf = conn_get_buf(server);
         rsize = mbuf_read_size(buf);
 
         if (rsize > 0) {
-            if (slot_parse_data(&r, buf, count) == CORVUS_ERR) return CORVUS_ERR;
-            if (reader_ready(&r)) return CORVUS_OK;
+            if (slot_parse_data(r, buf, count) == CORVUS_ERR) return CORVUS_ERR;
+            if (reader_ready(r)) return CORVUS_OK;
             continue;
         }
 
@@ -251,7 +250,7 @@ int slot_read_data(struct connection *server, int *count)
 int do_update_slot_map(struct connection *server)
 {
     if (conn_connect(server) == CORVUS_ERR) return CORVUS_ERR;
-    if (server->status != CONNECTED) {
+    if (server->info->status != CONNECTED) {
         LOG(ERROR, "update slot map, server not connected: %s", strerror(errno));
         return CORVUS_ERR;
     }
@@ -266,7 +265,8 @@ int do_update_slot_map(struct connection *server)
     }
 
     int count = -1;
-    LOG(INFO, "updating slot map using %s:%d", server->addr.host, server->addr.port);
+    LOG(INFO, "updating slot map using %s:%d",
+            server->info->addr.ip, server->info->addr.port);
     if(slot_read_data(server, &count) != CORVUS_OK) {
         LOG(ERROR, "update slot map, cmd read error");
         return CORVUS_ERR;
@@ -278,32 +278,33 @@ void slot_map_update(struct context *ctx)
 {
     int i, count = 0;
     struct address *node;
-    struct connection server;
 
-    conn_init(&server, ctx);
+    struct connection *server = conn_create(ctx);
+    server->info = conn_info_create(ctx);
 
     for (i = 0; i < node_list.len; i++) {
         node = &node_list.nodes[i];
-        server.fd = socket_create_stream();
-        if (server.fd == -1) continue;
+        server->fd = socket_create_stream();
+        if (server->fd == -1) continue;
 
-        if (socket_set_timeout(server.fd, 5) == CORVUS_ERR) {
-            close(server.fd);
+        if (socket_set_timeout(server->fd, 5) == CORVUS_ERR) {
+            close(server->fd);
             continue;
         }
 
-        memcpy(&server.addr, node, sizeof(struct address));
+        memcpy(&server->info->addr, node, sizeof(struct address));
 
-        count = do_update_slot_map(&server);
+        count = do_update_slot_map(server);
         if (count < REDIS_CLUSTER_SLOTS) {
-            conn_free(&server);
-            conn_buf_free(&server);
+            conn_free(server);
+            conn_buf_free(server);
             continue;
         }
         break;
     }
-    conn_free(&server);
-    conn_buf_free(&server);
+    conn_free(server);
+    conn_buf_free(server);
+    conn_recycle(ctx, server);
 
     if (count == CORVUS_ERR) {
         LOG(WARN, "can not update slot map");

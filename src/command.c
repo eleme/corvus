@@ -234,8 +234,10 @@ static void cmd_recycle(struct context *ctx, struct command *cmd)
 
 static int cmd_in_queue(struct command *cmd, struct connection *server)
 {
-    struct command *ready = STAILQ_LAST(&server->ready_queue, command, ready_next),
-                   *wait = STAILQ_LAST(&server->waiting_queue, command, waiting_next);
+    struct command *ready, *wait;
+
+    ready = STAILQ_LAST(&server->info->ready_queue, command, ready_next);
+    wait = STAILQ_LAST(&server->info->waiting_queue, command, waiting_next);
 
     return STAILQ_NEXT(cmd, ready_next) != NULL
         || STAILQ_NEXT(cmd, waiting_next) != NULL
@@ -291,6 +293,8 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             "free_cmds:%lld\r\n"
             "in_use_conns:%lld\r\n"
             "free_conns:%lld\r\n"
+            "in_use_conn_info:%lld\r\n"
+            "free_conn_info:%lld\r\n"
             "remotes:%s\r\n",
             config.cluster, VERSION, stats->pid, stats->threads,
             stats->used_cpu_sys, stats->used_cpu_user,
@@ -305,6 +309,8 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             stats->free_cmds,
             stats->basic.conns,
             stats->free_conns,
+            stats->basic.conn_info,
+            stats->free_conn_info,
             stats->remote_nodes);
 }
 
@@ -352,11 +358,11 @@ int cmd_forward_basic(struct command *cmd)
     }
     cmd->server = server;
 
-    server->last_active = time(NULL);
+    server->info->last_active = time(NULL);
 
     LOG(DEBUG, "command with slot %d ready", slot);
 
-    STAILQ_INSERT_TAIL(&server->ready_queue, cmd, ready_next);
+    STAILQ_INSERT_TAIL(&server->info->ready_queue, cmd, ready_next);
     if (conn_register(server) == -1) {
         LOG(ERROR, "cmd_forward_basic: fail to register server %d", server->fd);
         /* cmd already marked failed in server_eof */
@@ -578,7 +584,7 @@ int cmd_parse_token(struct command *cmd, struct redis_data *data)
 
 int cmd_parse_req(struct command *cmd, struct mbuf *buf)
 {
-    struct reader *r = &cmd->client->reader;
+    struct reader *r = &cmd->client->info->reader;
     reader_feed(r, buf);
 
     if (parse(r, MODE_REQ) == CORVUS_ERR) {
@@ -593,7 +599,7 @@ int cmd_parse_req(struct command *cmd, struct mbuf *buf)
         ASSERT_ELEMENTS(r->data.elements >= 1, &r->data);
 
         cmd->keys = r->data.elements - 1;
-        cmd->parse_done = 1;
+        cmd->parse_done = true;
         cmd->cmd_count = 1;
 
         memcpy(&cmd->req_buf[0], &r->start, sizeof(r->start));
@@ -619,7 +625,7 @@ int cmd_parse_req(struct command *cmd, struct mbuf *buf)
 
 int cmd_parse_rep(struct command *cmd, struct mbuf *buf)
 {
-    struct reader *r = &cmd->server->reader;
+    struct reader *r = &cmd->server->info->reader;
     reader_feed(r, buf);
 
     if (parse(r, MODE_REP) == CORVUS_ERR) {
@@ -632,8 +638,7 @@ int cmd_parse_rep(struct command *cmd, struct mbuf *buf)
     if (reader_ready(r)) {
         cmd->reply_type = r->redis_data_type;
         if (cmd->reply_type == REP_INTEGER) {
-            cmd->integer_data = r->integer;
-            r->integer = 0;
+            cmd->integer_data = r->item_size;
         }
 
         memcpy(&cmd->rep_buf[1], &r->end, sizeof(r->end));
@@ -738,7 +743,7 @@ void cmd_mark(struct command *cmd, int fail)
 {
     LOG(DEBUG, "mark cmd %p", cmd);
     struct command *root = NULL;
-    if (fail) cmd->cmd_fail = 1;
+    if (fail) cmd->cmd_fail = true;
 
     if (cmd->parent == NULL) {
         cmd->cmd_done_count = 1;
@@ -791,56 +796,22 @@ struct command *cmd_create(struct context *ctx)
     return cmd;
 }
 
-struct command *cmd_get(struct connection *client)
+int cmd_read_rep(struct command *cmd, struct connection *server)
 {
-    struct command *cmd;
-    int reuse = 0;
-
-    if (!STAILQ_EMPTY(&client->cmd_queue)) {
-        cmd = STAILQ_LAST(&client->cmd_queue, command, cmd_next);
-        if (!cmd->parse_done) {
-            reuse = 1;
-        }
-    }
-
-    if (!reuse) {
-        cmd = cmd_create(client->ctx);
-        STAILQ_INSERT_TAIL(&client->cmd_queue, cmd, cmd_next);
-    }
-    return cmd;
-}
-
-int cmd_read(struct command *cmd, struct connection *conn, int mode)
-{
-    int n, rsize, status;
+    int rsize, status;
     struct mbuf *buf;
 
     while (1) {
-        buf = conn_get_buf(conn);
+        buf = conn_get_buf(server);
         rsize = mbuf_read_size(buf);
 
         if (rsize <= 0) {
-            n = socket_read(conn->fd, buf);
-            if (n == 0) return CORVUS_EOF;
-            if (n == CORVUS_ERR) return CORVUS_ERR;
-            if (n == CORVUS_AGAIN) return CORVUS_AGAIN;
-            cmd->ctx->stats.recv_bytes += n;
-            conn->recv_bytes += n;
+            status = conn_read(server, buf);
+            if (status != CORVUS_OK) return status;
         }
 
-        switch (mode) {
-            case MODE_REQ:
-                status = cmd_parse_req(cmd, buf);
-                break;
-            case MODE_REP:
-                status = cmd_parse_rep(cmd, buf);
-                break;
-            default:
-                LOG(ERROR, "cmd_read: unknown reading mode %d", mode);
-                return CORVUS_ERR;
-        }
-        if (status == CORVUS_ERR) return CORVUS_ERR;
-        if (reader_ready(&conn->reader)) break;
+        if (cmd_parse_rep(cmd, buf) == CORVUS_ERR) return CORVUS_ERR;
+        if (reader_ready(&server->info->reader)) break;
     }
 
     return CORVUS_OK;
@@ -984,9 +955,9 @@ void cmd_set_stale(struct command *cmd)
         }
     } else if (cmd->server != NULL && cmd_in_queue(cmd, cmd->server)) {
         LOG(DEBUG, "command set stale");
-        cmd->stale = 1;
+        cmd->stale = true;
         cmd->conn_ref = cmd->client;
-        cmd->client->refcount++;
+        cmd->client->info->refcount++;
     } else {
         mbuf_range_clear(cmd->ctx, cmd->rep_buf);
         cmd_free(cmd);
@@ -1064,11 +1035,13 @@ void cmd_free(struct command *cmd)
     }
 
     if (cmd->conn_ref != NULL) {
-        cmd->conn_ref->refcount--;
-        if (cmd->conn_ref->refcount <= 0) {
-            conn_free(cmd->conn_ref);
+        cmd->conn_ref->info->refcount--;
+        if (cmd->conn_ref->info->refcount <= 0) {
             conn_buf_free(cmd->conn_ref);
-            conn_recycle(ctx, cmd->conn_ref);
+            if (!cmd->conn_ref->event_triggered) {
+                conn_free(cmd->conn_ref);
+                conn_recycle(ctx, cmd->conn_ref);
+            }
         }
         cmd->conn_ref = NULL;
     }

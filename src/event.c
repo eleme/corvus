@@ -42,18 +42,20 @@ void event_free(struct event_loop *loop)
     free(loop->events);
 }
 
-int event_register(struct event_loop *loop, struct connection *c)
+int event_register(struct event_loop *loop, struct connection *c, int mask)
 {
     struct epoll_event event;
 
-    event.events = (uint32_t)(EPOLLIN | EPOLLOUT | EPOLLET);
     event.data.ptr = c;
+    event.events = EPOLLET;
+    if (mask & E_WRITABLE) event.events |= EPOLLOUT;
+    if (mask & E_READABLE) event.events |= EPOLLIN;
 
     if (epoll_ctl(loop->epfd, EPOLL_CTL_ADD, c->fd, &event) == -1) {
-        LOG(ERROR, "event_register: %s", strerror(errno));
+        LOG(ERROR, "event_register: %d %s", c->fd, strerror(errno));
         return -1;
     }
-    c->registered = 1;
+    c->registered = true;
     return 0;
 }
 
@@ -69,7 +71,7 @@ int event_reregister(struct event_loop *loop, struct connection *c, int mask)
     if (mask & E_READABLE) event.events |= EPOLLIN;
 
     if (epoll_ctl(loop->epfd, op, c->fd, &event) == -1) {
-        LOG(ERROR, "event_reregister: %s", strerror(errno));
+        LOG(ERROR, "event_reregister: %d %s", c->fd, strerror(errno));
         return -1;
     }
     return 0;
@@ -77,17 +79,21 @@ int event_reregister(struct event_loop *loop, struct connection *c, int mask)
 
 int event_deregister(struct event_loop *loop, struct connection *c)
 {
+    if (c->fd == -1) {
+        return 0;
+    }
+
     if (epoll_ctl(loop->epfd, EPOLL_CTL_DEL, c->fd, NULL) == -1) {
-        LOG(ERROR, "event_deregister: %s", strerror(errno));
+        LOG(ERROR, "event_deregister: %d %s", c->fd, strerror(errno));
         return -1;
     }
-    c->registered = 0;
+    c->registered = false;
     return 0;
 }
 
 int event_wait(struct event_loop *loop, int timeout)
 {
-    int i, nevents;
+    int i, j, nevents;
 
     while (true) {
         nevents = epoll_wait(loop->epfd, loop->events, loop->nevent, timeout);
@@ -96,6 +102,20 @@ int event_wait(struct event_loop *loop, int timeout)
                 struct epoll_event *e = &loop->events[i];
                 struct connection *c = e->data.ptr;
                 uint32_t mask = 0;
+
+                bool duplicated = false;
+
+                if (c->parent != NULL) {
+                    for (j = i + 1; j < nevents; j++) {
+                        int fd = ((struct connection*)(loop->events[j].data.ptr))->fd;
+                        if (fd == c->parent->fd) {
+                            c->parent->event_triggered = false;
+                            duplicated = true;
+                            break;
+                        }
+                    }
+                }
+                if (duplicated) continue;
 
                 if (e->events & EPOLLIN) mask |= E_READABLE;
                 if (e->events & EPOLLOUT) mask |= E_WRITABLE;

@@ -15,8 +15,8 @@ TEST(test_check_connections) {
     conn1->fd = socket_create_stream();
     conn2->fd = socket_create_stream();
 
-    event_register(&ctx->loop, conn1);
-    event_register(&ctx->loop, conn2);
+    event_register(&ctx->loop, conn1, E_WRITABLE | E_READABLE);
+    event_register(&ctx->loop, conn2, E_WRITABLE | E_READABLE);
 
     TAILQ_INSERT_TAIL(&ctx->conns, conn1, next);
     TAILQ_INSERT_TAIL(&ctx->conns, conn2, next);

@@ -61,6 +61,8 @@ struct context {
     struct dict server_table;
     struct conn_tqh conns;
     uint32_t nfree_connq;
+    struct conn_info_tqh free_conn_infoq;
+    uint32_t nfree_conn_infoq;
 
     struct conn_tqh servers;
 
@@ -85,7 +87,7 @@ struct {
     int thread;
     int loglevel;
     bool syslog;
-    char statsd_addr[DSN_MAX + 1];
+    char statsd_addr[DSN_LEN + 1];
     int metric_interval;
     int stats;
     int64_t client_timeout;
