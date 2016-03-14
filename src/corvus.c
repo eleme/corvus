@@ -286,6 +286,15 @@ void context_free(struct context *ctx)
         free(conn);
     }
 
+    /* connection info queu */
+    struct conn_info *info;
+    while (!STAILQ_EMPTY(&ctx->free_conn_infoq)) {
+        info = STAILQ_FIRST(&ctx->free_conn_infoq);
+        STAILQ_REMOVE_HEAD(&ctx->free_conn_infoq, next);
+        free(info);
+        ctx->nfree_mbufq--;
+    }
+
     /* event loop */
     event_free(&ctx->loop);
 }

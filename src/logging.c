@@ -8,8 +8,8 @@
 #include "corvus.h"
 #include "logging.h"
 
-static const char *LEVEL_MAP[] = {"DEBUG", "INFO", "WARN", "ERROR"};
-static const int SYSLOG_LEVEL_MAP[] = {LOG_DEBUG, LOG_INFO, LOG_WARNING, LOG_ERR};
+static const char *LEVEL_MAP[] = {"DEBUG", "INFO", "WARN", "ERROR", "CRIT"};
+static const int SYSLOG_LEVEL_MAP[] = {LOG_DEBUG, LOG_INFO, LOG_WARNING, LOG_ERR, LOG_CRIT};
 
 void logger(const char *file, int line, int level, const char *fmt, ...)
 {

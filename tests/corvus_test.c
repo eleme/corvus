@@ -69,7 +69,7 @@ int main(int argc, const char *argv[])
     }
 
     config.syslog = 0;
-    config.loglevel = 99;
+    config.loglevel = CRIT;
     config.bufsize = 16384;
 
     struct node_conf conf = {NULL, 0};

@@ -12,7 +12,8 @@ enum {
     DEBUG,
     INFO,
     WARN,
-    ERROR
+    ERROR,
+    CRIT,
 };
 
 struct context;
