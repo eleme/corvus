@@ -755,11 +755,11 @@ void cmd_mark(struct command *cmd, int fail)
         }
     }
 
-    if (root != NULL) {
-        if (conn_register(root->client) == CORVUS_ERR) {
-            LOG(ERROR, "fail to reregister client %d", root->client->fd);
-            client_eof(root->client);
-        }
+    if (root != NULL && event_reregister(&cmd->ctx->loop,
+                root->client, E_WRITABLE) == CORVUS_ERR)
+    {
+        LOG(ERROR, "fail to reregister client %d", root->client->fd);
+        client_eof(root->client);
     }
 }
 

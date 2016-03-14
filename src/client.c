@@ -27,9 +27,10 @@ int client_read(struct connection *client, int read_socket)
     int status = CORVUS_OK, limit = 16;
 
     if (!STAILQ_EMPTY(&client->info->cmd_queue)
-            && STAILQ_FIRST(&client->info->cmd_queue)->parse_done) {
-        buf = conn_get_buf(client);
-        return client_trigger_event(client, buf);
+            && STAILQ_FIRST(&client->info->cmd_queue)->parse_done)
+    {
+        event_reregister(&client->ctx->loop, client, E_WRITABLE);
+        return CORVUS_OK;
     }
 
     do {
@@ -80,6 +81,7 @@ void client_make_iov(struct conn_info *info)
 
 int client_write(struct connection *client)
 {
+    struct context *ctx = client->ctx;
     struct conn_info *info = client->info;
 
     if (!STAILQ_EMPTY(&info->cmd_queue)) {
@@ -102,8 +104,14 @@ int client_write(struct connection *client)
     if (info->iov.cursor >= info->iov.len) {
         cmd_iov_reset(&info->iov);
     }
-    if (conn_register(client) == CORVUS_ERR) {
+
+    if (event_reregister(&ctx->loop, client, E_READABLE) == CORVUS_ERR) {
         LOG(ERROR, "client_write: fail to reregister client %d", client->fd);
+        return CORVUS_ERR;
+    }
+    if (client_trigger_event(client, conn_get_buf(client)) == CORVUS_ERR) {
+        LOG(ERROR, "client_write: fail to trigger event %d %d",
+                client->fd, client->ev->fd);
         return CORVUS_ERR;
     }
 
