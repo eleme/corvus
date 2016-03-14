@@ -25,7 +25,7 @@ do {                                                                      \
                 SERVER_RETRY_TIMES, c->slot,                              \
                 c->server->info->addr.ip,                                 \
                 c->server->info->addr.port, info_addr);                   \
-            server_data_clear(c);                                         \
+            mbuf_range_clear(c->ctx, c->rep_buf);                         \
             cmd_mark_fail(c, msg);                                        \
         }                                                                 \
         return CORVUS_OK;                                                 \
@@ -34,22 +34,6 @@ do {                                                                      \
 } while (0)
 
 static const char *req_ask = "*1\r\n$6\r\nASKING\r\n";
-
-void server_data_clear(struct command *cmd)
-{
-    struct mbuf *n, *b = cmd->rep_buf[0].buf;
-    while (b != NULL) {
-        n = TAILQ_NEXT(b, next);
-        b->refcount--;
-        if (b->refcount <= 0 && b->pos >= b->last) {
-            TAILQ_REMOVE(b->queue, b, next);
-            mbuf_recycle(cmd->ctx, b);
-        }
-        if (b == cmd->rep_buf[1].buf) break;
-        b = n;
-    }
-    memset(cmd->rep_buf, 0, sizeof(cmd->rep_buf));
-}
 
 void server_make_iov(struct conn_info *info)
 {
@@ -114,7 +98,7 @@ int server_write(struct connection *server)
 int _server_retry(struct connection *server, struct command *cmd)
 {
     if (server == NULL) {
-        server_data_clear(cmd);
+        mbuf_range_clear(cmd->ctx, cmd->rep_buf);
         cmd_mark_fail(cmd, rep_server_err);
         return SERVER_NULL;
     }
@@ -122,7 +106,7 @@ int _server_retry(struct connection *server, struct command *cmd)
         return SERVER_REGISTER_ERROR;
     }
     server->info->last_active = time(NULL);
-    server_data_clear(cmd);
+    mbuf_range_clear(cmd->ctx, cmd->rep_buf);
     cmd->server = server;
     STAILQ_INSERT_TAIL(&server->info->ready_queue, cmd, ready_next);
     return CORVUS_OK;
@@ -152,7 +136,7 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
     port = socket_parse_addr(info->addr, &addr);
     if (port == CORVUS_ERR) {
         LOG(WARN, "server_redirect: fail to parse addr %s", info->addr);
-        server_data_clear(cmd);
+        mbuf_range_clear(cmd->ctx, cmd->rep_buf);
         cmd_mark_fail(cmd, rep_addr_err);
         return CORVUS_OK;
     }
@@ -180,7 +164,7 @@ int server_read_reply(struct connection *server, struct command *cmd)
     if (cmd->asking) return CORVUS_ASKING;
 
     if (cmd->stale) {
-        server_data_clear(cmd);
+        mbuf_range_clear(cmd->ctx, cmd->rep_buf);
         return CORVUS_OK;
     }
 
@@ -193,7 +177,7 @@ int server_read_reply(struct connection *server, struct command *cmd)
     memset(info.addr, 0, sizeof(info.addr));
 
     if (cmd_parse_redirect(cmd, &info) == CORVUS_ERR) {
-        server_data_clear(cmd);
+        mbuf_range_clear(cmd->ctx, cmd->rep_buf);
         cmd_mark_fail(cmd, rep_redirect_err);
         return CORVUS_OK;
     }
@@ -233,7 +217,7 @@ int server_read(struct connection *server)
         switch (status) {
             case CORVUS_ASKING:
                 LOG(DEBUG, "recv asking");
-                server_data_clear(cmd);
+                mbuf_range_clear(cmd->ctx, cmd->rep_buf);
                 cmd->asking = 0;
                 continue;
             case CORVUS_OK:
@@ -312,6 +296,12 @@ void server_eof(struct connection *server, const char *reason)
         } else {
             cmd_mark_fail(c, reason);
         }
+    }
+
+    // remove unprocessed data
+    struct mbuf *b = TAILQ_LAST(&server->info->data, mhdr);
+    if (b != NULL && b->pos < b->last) {
+        b->pos = b->last;
     }
 
     while (!STAILQ_EMPTY(&server->info->waiting_queue)) {

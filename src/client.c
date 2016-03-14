@@ -16,7 +16,6 @@ int client_trigger_event(struct connection *client, struct mbuf *buf)
             return CORVUS_ERR;
         }
         client->event_triggered = true;
-        return CORVUS_OK;
     }
     return CORVUS_OK;
 }
@@ -165,6 +164,8 @@ void client_event_ready(struct connection *self, uint32_t mask)
         }
         return;
     }
+
+    client->info->last_active = time(NULL);
 
     if (mask & E_READABLE) {
         if (client_read(client, 0) == CORVUS_ERR) {
