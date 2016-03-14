@@ -9,8 +9,10 @@
 #include "logging.h"
 #include "slot.h"
 
+#define HOST_LEN 255
+
 struct bytes {
-    char key[DSN_MAX];
+    char key[DSN_LEN + 1];
     long long recv;
     long long send;
     long long completed;
@@ -21,7 +23,7 @@ static struct sockaddr_in dest;
 static pthread_t stats_thread;
 static int metric_interval = 10;
 static struct dict bytes_map;
-static char hostname[HOST_NAME_MAX + 1];
+static char hostname[HOST_LEN + 1];
 
 static void stats_send(char *metric, double value)
 {
@@ -64,9 +66,11 @@ void stats_get_simple(struct stats *stats)
         stats->basic.buffers += contexts[i].stats.buffers;
         stats->basic.conns += contexts[i].stats.conns;
         stats->basic.cmds += contexts[i].stats.cmds;
+        stats->basic.conn_info += contexts[i].stats.conn_info;
         stats->free_buffers += contexts[i].nfree_mbufq;
         stats->free_cmds += contexts[i].nfree_cmdq;
         stats->free_conns += contexts[i].nfree_connq;
+        stats->free_conn_info += contexts[i].nfree_conn_infoq;
     }
 }
 
@@ -79,28 +83,28 @@ void stats_node_info_agg(struct bytes *bytes)
 
     for (int i = 0; i < config.thread; i++) {
         TAILQ_FOREACH(server, &contexts[i].servers, next) {
-            n = strlen(server->addr.host);
+            n = strlen(server->info->addr.ip);
             if (n <= 0) continue;
 
-            char host[n + 8];
+            char ip[n + 8];
             for (j = 0; j < n; j++) {
-                host[j] = server->addr.host[j];
-                if (host[j] == '.') host[j] = '-';
+                ip[j] = server->info->addr.ip[j];
+                if (ip[j] == '.') ip[j] = '-';
             }
-            sprintf(host + j, "-%d", server->addr.port);
+            sprintf(ip + j, "-%d", server->info->addr.port);
 
-            b = dict_get(&bytes_map, host);
+            b = dict_get(&bytes_map, ip);
             if (b == NULL) {
                 b = &bytes[m++];
-                strncpy(b->key, host, sizeof(b->key));
+                strncpy(b->key, ip, sizeof(b->key));
                 b->send = 0;
                 b->recv = 0;
                 b->completed = 0;
                 dict_set(&bytes_map, b->key, (void*)b);
             }
-            b->send += server->send_bytes;
-            b->recv += server->recv_bytes;
-            b->completed += server->completed_commands;
+            b->send += server->info->send_bytes;
+            b->recv += server->info->recv_bytes;
+            b->completed += server->info->completed_commands;
         }
     }
 }
@@ -122,7 +126,7 @@ void stats_send_node_info()
     struct bytes *value;
 
     /* redis-node.127-0-0-1:8000.bytes.{send,recv} */
-    int len = HOST_NAME_MAX + 64;
+    int len = HOST_LEN + 64;
     char name[len];
 
     struct bytes bytes[REDIS_CLUSTER_SLOTS];
@@ -177,10 +181,10 @@ int stats_init(int interval)
     int len;
     dict_init(&bytes_map);
 
-    gethostname(hostname, HOST_NAME_MAX + 1);
+    gethostname(hostname, HOST_LEN + 1);
     len = strlen(hostname);
-    if (len > HOST_NAME_MAX) {
-        hostname[HOST_NAME_MAX] = '\0';
+    if (len > HOST_LEN) {
+        hostname[HOST_LEN] = '\0';
         len--;
     }
 
@@ -228,9 +232,9 @@ int stats_resolve_addr(char *addr)
     struct address a;
 
     memset(&dest, 0, sizeof(struct sockaddr_in));
-    if (socket_parse_addr(addr, &a) == CORVUS_ERR) {
+    if (socket_parse_ip(addr, &a) == CORVUS_ERR) {
         LOG(ERROR, "stats_resolve_addr: fail to parse addr %s", addr);
         return CORVUS_ERR;
     }
-    return socket_get_sockaddr(a.host, a.port, &dest, SOCK_DGRAM);
+    return socket_get_sockaddr(a.ip, a.port, &dest, SOCK_DGRAM);
 }

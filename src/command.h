@@ -31,57 +31,55 @@ struct iov_data {
 };
 
 struct command {
+    struct buf_ptr req_buf[2];
+    struct buf_ptr rep_buf[2];
+
     STAILQ_ENTRY(command) cmd_next;
     STAILQ_ENTRY(command) ready_next;
     STAILQ_ENTRY(command) waiting_next;
     STAILQ_ENTRY(command) sub_cmd_next;
 
     struct context *ctx;
-
     struct connection *conn_ref;
     struct command *cmd_ref;
-    int refcount;
-
-    int parse_done;
-
-    /* redirect */
-    int asking;
-    int redirected;
-
-    char *prefix;
-
-    int stale;
-
-    int slot;
-    int cmd_type;
-    int request_type;
-    int reply_type;
-    int keys;
-    int integer_data; /* for integer response */
-
-    int cmd_count;
-    int cmd_fail;
-    int cmd_done_count;
-    struct cmd_tqh sub_cmds;
-    struct command *parent;
-
-    struct buf_ptr req_buf[2];
-    struct buf_ptr rep_buf[2];
-
-    char *fail_reason;
 
     struct connection *client;
     struct connection *server;
+    struct command *parent;
+
+    char *prefix;
+    char *fail_reason;
 
     /* before read, after write*/
     int64_t req_time[2];
     /* before write, after read */
     int64_t rep_time[2];
+
+    int refcount;
+
+    int32_t slot;
+    int32_t cmd_type;
+    int16_t request_type;
+    int16_t reply_type;
+    int keys;
+    int integer_data; /* for integer response */
+
+    int cmd_count;
+    int cmd_done_count;
+    struct cmd_tqh sub_cmds;
+
+    /* redirect */
+    int16_t redirected;
+    bool asking;
+
+    bool parse_done;
+    bool stale;
+    bool cmd_fail;
 };
 
 struct redirect_info {
     uint16_t slot;
-    char addr[DSN_MAX];
+    char addr[DSN_LEN + 1];
     int type;
 };
 
@@ -97,10 +95,10 @@ const char *rep_err,
 void cmd_map_init();
 void cmd_map_destroy();
 struct command *cmd_create(struct context *ctx);
-struct command *cmd_get(struct connection *client);
-int cmd_read(struct command *cmd, struct connection *conn, int mode);
+int cmd_read_rep(struct command *cmd, struct connection *server);
 void cmd_create_iovec(struct buf_ptr ptr[], struct iov_data *iov);
 void cmd_make_iovec(struct command *cmd, struct iov_data *iov);
+int cmd_parse_req(struct command *cmd, struct mbuf *buf);
 int cmd_parse_redirect(struct command *cmd, struct redirect_info *info);
 void cmd_mark_done(struct command *cmd);
 void cmd_mark_fail(struct command *cmd, const char *reason);

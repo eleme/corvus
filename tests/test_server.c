@@ -26,11 +26,13 @@ TEST(test_server_eof) {
     cmd1->cmd_count = cmd2->cmd_count = 10;
 
     conn_add_data(server, (uint8_t*)a, strlen(a), &cmd2->rep_buf[0], &cmd2->rep_buf[1]);
+    struct mbuf *b = TAILQ_FIRST(&server->info->local_data);
+    b->pos = b->last;
 
     cmd2->stale = 1;
 
-    STAILQ_INSERT_TAIL(&server->ready_queue, cmd1, ready_next);
-    STAILQ_INSERT_TAIL(&server->waiting_queue, cmd2, waiting_next);
+    STAILQ_INSERT_TAIL(&server->info->ready_queue, cmd1, ready_next);
+    STAILQ_INSERT_TAIL(&server->info->waiting_queue, cmd2, waiting_next);
 
     server_eof(server, "test eof");
 
@@ -45,12 +47,14 @@ TEST(test_server_eof) {
 
     /* server freed */
     ASSERT(server->fd == -1);
-    ASSERT(STAILQ_EMPTY(&server->ready_queue));
-    ASSERT(STAILQ_EMPTY(&server->waiting_queue));
-    ASSERT(TAILQ_EMPTY(&server->local_data));
+    ASSERT(STAILQ_EMPTY(&server->info->ready_queue));
+    ASSERT(STAILQ_EMPTY(&server->info->waiting_queue));
+    ASSERT(TAILQ_EMPTY(&server->info->local_data));
 
     cmd_free(cmd1);
     cmd_free(cmd);
+
+    conn_free(server);
     conn_recycle(ctx, server);
 
     PASS(NULL);
@@ -59,31 +63,33 @@ TEST(test_server_eof) {
 TEST(test_server_data_clear) {
     char *data = "*3\r\n$3\r\nSET\r\n$5\r\nhello\r\n$3\r\n999\r\n";
 
-    struct connection conn;
-    conn_init(&conn, ctx);
+    struct connection *conn = server_create(ctx, -1);
 
     struct command *cmd = cmd_create(ctx);
 
-    struct mbuf *buf = conn_get_buf(&conn);
+    struct mbuf *buf = conn_get_buf(conn);
     int size = strlen(data);
     memcpy(buf->last, data, size);
     buf->last += size;
 
-    reader_feed(&conn.reader, buf);
-    ASSERT(parse(&conn.reader, MODE_REP) == 0);
+    reader_feed(&conn->info->reader, buf);
+    ASSERT(parse(&conn->info->reader, MODE_REP) == 0);
 
-    memcpy(&cmd->rep_buf[0], &conn.reader.start, sizeof(struct buf_ptr));
-    memcpy(&cmd->rep_buf[1], &conn.reader.end, sizeof(struct buf_ptr));
+    memcpy(&cmd->rep_buf[0], &conn->info->reader.start, sizeof(struct buf_ptr));
+    memcpy(&cmd->rep_buf[1], &conn->info->reader.end, sizeof(struct buf_ptr));
 
     ASSERT(buf->refcount == 1);
 
-    server_data_clear(cmd);
+    mbuf_range_clear(ctx, cmd->rep_buf);
 
     ASSERT(cmd->rep_buf[0].buf == NULL);
     ASSERT(cmd->rep_buf[1].buf == NULL);
     ASSERT(TAILQ_FIRST(&ctx->free_mbufq) == buf);
 
     cmd_free(cmd);
+
+    conn_free(conn);
+    conn_recycle(ctx, conn);
 
     PASS(NULL);
 }

@@ -6,17 +6,19 @@ extern void check_connections(struct context *ctx);
 
 TEST(test_check_connections) {
     struct connection *conn1 = conn_create(ctx);
+    conn1->info = conn_info_create(ctx);
     struct connection *conn2 = conn_create(ctx);
+    conn2->info = conn_info_create(ctx);
 
     config.client_timeout = config.server_timeout = 5;
-    conn1->last_active = 1;
-    conn2->last_active = 1;
+    conn1->info->last_active = 1;
+    conn2->info->last_active = 1;
 
     conn1->fd = socket_create_stream();
     conn2->fd = socket_create_stream();
 
-    event_register(&ctx->loop, conn1);
-    event_register(&ctx->loop, conn2);
+    event_register(&ctx->loop, conn1, E_WRITABLE | E_READABLE);
+    event_register(&ctx->loop, conn2, E_WRITABLE | E_READABLE);
 
     TAILQ_INSERT_TAIL(&ctx->conns, conn1, next);
     TAILQ_INSERT_TAIL(&ctx->conns, conn2, next);

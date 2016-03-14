@@ -2,6 +2,7 @@
 #include <sys/socket.h>
 #include <netinet/tcp.h>
 #include <sys/uio.h>
+#include <sys/eventfd.h>
 #include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -303,14 +304,14 @@ int socket_get_sockaddr(char *addr, int port, struct sockaddr_in *dest, int sock
     return CORVUS_OK;
 }
 
-void socket_address_init(struct address *addr, char *host, int len, int port)
+void socket_address_init(struct address *addr, char *ip, int len, int port)
 {
-    int size = MIN(HOST_NAME_MAX, len);
-    strncpy(addr->host, host, size);
-    if (size >= HOST_NAME_MAX) {
-        LOG(WARN, "hostname length exceed %d", HOST_NAME_MAX);
+    int size = MIN(IP_LEN, len);
+    strncpy(addr->ip, ip, size);
+    if (size >= IP_LEN) {
+        LOG(WARN, "hostname length exceed %d", IP_LEN);
     }
-    addr->host[size] = '\0';
+    addr->ip[size] = '\0';
     addr->port = port;
 }
 
@@ -323,7 +324,7 @@ int socket_parse_port(char *ptr, uint16_t *res)
     return CORVUS_OK;
 }
 
-int socket_parse_addr(char *addr, struct address *address)
+int socket_parse(char *addr, ssize_t *len)
 {
     uint16_t port;
     char *colon;
@@ -334,17 +335,68 @@ int socket_parse_addr(char *addr, struct address *address)
     if (socket_parse_port(colon + 1, &port) == CORVUS_ERR) {
         return CORVUS_ERR;
     }
+    *len = colon - addr;
+    return port;
+}
 
-    socket_address_init(address, addr, colon - addr, port);
+int socket_parse_ip(char *addr, struct address *address)
+{
+    ssize_t len;
+    int port = socket_parse(addr, &len);
+    if (port == CORVUS_ERR) return CORVUS_ERR;
+
+    char a[len + 1];
+    memcpy(a, addr, len);
+    a[len] = '\0';
+
+    struct sockaddr_in addr_in;
+    if (socket_get_sockaddr(a, port, &addr_in, SOCK_STREAM) == CORVUS_ERR) {
+        return CORVUS_ERR;
+    }
+    if (inet_ntop(AF_INET, (void*)&(addr_in.sin_addr),
+                address->ip, sizeof(address->ip)) == NULL)
+    {
+        LOG(ERROR, "socket_parse_ip: %s", strerror(errno));
+        return CORVUS_ERR;
+    }
+    address->port = port;
+    return CORVUS_OK;
+}
+
+int socket_parse_addr(char *addr, struct address *address)
+{
+    ssize_t len;
+    int port = socket_parse(addr, &len);
+    if (port == CORVUS_ERR) return CORVUS_ERR;
+    socket_address_init(address, addr, len, port);
     return port;
 }
 
 void socket_get_key(struct address *addr, char *dst)
 {
-    int n = snprintf(dst, DSN_MAX, "%s:%d", addr->host, addr->port);
-    if (n >= DSN_MAX) {
-        LOG(WARN, "hostname %s length exceed %d", addr->host,
-                HOST_NAME_MAX - 1);
-        dst[DSN_MAX - 1] = '\0';
+    int n = snprintf(dst, DSN_LEN, "%s:%d", addr->ip, addr->port);
+    if (n >= DSN_LEN) {
+        LOG(WARN, "hostname %s length exceed %d", addr->ip, IP_LEN - 1);
+        dst[DSN_LEN - 1] = '\0';
     }
+}
+
+int socket_create_eventfd()
+{
+    int fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    if (fd == -1) {
+        LOG(WARN, "%s: %s", __func__, strerror(errno));
+    }
+    return fd;
+}
+
+int socket_trigger_event(int evfd)
+{
+    uint64_t u = 1;
+    ssize_t s = write(evfd, &u, sizeof(u));
+    if (s != sizeof(u)) {
+        LOG(ERROR, "%s: %s", __func__, strerror(errno));
+        return CORVUS_ERR;
+    }
+    return CORVUS_OK;
 }

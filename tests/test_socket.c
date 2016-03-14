@@ -4,10 +4,10 @@
 TEST(test_socket_address_init) {
     struct address address;
 
-    char host[] = "127.0.0.2";
-    socket_address_init(&address, host, strlen(host), 12345);
+    char ip[] = "127.0.0.2";
+    socket_address_init(&address, ip, strlen(ip), 12345);
 
-    ASSERT(strcmp(address.host, host) == 0);
+    ASSERT(strcmp(address.ip, ip) == 0);
     ASSERT(address.port == 12345);
     PASS(NULL);
 }
@@ -35,32 +35,26 @@ TEST(test_socket_parse_addr) {
     struct address address;
     memset(&address, 0, sizeof(address));
 
-    socket_parse_addr("localhost:8000", &address);
-    ASSERT(strcmp(address.host, "localhost") == 0);
+    ASSERT(socket_parse_addr("127.0.0.1:8000", &address) == 8000);
+    ASSERT(strcmp(address.ip, "127.0.0.1") == 0);
     ASSERT(address.port == 8000);
 
-    socket_parse_addr(":12345", &address);
-    ASSERT(strcmp(address.host, "") == 0);
-    ASSERT(address.port == 12345);
+    ASSERT(socket_parse_addr("234.233.1.1:65511", &address) == 65511);
+    ASSERT(strcmp(address.ip, "234.233.1.1") == 0);
+    ASSERT(address.port == 65511);
 
     PASS(NULL);
 }
 
 TEST(test_socket_parse_addr_wrong) {
     struct address address;
-    int s = 100;
 
-    s = socket_parse_addr("localhost:", &address);
-    ASSERT(s == CORVUS_ERR);
+    ASSERT(socket_parse_addr(":12345", &address) == 12345);
+    ASSERT(socket_parse_addr("127.0.0.1:", &address) == -1);
+    ASSERT(socket_parse_addr("127.0.0.1:65536", &address) == -1);
+    ASSERT(socket_parse_addr("127.0.0.1:abcd", &address) == -1);
+    ASSERT(socket_parse_addr("P\343\377\377\377\177\000\000@\342", &address) == -1);
 
-    s = socket_parse_addr("localhost:65536", &address);
-    ASSERT(s == CORVUS_ERR);
-
-    s = socket_parse_addr("localhost:abcd", &address);
-    ASSERT(s == CORVUS_ERR);
-
-    s = socket_parse_addr("P\343\377\377\377\177\000\000@\342", &address);
-    ASSERT(s == CORVUS_ERR);
     PASS(NULL);
 }
 

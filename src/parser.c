@@ -104,8 +104,8 @@ int process_type(struct reader *r)
 {
     switch (*r->buf->pos) {
         case '*':
-            r->array_size = 0;
-            r->array_type = PARSE_ARRAY_BEGIN;
+            r->item_size = 0;
+            r->item_type = PARSE_ARRAY_BEGIN;
             r->type = PARSE_ARRAY;
             r->redis_data_type = REP_ARRAY;
             if (stack_push(r, REP_ARRAY) == CORVUS_ERR) {
@@ -113,25 +113,25 @@ int process_type(struct reader *r)
             }
             break;
         case '$':
-            r->string_size = 0;
-            r->string_type = PARSE_STRING_BEGIN;
+            r->item_size = 0;
+            r->item_type = PARSE_STRING_BEGIN;
             r->type = PARSE_STRING;
             r->redis_data_type = REP_STRING;
             break;
         case ':':
-            r->integer = 0;
+            r->item_type = PARSE_INTEGER_BEGIN;
+            r->item_size = 0;
             r->type = PARSE_INTEGER;
-            r->integer_type = PARSE_INTEGER_BEGIN;
             r->redis_data_type = REP_INTEGER;
             break;
         case '+':
+            r->item_type = PARSE_SIMPLE_STRING_BEGIN;
             r->type = PARSE_SIMPLE_STRING;
-            r->simple_string_type = PARSE_SIMPLE_STRING_BEGIN;
             r->redis_data_type = REP_SIMPLE_STRING;
             break;
         case '-':
+            r->item_type = PARSE_SIMPLE_STRING_BEGIN;
             r->type = PARSE_ERROR;
-            r->simple_string_type = PARSE_SIMPLE_STRING_BEGIN;
             r->redis_data_type = REP_ERROR;
             break;
         default:
@@ -156,23 +156,23 @@ int process_array(struct reader *r)
 
     while (r->buf->pos < r->buf->last) {
         p = r->buf->pos;
-        switch (r->array_type) {
+        switch (r->item_type) {
             case PARSE_ARRAY_BEGIN:
-                r->array_type = PARSE_ARRAY_LENGTH;
+                r->item_type = PARSE_ARRAY_LENGTH;
                 break;
             case PARSE_ARRAY_LENGTH:
                 c = *p;
                 switch (c) {
                     case '-': r->sign = -1; break;
                     case '\r':
-                        r->array_size *= r->sign;
+                        r->item_size *= r->sign;
                         r->sign = 1;
-                        r->array_type = PARSE_ARRAY_END;
+                        r->item_type = PARSE_ARRAY_END;
                         break;
                     default:
-                        v = r->array_size;
+                        v = r->item_size;
                         TO_NUMBER(v, c);
-                        r->array_size = v;
+                        r->item_size = v;
                         if (r->sign != -1) {
                             task->elements = task->data.elements = v;
                         }
@@ -230,45 +230,45 @@ int process_string(struct reader *r)
 
     while (r->buf->pos < r->buf->last) {
         p = r->buf->pos;
-        switch (r->string_type) {
+        switch (r->item_type) {
             case PARSE_STRING_BEGIN:
                 if (data != NULL) {
                     data->buf[0].buf = r->buf;
                     data->buf[0].pos = r->buf->pos;
                 }
-                r->string_type = PARSE_STRING_LENGTH;
+                r->item_type = PARSE_STRING_LENGTH;
                 break;
             case PARSE_STRING_LENGTH:
                 c = *p;
                 switch (c) {
                     case '-': r->sign = -1; break;
                     case '\r':
-                        r->string_size *= r->sign;
+                        r->item_size *= r->sign;
                         r->sign = 1;
                         if (task->elements > 0) task->elements--;
-                        if (r->string_size == -1) {
-                            r->string_type = PARSE_STRING_END;
+                        if (r->item_size == -1) {
+                            r->item_type = PARSE_STRING_END;
                         }
                         break;
                     case '\n':
-                        r->string_type = PARSE_STRING_ENTITY;
+                        r->item_type = PARSE_STRING_ENTITY;
                         break;
                     default:
-                        v = r->string_size;
+                        v = r->item_size;
                         TO_NUMBER(v, c);
-                        r->string_size = v;
+                        r->item_size = v;
                         break;
                 }
                 break;
             case PARSE_STRING_ENTITY:
                 remain = r->buf->last - p;
-                if (r->string_size < remain) {
-                    r->string_type = PARSE_STRING_END;
-                    r->buf->pos += r->string_size;
-                    if (arr != NULL) pos_array_push(arr, r->string_size, p);
-                    r->string_size = 0;
+                if (r->item_size < remain) {
+                    r->item_type = PARSE_STRING_END;
+                    r->buf->pos += r->item_size;
+                    if (arr != NULL) pos_array_push(arr, r->item_size, p);
+                    r->item_size = 0;
                 } else {
-                    r->string_size -= remain;
+                    r->item_size -= remain;
                     r->buf->pos += remain - 1;
                     if (arr != NULL) pos_array_push(arr, remain, p);
                 }
@@ -320,24 +320,24 @@ int process_integer(struct reader *r)
 
     while (r->buf->pos < r->buf->last) {
         p = r->buf->pos;
-        switch (r->integer_type) {
+        switch (r->item_type) {
             case PARSE_INTEGER_BEGIN:
-                r->integer_type = PARSE_INTEGER_LENGTH;
+                r->item_type = PARSE_INTEGER_LENGTH;
                 break;
             case PARSE_INTEGER_LENGTH:
                 c = *p;
                 switch (c) {
                     case '-': r->sign = -1; break;
                     case '\r':
-                        r->integer *= r->sign;
-                        if (data != NULL) data->integer = r->integer;
+                        r->item_size *= r->sign;
+                        if (data != NULL) data->integer = r->item_size;
                         if (task->elements > 0) task->elements--;
-                        r->integer_type = PARSE_INTEGER_END;
+                        r->item_type = PARSE_INTEGER_END;
                         break;
                     default:
-                        v = r->integer;
+                        v = r->item_size;
                         TO_NUMBER(v, c);
-                        r->integer = v;
+                        r->item_size = v;
                 }
                 break;
             case PARSE_INTEGER_END:
@@ -394,21 +394,21 @@ int process_simple_string(struct reader *r, int type)
 
     while (r->buf->pos < r->buf->last) {
         p = r->buf->pos;
-        switch (r->simple_string_type) {
+        switch (r->item_type) {
             case PARSE_SIMPLE_STRING_BEGIN:
-                r->simple_string_type = PARSE_SIMPLE_STRING_TYPE;
+                r->item_type = PARSE_SIMPLE_STRING_TYPE;
                 break;
             case PARSE_SIMPLE_STRING_TYPE:
                 if (pos != NULL) {
                     pos->str = p;
                     pos->len = 0;
                 }
-                r->simple_string_type = PARSE_SIMPLE_STRING_LENGTH;
+                r->item_type = PARSE_SIMPLE_STRING_LENGTH;
             case PARSE_SIMPLE_STRING_LENGTH:
                 c = *p;
                 if (c == '\r') {
                     if (task->elements > 0) task->elements--;
-                    r->simple_string_type = PARSE_SIMPLE_STRING_END;
+                    r->item_type = PARSE_SIMPLE_STRING_END;
                 } else if (pos != NULL && arr != NULL) {
                     pos->len++;
                     arr->str_len++;
@@ -490,7 +490,7 @@ int parse(struct reader *r, int mode)
                 }
                 r->buf->pos++;
                 r->type = PARSE_BEGIN;
-                r->ready = 1;
+                r->ready = true;
                 r->end.buf = r->buf;
                 r->end.pos = r->buf->pos;
                 if (r->buf != r->start.buf) {

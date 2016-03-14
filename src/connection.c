@@ -10,9 +10,6 @@
 #include "event.h"
 #include "server.h"
 #include "dict.h"
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netdb.h>
 
 #define EMPTY_CMD_QUEUE(queue, field)     \
 do {                                      \
@@ -32,7 +29,13 @@ do {                                      \
 
 static int verify_server(struct connection *server)
 {
-    if (server->status != DISCONNECTED) {
+    if (server->info == NULL) {
+        LOG(ERROR, "verify_server: connection info of server %d is null",
+                server->fd);
+        return CORVUS_ERR;
+    }
+    struct conn_info *info = server->info;
+    if (info->status != DISCONNECTED) {
         return CORVUS_OK;
     }
 
@@ -49,11 +52,11 @@ static int verify_server(struct connection *server)
 
     if (conn_connect(server) == CORVUS_ERR) {
         LOG(ERROR, "verify_server: fail to connect %s:%d",
-                server->addr.host, server->addr.port);
+                info->addr.ip, info->addr.port);
         conn_free(server);
         return CORVUS_ERR;
     }
-    server->registered = 0;
+    server->registered = false;
     return CORVUS_OK;
 }
 
@@ -65,46 +68,53 @@ static struct connection *conn_create_server(struct context *ctx, struct address
         return NULL;
     }
     struct connection *server = server_create(ctx, fd);
-    memcpy(&server->addr, addr, sizeof(server->addr));
+    struct conn_info *info = server->info;
+    memcpy(&info->addr, addr, sizeof(info->addr));
 
     if (conn_connect(server) == CORVUS_ERR) {
         LOG(ERROR, "conn_create_server: fail to connect %s:%d",
-                server->addr.host, server->addr.port);
+                info->addr.ip, info->addr.port);
         conn_free(server);
         conn_buf_free(server);
         conn_recycle(ctx, server);
         return NULL;
     }
 
-    strncpy(server->dsn, key, DSN_MAX);
-    dict_set(&ctx->server_table, server->dsn, (void*)server);
+    strncpy(info->dsn, key, DSN_LEN);
+    dict_set(&ctx->server_table, info->dsn, (void*)server);
     TAILQ_INSERT_TAIL(&ctx->servers, server, next);
     return server;
 }
 
+void conn_info_init(struct conn_info *info)
+{
+    info->refcount = 0;
+
+    memset(&info->addr, 0, sizeof(info->addr));
+    memset(info->dsn, 0, sizeof(info->dsn));
+
+    reader_init(&info->reader);
+
+    info->last_active = -1;
+
+    STAILQ_INIT(&info->cmd_queue);
+    STAILQ_INIT(&info->ready_queue);
+    STAILQ_INIT(&info->waiting_queue);
+    TAILQ_INIT(&info->data);
+    TAILQ_INIT(&info->local_data);
+
+    info->send_bytes = 0;
+    info->recv_bytes = 0;
+    info->completed_commands = 0;
+    info->status = DISCONNECTED;
+}
+
 void conn_init(struct connection *conn, struct context *ctx)
 {
+    memset(conn, 0, sizeof(struct connection));
+
     conn->ctx = ctx;
     conn->fd = -1;
-    conn->refcount = 0;
-    conn->last_active = -1;
-    conn->status = DISCONNECTED;
-    conn->ready = NULL;
-    conn->registered = 0;
-    conn->send_bytes = conn->recv_bytes = 0;
-    conn->completed_commands = 0;
-    memset(&conn->addr, 0, sizeof(conn->addr));
-    STAILQ_INIT(&conn->cmd_queue);
-    STAILQ_INIT(&conn->ready_queue);
-    STAILQ_INIT(&conn->waiting_queue);
-    TAILQ_INIT(&conn->data);
-    TAILQ_INIT(&conn->local_data);
-
-    TAILQ_RESET(conn, next);
-
-    memset(&conn->dsn, 0, sizeof(conn->dsn));
-
-    reader_init(&conn->reader);
 }
 
 struct connection *conn_create(struct context *ctx)
@@ -116,21 +126,42 @@ struct connection *conn_create(struct context *ctx)
         ctx->nfree_connq--;
     } else {
         conn = malloc(sizeof(struct connection));
-        memset(&conn->iov, 0, sizeof(conn->iov));
     }
     conn_init(conn, ctx);
     ctx->stats.conns++;
     return conn;
 }
 
+struct conn_info *conn_info_create(struct context *ctx)
+{
+    struct conn_info *info;
+    if (!STAILQ_EMPTY(&ctx->free_conn_infoq)) {
+        info = STAILQ_FIRST(&ctx->free_conn_infoq);
+        STAILQ_REMOVE_HEAD(&ctx->free_conn_infoq, next);
+        ctx->nfree_conn_infoq--;
+    } else {
+        info = malloc(sizeof(struct conn_info));
+        // init iov here
+        memset(&info->iov, 0, sizeof(info->iov));
+    }
+    conn_info_init(info);
+    ctx->stats.conn_info++;
+    return info;
+}
+
 int conn_connect(struct connection *conn)
 {
     int status;
-    status = socket_connect(conn->fd, conn->addr.host, conn->addr.port);
+    struct conn_info *info = conn->info;
+    if (info == NULL) {
+        LOG(ERROR, "connection info of %d is null", conn->fd);
+        return CORVUS_ERR;
+    }
+    status = socket_connect(conn->fd, info->addr.ip, info->addr.port);
     switch (status) {
-        case CORVUS_ERR: conn->status = DISCONNECTED; return CORVUS_ERR;
-        case CORVUS_INPROGRESS: conn->status = CONNECTING; break;
-        case CORVUS_OK: conn->status = CONNECTED; break;
+        case CORVUS_ERR: info->status = DISCONNECTED; return CORVUS_ERR;
+        case CORVUS_INPROGRESS: info->status = CONNECTING; break;
+        case CORVUS_OK: info->status = CONNECTED; break;
     }
     return CORVUS_OK;
 }
@@ -142,36 +173,57 @@ void conn_free(struct connection *conn)
         close(conn->fd);
         conn->fd = -1;
     }
-    conn->status = DISCONNECTED;
-    conn->registered = 0;
 
-    reader_free(&conn->reader);
-    reader_init(&conn->reader);
+    conn->registered = false;
 
-    EMPTY_CMD_QUEUE(&conn->cmd_queue, cmd_next);
-    EMPTY_CMD_QUEUE(&conn->ready_queue, ready_next);
-    EMPTY_CMD_QUEUE(&conn->waiting_queue, waiting_next);
+    if (conn->ev != NULL) {
+        conn->ev->info = NULL;
+        conn_free(conn->ev);
+        conn_recycle(conn->ctx, conn->ev);
+        conn->ev = NULL;
+    }
+
+    if (conn->info == NULL) return;
+    struct conn_info *info = conn->info;
+
+    info->status = DISCONNECTED;
+
+    reader_free(&info->reader);
+    reader_init(&info->reader);
+
+    EMPTY_CMD_QUEUE(&info->cmd_queue, cmd_next);
+    EMPTY_CMD_QUEUE(&info->ready_queue, ready_next);
+    EMPTY_CMD_QUEUE(&info->waiting_queue, waiting_next);
 }
 
 void conn_buf_free(struct connection *conn)
 {
+    if (conn->info == NULL) return;
+    struct conn_info *info = conn->info;
     struct mbuf *buf;
-    while (!TAILQ_EMPTY(&conn->data)) {
-        buf = TAILQ_FIRST(&conn->data);
-        TAILQ_REMOVE(&conn->data, buf, next);
+    while (!TAILQ_EMPTY(&info->data)) {
+        buf = TAILQ_FIRST(&info->data);
+        TAILQ_REMOVE(&info->data, buf, next);
         mbuf_recycle(conn->ctx, buf);
     }
-    while (!TAILQ_EMPTY(&conn->local_data)) {
-        buf = TAILQ_FIRST(&conn->local_data);
-        TAILQ_REMOVE(&conn->local_data, buf, next);
+    while (!TAILQ_EMPTY(&info->local_data)) {
+        buf = TAILQ_FIRST(&info->local_data);
+        TAILQ_REMOVE(&info->local_data, buf, next);
         mbuf_recycle(conn->ctx, buf);
     }
 }
 
 void conn_recycle(struct context *ctx, struct connection *conn)
 {
-    if (!TAILQ_EMPTY(&conn->data)) {
-        LOG(WARN, "connection recycle, data buffer not empty");
+    if (conn->info != NULL) {
+        ctx->stats.conn_info--;
+        struct conn_info *info = conn->info;
+        if (!TAILQ_EMPTY(&info->data)) {
+            LOG(WARN, "connection recycle, data buffer not empty");
+        }
+        STAILQ_INSERT_TAIL(&ctx->free_conn_infoq, info, next);
+        ctx->nfree_conn_infoq++;
+        conn->info = NULL;
     }
 
     ctx->stats.conns--;
@@ -203,7 +255,7 @@ int conn_create_fd()
 struct connection *conn_get_server_from_pool(struct context *ctx, struct address *addr)
 {
     struct connection *server = NULL;
-    char key[DSN_MAX];
+    char key[DSN_LEN + 1];
 
     socket_get_key(addr, key);
     server = dict_get(&ctx->server_table, key);
@@ -247,13 +299,14 @@ struct connection *conn_get_server(struct context *ctx, uint16_t slot)
 struct mbuf *conn_get_buf(struct connection *conn)
 {
     struct mbuf *buf = NULL;
+    struct conn_info *info = conn->info;
 
-    if (!TAILQ_EMPTY(&conn->data)) buf = TAILQ_LAST(&conn->data, mhdr);
+    if (!TAILQ_EMPTY(&info->data)) buf = TAILQ_LAST(&info->data, mhdr);
 
     if (buf == NULL || buf->pos >= buf->end) {
         buf = mbuf_get(conn->ctx);
-        buf->queue = &conn->data;
-        TAILQ_INSERT_TAIL(&conn->data, buf, next);
+        buf->queue = &info->data;
+        TAILQ_INSERT_TAIL(&info->data, buf, next);
     }
     return buf;
 }
@@ -261,19 +314,17 @@ struct mbuf *conn_get_buf(struct connection *conn)
 int conn_register(struct connection *conn)
 {
     struct context *ctx = conn->ctx;
-    switch (conn->registered) {
-        case 1:
-            return event_reregister(&ctx->loop, conn, E_WRITABLE | E_READABLE);
-        case 0:
-            return event_register(&ctx->loop, conn);
+    if (conn->registered) {
+        return event_reregister(&ctx->loop, conn, E_WRITABLE | E_READABLE);
+    } else {
+        return event_register(&ctx->loop, conn, E_WRITABLE | E_READABLE);
     }
-    return CORVUS_OK;
 }
 
 void conn_add_data(struct connection *conn, uint8_t *data, int n,
         struct buf_ptr *start, struct buf_ptr *end)
 {
-    struct mhdr *queue = &conn->local_data;
+    struct mhdr *queue = &conn->info->local_data;
     struct context *ctx = conn->ctx;
     struct mbuf *buf = mbuf_queue_get(ctx, queue);
     int remain = n, wlen, size, len = 0;
@@ -303,12 +354,13 @@ void conn_add_data(struct connection *conn, uint8_t *data, int n,
 int conn_write(struct connection *conn, int clear)
 {
     ssize_t remain = 0, status, bytes = 0, count = 0;
+    struct conn_info *info = conn->info;
 
     int i, n = 0;
-    struct iovec *vec = conn->iov.data + conn->iov.cursor;
-    struct mbuf **bufs = conn->iov.buf_ptr + conn->iov.cursor;
+    struct iovec *vec = info->iov.data + info->iov.cursor;
+    struct mbuf **bufs = info->iov.buf_ptr + info->iov.cursor;
 
-    while (n < conn->iov.len - conn->iov.cursor) {
+    while (n < info->iov.len - info->iov.cursor) {
         if (n >= CORVUS_IOV_MAX || bytes >= SSIZE_MAX) break;
         bytes += vec[n++].iov_len;
     }
@@ -331,11 +383,41 @@ int conn_write(struct connection *conn, int clear)
         n = i;
     }
 
-    conn->iov.cursor += n;
+    info->iov.cursor += n;
 
     if (clear) {
         mbuf_decref(conn->ctx, bufs, n);
     }
 
     return status;
+}
+
+int conn_read(struct connection *conn, struct mbuf *buf)
+{
+    int n = socket_read(conn->fd, buf);
+    if (n == 0) return CORVUS_EOF;
+    if (n == CORVUS_ERR) return CORVUS_ERR;
+    if (n == CORVUS_AGAIN) return CORVUS_AGAIN;
+    conn->ctx->stats.recv_bytes += n;
+    conn->info->recv_bytes += n;
+    return CORVUS_OK;
+}
+
+struct command *conn_get_cmd(struct connection *client)
+{
+    struct command *cmd;
+    int reuse = 0;
+
+    if (!STAILQ_EMPTY(&client->info->cmd_queue)) {
+        cmd = STAILQ_LAST(&client->info->cmd_queue, command, cmd_next);
+        if (!cmd->parse_done) {
+            reuse = 1;
+        }
+    }
+
+    if (!reuse) {
+        cmd = cmd_create(client->ctx);
+        STAILQ_INSERT_TAIL(&client->info->cmd_queue, cmd, cmd_next);
+    }
+    return cmd;
 }

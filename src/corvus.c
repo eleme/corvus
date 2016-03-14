@@ -71,7 +71,7 @@ int config_add(char *name, char *value)
         val = atoi(value);
         config.server_timeout = val < 0 ? 0 : val;
     } else if (strcmp(name, "statsd") == 0) {
-        strncpy(config.statsd_addr, value, DSN_MAX);
+        strncpy(config.statsd_addr, value, DSN_LEN);
     } else if (strcmp(name, "metric_interval") == 0) {
         config.metric_interval = atoi(value);
         if (config.metric_interval <= 0) config.metric_interval = 10;
@@ -95,7 +95,7 @@ int config_add(char *name, char *value)
             config.node.addr = realloc(config.node.addr,
                     sizeof(struct address) * (config.node.len + 1));
 
-            if (socket_parse_addr(p, &config.node.addr[config.node.len]) == -1) {
+            if (socket_parse_ip(p, &config.node.addr[config.node.len]) == -1) {
                 free(config.node.addr);
                 return -1;
             }
@@ -236,6 +236,7 @@ void context_init(struct context *ctx)
     mbuf_init(ctx);
 
     STAILQ_INIT(&ctx->free_cmdq);
+    STAILQ_INIT(&ctx->free_conn_infoq);
     TAILQ_INIT(&ctx->servers);
     TAILQ_INIT(&ctx->conns);
 }
@@ -247,9 +248,10 @@ void context_free(struct context *ctx)
     struct dict_iter iter = DICT_ITER_INITIALIZER;
     DICT_FOREACH(&ctx->server_table, &iter) {
         conn = (struct connection*)(iter.value);
-        cmd_iov_free(&conn->iov);
+        cmd_iov_free(&conn->info->iov);
         conn_free(conn);
         conn_buf_free(conn);
+        free(conn->info);
         free(conn);
     }
     dict_free(&ctx->server_table);
@@ -269,13 +271,27 @@ void context_free(struct context *ctx)
     /* connection queue */
     while (!TAILQ_EMPTY(&ctx->conns)) {
         conn = TAILQ_FIRST(&ctx->conns);
-        cmd_iov_free(&conn->iov);
+        TAILQ_REMOVE(&ctx->conns, conn, next);
         if (conn->fd != -1) {
+            if (conn->ev != NULL) {
+                conn_free(conn->ev);
+                free(conn->ev);
+                conn->ev = NULL;
+            }
             conn_free(conn);
             conn_buf_free(conn);
         }
-        TAILQ_REMOVE(&ctx->conns, conn, next);
         free(conn);
+    }
+
+    /* connection info queu */
+    struct conn_info *info;
+    while (!STAILQ_EMPTY(&ctx->free_conn_infoq)) {
+        info = STAILQ_FIRST(&ctx->free_conn_infoq);
+        STAILQ_REMOVE_HEAD(&ctx->free_conn_infoq, next);
+        cmd_iov_free(&info->iov);
+        free(info);
+        ctx->nfree_mbufq--;
     }
 
     /* event loop */
@@ -295,7 +311,7 @@ void *main_loop(void *data)
         LOG(ERROR, "Fatal: fail to create proxy.");
         exit(EXIT_FAILURE);
     }
-    if (event_register(&ctx->loop, &ctx->proxy) == -1) {
+    if (event_register(&ctx->loop, &ctx->proxy, E_READABLE) == -1) {
         LOG(ERROR, "Fatal: fail to register proxy.");
         exit(EXIT_FAILURE);
     }
@@ -304,7 +320,7 @@ void *main_loop(void *data)
         LOG(ERROR, "Fatal: fail to init timer.");
         exit(EXIT_FAILURE);
     }
-    if (event_register(&ctx->loop, &ctx->timer) == -1) {
+    if (event_register(&ctx->loop, &ctx->timer, E_READABLE) == -1) {
         LOG(ERROR, "Fatal: fail to register timer.");
         exit(EXIT_FAILURE);
     }

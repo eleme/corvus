@@ -23,11 +23,18 @@ int proxy_accept(struct connection *proxy)
         return CORVUS_ERR;
     }
 
-    strcpy(client->addr.host, ip);
-    client->addr.port = port;
+    strcpy(client->info->addr.ip, ip);
+    client->info->addr.port = port;
 
     if (conn_register(client) == CORVUS_ERR) {
-        LOG(ERROR, "fail to register client");
+        LOG(ERROR, "proxy_accept: fail to register client");
+        conn_free(client);
+        conn_recycle(ctx, client);
+        return CORVUS_ERR;
+    }
+
+    if (event_register(&client->ctx->loop, client->ev, E_READABLE) == CORVUS_ERR) {
+        LOG(ERROR, "proxy_accept: fail to register client event");
         conn_free(client);
         conn_recycle(ctx, client);
         return CORVUS_ERR;

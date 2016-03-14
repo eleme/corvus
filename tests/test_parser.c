@@ -346,7 +346,7 @@ TEST(test_process_array) {
     reader.mode = MODE_REP;
     ASSERT(process_array(&reader) == 0);
     ASSERT(buf->pos == buf->last);
-    ASSERT(reader.array_size == 2334);
+    ASSERT(reader.item_size == 2334);
     ASSERT(reader.type == PARSE_TYPE);
     ASSERT(reader.sidx == 1);
 
@@ -372,7 +372,7 @@ TEST(test_process_string) {
     ASSERT(process_string(&reader) == 0);
     ASSERT(buf->pos + 1 == buf->last);
     ASSERT(buf->pos[0] == '\n');
-    ASSERT(reader.string_size == 0);
+    ASSERT(reader.item_size == 0);
     ASSERT(reader.type == PARSE_END);
     ASSERT(reader.sidx == 0);
 
