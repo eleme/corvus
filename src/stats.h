@@ -13,8 +13,8 @@ struct basic_stats {
     long long recv_bytes;
     long long send_bytes;
 
-    double remote_latency;
-    double total_latency;
+    long long remote_latency;
+    long long total_latency;
 
     long long buffers;
     long long cmds;
@@ -29,7 +29,7 @@ struct stats {
     double used_cpu_sys;
     double used_cpu_user;
 
-    double last_command_latency[ADDR_MAX];
+    long long last_command_latency[ADDR_MAX];
     char remote_nodes[ADDR_LIST_MAX];
 
     struct basic_stats basic;

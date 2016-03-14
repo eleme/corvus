@@ -239,7 +239,7 @@ void client_eof(struct connection *client)
         cmd_set_stale(cmd);
     }
 
-    client->ctx->stats.connected_clients--;
+    ATOMIC_DEC(client->ctx->stats.connected_clients, 1);
 
     event_deregister(&client->ctx->loop, client);
     if (client->ev != NULL && !client->event_triggered) {

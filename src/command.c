@@ -301,8 +301,8 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             stats->basic.connected_clients,
             stats->basic.completed_commands,
             stats->basic.recv_bytes, stats->basic.send_bytes,
-            stats->basic.remote_latency,
-            stats->basic.total_latency, latency,
+            stats->basic.remote_latency / 1000000.0,
+            stats->basic.total_latency / 1000000.0, latency,
             stats->basic.buffers,
             stats->free_buffers,
             stats->basic.cmds,
@@ -505,7 +505,7 @@ int cmd_info(struct command *cmd)
     memset(latency, 0, sizeof(latency));
 
     for (i = 0; i < stats.threads; i++) {
-        n = snprintf(latency + size, 16, "%.6f", stats.last_command_latency[i]);
+        n = snprintf(latency + size, 16, "%.6f", stats.last_command_latency[i] / 1000000.0);
         size += n;
         if (i < stats.threads - 1) {
             latency[size] = ',';
@@ -923,22 +923,23 @@ void cmd_stats(struct command *cmd)
 {
     struct context *ctx = cmd->ctx;
     struct command *last, *first;
-    double latency;
+    long long latency;
 
-    ctx->stats.completed_commands++;
+    ATOMIC_INC(ctx->stats.completed_commands, 1);
 
-    latency = (cmd->req_time[1] - cmd->req_time[0]) / 1000000.0;
-    ctx->stats.total_latency += latency;
-    ctx->last_command_latency = latency;
+    latency = cmd->req_time[1] - cmd->req_time[0];
+
+    ATOMIC_INC(ctx->stats.total_latency, latency);
+    ATOMIC_SET(ctx->last_command_latency, latency);
 
     if (!STAILQ_EMPTY(&cmd->sub_cmds)) {
         first = STAILQ_FIRST(&cmd->sub_cmds);
         last = STAILQ_LAST(&cmd->sub_cmds, command, sub_cmd_next);
-        latency = (last->rep_time[1] - first->rep_time[0]) / 1000000.0;
+        latency = last->rep_time[1] - first->rep_time[0];
     } else {
-        latency = (cmd->rep_time[1] - cmd->rep_time[0]) / 1000000.0;
+        latency = cmd->rep_time[1] - cmd->rep_time[0];
     }
-    ctx->stats.remote_latency += latency;
+    ATOMIC_INC(ctx->stats.remote_latency, latency);
 }
 
 void cmd_set_stale(struct command *cmd)

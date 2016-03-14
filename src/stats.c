@@ -25,6 +25,8 @@ static int metric_interval = 10;
 static struct dict bytes_map;
 static char hostname[HOST_LEN + 1];
 
+struct stats global_stats;
+
 static void stats_send(char *metric, double value)
 {
     if (statsd_fd == -1) {
@@ -39,6 +41,16 @@ static void stats_send(char *metric, double value)
     if (sendto(statsd_fd, buf, n, 0, (struct sockaddr*)&dest, sizeof(dest)) == -1) {
         LOG(WARN, "fail to send metrics data: %s", strerror(errno));
     }
+}
+
+
+void stats_global_add(struct stats *stats)
+{
+    global_stats.basic.completed_commands += stats->basic.completed_commands;
+    global_stats.basic.remote_latency += stats->basic.remote_latency;
+    global_stats.basic.total_latency += stats->basic.total_latency;
+    global_stats.basic.recv_bytes += stats->basic.recv_bytes;
+    global_stats.basic.send_bytes += stats->basic.send_bytes;
 }
 
 void stats_get_simple(struct stats *stats)
@@ -57,13 +69,14 @@ void stats_get_simple(struct stats *stats)
 
     int i;
     for (i = 0; i < config.thread; i++) {
-        stats->basic.connected_clients += contexts[i].stats.connected_clients;
-        stats->basic.completed_commands += contexts[i].stats.completed_commands;
-        stats->basic.remote_latency += contexts[i].stats.remote_latency;
-        stats->basic.total_latency += contexts[i].stats.total_latency;
-        stats->basic.recv_bytes += contexts[i].stats.recv_bytes;
-        stats->basic.send_bytes += contexts[i].stats.send_bytes;
-        stats->basic.buffers += contexts[i].stats.buffers;
+        stats->basic.completed_commands += ATOMIC_IGET(contexts[i].stats.completed_commands, 0);
+        stats->basic.remote_latency += ATOMIC_IGET(contexts[i].stats.remote_latency, 0);
+        stats->basic.total_latency += ATOMIC_IGET(contexts[i].stats.total_latency, 0);
+        stats->basic.recv_bytes += ATOMIC_IGET(contexts[i].stats.recv_bytes, 0);
+        stats->basic.send_bytes += ATOMIC_IGET(contexts[i].stats.send_bytes, 0);
+
+        stats->basic.connected_clients += ATOMIC_GET(contexts[i].stats.connected_clients);
+        stats->basic.buffers += ATOMIC_GET(contexts[i].stats.buffers);
         stats->basic.conns += contexts[i].stats.conns;
         stats->basic.cmds += contexts[i].stats.cmds;
         stats->basic.conn_info += contexts[i].stats.conn_info;
@@ -72,6 +85,7 @@ void stats_get_simple(struct stats *stats)
         stats->free_conns += contexts[i].nfree_connq;
         stats->free_conn_info += contexts[i].nfree_conn_infoq;
     }
+    stats_global_add(stats);
 }
 
 void stats_node_info_agg(struct bytes *bytes)
@@ -118,7 +132,7 @@ void stats_send_simple()
     stats_send("completed_commands", stats.basic.completed_commands);
     stats_send("used_cpu_sys", stats.used_cpu_sys);
     stats_send("used_cpu_user", stats.used_cpu_user);
-    stats_send("latency", stats.basic.total_latency);
+    stats_send("latency", stats.basic.total_latency / 1000000.0);
 }
 
 void stats_send_node_info()
@@ -151,6 +165,13 @@ void stats_send_node_info()
 void stats_get(struct stats *stats)
 {
     stats_get_simple(stats);
+
+    stats->basic.completed_commands = global_stats.basic.completed_commands;
+    stats->basic.remote_latency = global_stats.basic.remote_latency;
+    stats->basic.total_latency = global_stats.basic.total_latency;
+    stats->basic.recv_bytes = global_stats.basic.recv_bytes;
+    stats->basic.send_bytes = global_stats.basic.send_bytes;
+
     memset(stats->remote_nodes, 0, sizeof(stats->remote_nodes));
     slot_get_addr_list(stats->remote_nodes);
 
@@ -159,7 +180,7 @@ void stats_get(struct stats *stats)
     memset(stats->last_command_latency, 0, sizeof(stats->last_command_latency));
     for (int i = 0; i < stats->threads; i++) {
         if (i >= ADDR_MAX) break;
-        stats->last_command_latency[i] = contexts[i].last_command_latency;
+        stats->last_command_latency[i] = ATOMIC_GET(contexts[i].last_command_latency);
     }
 }
 
@@ -180,6 +201,8 @@ int stats_init(int interval)
     pthread_attr_t attr;
     int len;
     dict_init(&bytes_map);
+
+    memset(&global_stats, 0, sizeof(global_stats));
 
     gethostname(hostname, HOST_LEN + 1);
     len = strlen(hostname);

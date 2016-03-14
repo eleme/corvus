@@ -160,7 +160,8 @@ int server_read_reply(struct connection *server, struct command *cmd)
     int status = cmd_read_rep(cmd, server);
     if (status != CORVUS_OK) return status;
 
-    server->info->completed_commands++;
+    ATOMIC_INC(server->info->completed_commands, 1);
+
     if (cmd->asking) return CORVUS_ASKING;
 
     if (cmd->stale) {

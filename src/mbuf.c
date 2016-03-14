@@ -57,19 +57,21 @@ struct mbuf *mbuf_get(struct context *ctx)
     mbuf->last = mbuf->start;
     mbuf->queue = NULL;
     mbuf->refcount = 0;
-
     TAILQ_NEXT(mbuf, next) = NULL;
 
-    ctx->stats.buffers++;
+    ATOMIC_INC(ctx->stats.buffers, 1);
+
     return mbuf;
 }
 
 void mbuf_recycle(struct context *ctx, struct mbuf *mbuf)
 {
-    ctx->stats.buffers--;
+    ATOMIC_DEC(ctx->stats.buffers, 1);
+
     TAILQ_NEXT(mbuf, next) = NULL;
     TAILQ_INSERT_HEAD(&ctx->free_mbufq, mbuf, next);
-    ctx->nfree_mbufq++;
+
+    ATOMIC_INC(ctx->nfree_mbufq, 1);
 }
 
 uint32_t mbuf_read_size(struct mbuf *mbuf)

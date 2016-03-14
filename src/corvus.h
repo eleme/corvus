@@ -27,6 +27,21 @@
 
 #define CLUSTER_NAME_SIZE 127
 
+#define ATOMIC_GET(data) \
+    __atomic_load_n(&(data), __ATOMIC_SEQ_CST)
+
+#define ATOMIC_IGET(data, value) \
+    __atomic_exchange_n(&(data), value, __ATOMIC_SEQ_CST)
+
+#define ATOMIC_SET(data, value) \
+    __atomic_store_n(&(data), value, __ATOMIC_SEQ_CST)
+
+#define ATOMIC_INC(data, value) \
+    __atomic_add_fetch(&(data), value, __ATOMIC_SEQ_CST)
+
+#define ATOMIC_DEC(data, value) \
+    __atomic_sub_fetch(&(data), value, __ATOMIC_SEQ_CST)
+
 enum thread_role {
     THREAD_UNKNOWN,
     THREAD_MAIN_WORKER,
@@ -77,7 +92,7 @@ struct context {
 
     /* stats */
     struct basic_stats stats;
-    double last_command_latency;
+    long long last_command_latency;
 };
 
 struct {
