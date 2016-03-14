@@ -88,10 +88,14 @@ static struct connection *conn_create_server(struct context *ctx, struct address
 
 void conn_info_init(struct conn_info *info)
 {
-    memset(info, 0, sizeof(struct conn_info));
+    info->refcount = 0;
+
+    memset(&info->addr, 0, sizeof(info->addr));
+    memset(info->dsn, 0, sizeof(info->dsn));
+
+    reader_init(&info->reader);
 
     info->last_active = -1;
-    info->status = DISCONNECTED;
 
     STAILQ_INIT(&info->cmd_queue);
     STAILQ_INIT(&info->ready_queue);
@@ -99,7 +103,10 @@ void conn_info_init(struct conn_info *info)
     TAILQ_INIT(&info->data);
     TAILQ_INIT(&info->local_data);
 
-    reader_init(&info->reader);
+    info->send_bytes = 0;
+    info->recv_bytes = 0;
+    info->completed_commands = 0;
+    info->status = DISCONNECTED;
 }
 
 void conn_init(struct connection *conn, struct context *ctx)
@@ -134,6 +141,8 @@ struct conn_info *conn_info_create(struct context *ctx)
         ctx->nfree_conn_infoq--;
     } else {
         info = malloc(sizeof(struct conn_info));
+        // init iov here
+        memset(&info->iov, 0, sizeof(info->iov));
     }
     conn_info_init(info);
     ctx->stats.conn_info++;
@@ -214,6 +223,7 @@ void conn_recycle(struct context *ctx, struct connection *conn)
         }
         STAILQ_INSERT_TAIL(&ctx->free_conn_infoq, info, next);
         ctx->nfree_conn_infoq++;
+        conn->info = NULL;
     }
 
     ctx->stats.conns--;

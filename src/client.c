@@ -10,7 +10,7 @@
 
 int client_trigger_event(struct connection *client, struct mbuf *buf)
 {
-    if (buf->pos < buf->last) {
+    if (buf->pos < buf->last && !client->event_triggered) {
         if (socket_trigger_event(client->ev->fd) == CORVUS_ERR) {
             LOG(ERROR, "%s: fail to trigger readable event", __func__);
             return CORVUS_ERR;

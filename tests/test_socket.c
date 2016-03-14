@@ -31,11 +31,11 @@ TEST(test_parse_port) {
     PASS(NULL);
 }
 
-TEST(test_socket_parse_ip) {
+TEST(test_socket_parse_addr) {
     struct address address;
     memset(&address, 0, sizeof(address));
 
-    ASSERT(socket_parse_ip("localhost:8000", &address) == 0);
+    ASSERT(socket_parse_addr("127.0.0.1:8000", &address) == 8000);
     ASSERT(strcmp(address.ip, "127.0.0.1") == 0);
     ASSERT(address.port == 8000);
 
@@ -46,14 +46,14 @@ TEST(test_socket_parse_ip) {
     PASS(NULL);
 }
 
-TEST(test_socket_parse_ip_wrong) {
+TEST(test_socket_parse_addr_wrong) {
     struct address address;
 
-    ASSERT(socket_parse_ip(":12345", &address) == -1);
-    ASSERT(socket_parse_ip("localhost:", &address) == -1);
-    ASSERT(socket_parse_ip("localhost:65536", &address) == -1);
-    ASSERT(socket_parse_ip("localhost:abcd", &address) == -1);
-    ASSERT(socket_parse_ip("P\343\377\377\377\177\000\000@\342", &address) == -1);
+    ASSERT(socket_parse_addr(":12345", &address) == 12345);
+    ASSERT(socket_parse_addr("127.0.0.1:", &address) == -1);
+    ASSERT(socket_parse_addr("127.0.0.1:65536", &address) == -1);
+    ASSERT(socket_parse_addr("127.0.0.1:abcd", &address) == -1);
+    ASSERT(socket_parse_addr("P\343\377\377\377\177\000\000@\342", &address) == -1);
 
     PASS(NULL);
 }
@@ -61,6 +61,6 @@ TEST(test_socket_parse_ip_wrong) {
 TEST_CASE(test_socket) {
     RUN_TEST(test_socket_address_init);
     RUN_TEST(test_parse_port);
-    RUN_TEST(test_socket_parse_ip);
-    RUN_TEST(test_socket_parse_ip_wrong);
+    RUN_TEST(test_socket_parse_addr);
+    RUN_TEST(test_socket_parse_addr_wrong);
 }

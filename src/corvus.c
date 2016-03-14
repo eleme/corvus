@@ -251,6 +251,7 @@ void context_free(struct context *ctx)
         cmd_iov_free(&conn->info->iov);
         conn_free(conn);
         conn_buf_free(conn);
+        free(conn->info);
         free(conn);
     }
     dict_free(&ctx->server_table);
@@ -271,9 +272,6 @@ void context_free(struct context *ctx)
     while (!TAILQ_EMPTY(&ctx->conns)) {
         conn = TAILQ_FIRST(&ctx->conns);
         TAILQ_REMOVE(&ctx->conns, conn, next);
-        if (conn->info != NULL) {
-            cmd_iov_free(&conn->info->iov);
-        }
         if (conn->fd != -1) {
             if (conn->ev != NULL) {
                 conn_free(conn->ev);
@@ -291,6 +289,7 @@ void context_free(struct context *ctx)
     while (!STAILQ_EMPTY(&ctx->free_conn_infoq)) {
         info = STAILQ_FIRST(&ctx->free_conn_infoq);
         STAILQ_REMOVE_HEAD(&ctx->free_conn_infoq, next);
+        cmd_iov_free(&info->iov);
         free(info);
         ctx->nfree_mbufq--;
     }
