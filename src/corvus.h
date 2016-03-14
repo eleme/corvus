@@ -62,12 +62,11 @@ struct node_conf {
 
 struct context {
     /* buffer related */
-    uint32_t nfree_mbufq;
-    struct mhdr free_mbufq;
     size_t mbuf_offset;
 
-    uint32_t nfree_cmdq;
+    struct mhdr free_mbufq;
     struct cmd_tqh free_cmdq;
+    struct conn_info_tqh free_conn_infoq;
 
     struct connection proxy;
     struct connection timer;
@@ -75,9 +74,6 @@ struct context {
     /* connection pool */
     struct dict server_table;
     struct conn_tqh conns;
-    uint32_t nfree_connq;
-    struct conn_info_tqh free_conn_infoq;
-    uint32_t nfree_conn_infoq;
 
     struct conn_tqh servers;
 
@@ -92,6 +88,7 @@ struct context {
 
     /* stats */
     struct basic_stats stats;
+    struct memory_stats mstats;
     long long last_command_latency;
 };
 

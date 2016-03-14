@@ -82,7 +82,7 @@ int server_write(struct connection *server)
     }
     if (status == CORVUS_AGAIN) return CORVUS_OK;
 
-    info->send_bytes += status;
+    ATOMIC_INC(info->send_bytes, status);
 
     if (info->iov.cursor >= info->iov.len) {
         cmd_iov_reset(&info->iov);

@@ -103,9 +103,9 @@ void conn_info_init(struct conn_info *info)
     TAILQ_INIT(&info->data);
     TAILQ_INIT(&info->local_data);
 
-    info->send_bytes = 0;
-    info->recv_bytes = 0;
-    info->completed_commands = 0;
+    ATOMIC_SET(info->send_bytes, 0);
+    ATOMIC_SET(info->recv_bytes, 0);
+    ATOMIC_SET(info->completed_commands, 0);
     info->status = DISCONNECTED;
 }
 
@@ -123,12 +123,12 @@ struct connection *conn_create(struct context *ctx)
     if ((conn = TAILQ_FIRST(&ctx->conns)) != NULL && conn->fd == -1) {
         LOG(DEBUG, "connection get cache");
         TAILQ_REMOVE(&ctx->conns, conn, next);
-        ctx->nfree_connq--;
+        ATOMIC_DEC(ctx->mstats.free_conns, 1);
     } else {
         conn = malloc(sizeof(struct connection));
     }
     conn_init(conn, ctx);
-    ctx->stats.conns++;
+    ATOMIC_INC(ctx->mstats.conns, 1);
     return conn;
 }
 
@@ -138,14 +138,14 @@ struct conn_info *conn_info_create(struct context *ctx)
     if (!STAILQ_EMPTY(&ctx->free_conn_infoq)) {
         info = STAILQ_FIRST(&ctx->free_conn_infoq);
         STAILQ_REMOVE_HEAD(&ctx->free_conn_infoq, next);
-        ctx->nfree_conn_infoq--;
+        ATOMIC_DEC(ctx->mstats.free_conn_info, 1);
     } else {
         info = malloc(sizeof(struct conn_info));
         // init iov here
         memset(&info->iov, 0, sizeof(info->iov));
     }
     conn_info_init(info);
-    ctx->stats.conn_info++;
+    ATOMIC_INC(ctx->mstats.conn_info, 1);
     return info;
 }
 
@@ -216,23 +216,27 @@ void conn_buf_free(struct connection *conn)
 void conn_recycle(struct context *ctx, struct connection *conn)
 {
     if (conn->info != NULL) {
-        ctx->stats.conn_info--;
+        ATOMIC_DEC(ctx->mstats.conn_info, 1);
+
         struct conn_info *info = conn->info;
         if (!TAILQ_EMPTY(&info->data)) {
             LOG(WARN, "connection recycle, data buffer not empty");
         }
         STAILQ_INSERT_TAIL(&ctx->free_conn_infoq, info, next);
-        ctx->nfree_conn_infoq++;
+
+        ATOMIC_INC(ctx->mstats.free_conn_info, 1);
         conn->info = NULL;
     }
 
-    ctx->stats.conns--;
+    ATOMIC_DEC(ctx->mstats.conns, 1);
+
     if (conn->next.tqe_next != NULL || conn->next.tqe_prev != NULL) {
         TAILQ_REMOVE(&ctx->conns, conn, next);
         TAILQ_RESET(conn, next);
     }
     TAILQ_INSERT_HEAD(&ctx->conns, conn, next);
-    ctx->nfree_connq++;
+
+    ATOMIC_INC(ctx->mstats.free_conns, 1);
 }
 
 int conn_create_fd()
@@ -368,7 +372,7 @@ int conn_write(struct connection *conn, int clear)
     status = socket_write(conn->fd, vec, n);
     if (status == CORVUS_AGAIN || status == CORVUS_ERR) return status;
 
-    conn->ctx->stats.send_bytes += status;
+    ATOMIC_INC(conn->ctx->stats.send_bytes, status);
 
     if (status < bytes) {
         for (i = 0; i < n; i++) {
@@ -398,8 +402,8 @@ int conn_read(struct connection *conn, struct mbuf *buf)
     if (n == 0) return CORVUS_EOF;
     if (n == CORVUS_ERR) return CORVUS_ERR;
     if (n == CORVUS_AGAIN) return CORVUS_AGAIN;
-    conn->ctx->stats.recv_bytes += n;
-    conn->info->recv_bytes += n;
+    ATOMIC_INC(conn->ctx->stats.recv_bytes, n);
+    ATOMIC_INC(conn->info->recv_bytes, n);
     return CORVUS_OK;
 }
 

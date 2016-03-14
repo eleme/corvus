@@ -11,7 +11,8 @@ static struct mbuf *_mbuf_get(struct context *ctx)
     if (!TAILQ_EMPTY(&ctx->free_mbufq)) {
         mbuf = TAILQ_FIRST(&ctx->free_mbufq);
         TAILQ_REMOVE(&ctx->free_mbufq, mbuf, next);
-        ctx->nfree_mbufq--;
+
+        ATOMIC_DEC(ctx->mstats.free_buffers, 1);
     } else {
         buf = (uint8_t*)malloc(config.bufsize);
         if (buf == NULL) {
@@ -33,9 +34,9 @@ void mbuf_free(struct context *ctx, struct mbuf *mbuf)
 
 void mbuf_init(struct context *ctx)
 {
-    ctx->nfree_mbufq = 0;
-    TAILQ_INIT(&ctx->free_mbufq);
+    ATOMIC_SET(ctx->mstats.free_buffers, 0);
 
+    TAILQ_INIT(&ctx->free_mbufq);
     ctx->mbuf_offset = config.bufsize - sizeof(struct mbuf);
 }
 
@@ -59,19 +60,19 @@ struct mbuf *mbuf_get(struct context *ctx)
     mbuf->refcount = 0;
     TAILQ_NEXT(mbuf, next) = NULL;
 
-    ATOMIC_INC(ctx->stats.buffers, 1);
+    ATOMIC_INC(ctx->mstats.buffers, 1);
 
     return mbuf;
 }
 
 void mbuf_recycle(struct context *ctx, struct mbuf *mbuf)
 {
-    ATOMIC_DEC(ctx->stats.buffers, 1);
+    ATOMIC_DEC(ctx->mstats.buffers, 1);
 
     TAILQ_NEXT(mbuf, next) = NULL;
     TAILQ_INSERT_HEAD(&ctx->free_mbufq, mbuf, next);
 
-    ATOMIC_INC(ctx->nfree_mbufq, 1);
+    ATOMIC_INC(ctx->mstats.free_buffers, 1);
 }
 
 uint32_t mbuf_read_size(struct mbuf *mbuf)
@@ -91,7 +92,8 @@ void mbuf_destroy(struct context *ctx)
         buf = TAILQ_FIRST(&ctx->free_mbufq);
         TAILQ_REMOVE(&ctx->free_mbufq, buf, next);
         mbuf_free(ctx, buf);
-        ctx->nfree_mbufq--;
+
+        ATOMIC_DEC(ctx->mstats.free_buffers, 1);
     }
 }
 

@@ -7,6 +7,18 @@
 #define ADDR_MAX 1024
 #define ADDR_LIST_MAX (ADDR_MAX * DSN_LEN)
 
+struct memory_stats {
+    long long buffers;
+    long long cmds;
+    long long conns;
+    long long conn_info;
+
+    long long free_buffers;
+    long long free_cmds;
+    long long free_conns;
+    long long free_conn_info;
+};
+
 struct basic_stats {
     long long connected_clients;
     long long completed_commands;
@@ -15,11 +27,6 @@ struct basic_stats {
 
     long long remote_latency;
     long long total_latency;
-
-    long long buffers;
-    long long cmds;
-    long long conns;
-    long long conn_info;
 };
 
 struct stats {
@@ -33,16 +40,12 @@ struct stats {
     char remote_nodes[ADDR_LIST_MAX];
 
     struct basic_stats basic;
-
-    long long free_buffers;
-    long long free_cmds;
-    long long free_conns;
-    long long free_conn_info;
 };
 
 int stats_init(int interval);
 void stats_kill();
 int stats_resolve_addr(char *addr);
 void stats_get(struct stats *stats);
+void stats_get_memory(struct memory_stats *stats);
 
 #endif /* end of include guard: __STATS_H */

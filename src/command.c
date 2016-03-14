@@ -147,8 +147,9 @@
     /* misc */                       \
     HANDLER(AUTH, UNIMPL)            \
     HANDLER(ECHO, UNIMPL)            \
-    HANDLER(PING, PROXY)             \
-    HANDLER(INFO, PROXY)             \
+    HANDLER(PING, EXTRA)             \
+    HANDLER(INFO, EXTRA)             \
+    HANDLER(PROXY, EXTRA)            \
     HANDLER(QUIT, UNIMPL)            \
     HANDLER(SELECT, UNIMPL)
 
@@ -160,7 +161,7 @@ enum {
     CMD_UNIMPL,
     CMD_BASIC,
     CMD_COMPLEX,
-    CMD_PROXY,
+    CMD_EXTRA,
 };
 
 struct cmd_item {
@@ -223,13 +224,15 @@ static void cmd_init(struct context *ctx, struct command *cmd)
 
 static void cmd_recycle(struct context *ctx, struct command *cmd)
 {
-    ctx->stats.cmds--;
+    ATOMIC_DEC(ctx->mstats.cmds, 1);
+
     STAILQ_NEXT(cmd, cmd_next) = NULL;
     STAILQ_NEXT(cmd, ready_next) = NULL;
     STAILQ_NEXT(cmd, waiting_next) = NULL;
     STAILQ_NEXT(cmd, sub_cmd_next) = NULL;
     STAILQ_INSERT_HEAD(&ctx->free_cmdq, cmd, cmd_next);
-    ctx->nfree_cmdq++;
+
+    ATOMIC_INC(ctx->mstats.free_cmds, 1);
 }
 
 static int cmd_in_queue(struct command *cmd, struct connection *server)
@@ -287,14 +290,6 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             "remote_latency:%.6f\r\n"
             "total_latency:%.6f\r\n"
             "last_command_latency:%s\r\n"
-            "in_use_buffers:%lld\r\n"
-            "free_buffers:%lld\r\n"
-            "in_use_cmds:%lld\r\n"
-            "free_cmds:%lld\r\n"
-            "in_use_conns:%lld\r\n"
-            "free_conns:%lld\r\n"
-            "in_use_conn_info:%lld\r\n"
-            "free_conn_info:%lld\r\n"
             "remotes:%s\r\n",
             config.cluster, VERSION, stats->pid, stats->threads,
             stats->used_cpu_sys, stats->used_cpu_user,
@@ -303,14 +298,6 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             stats->basic.recv_bytes, stats->basic.send_bytes,
             stats->basic.remote_latency / 1000000.0,
             stats->basic.total_latency / 1000000.0, latency,
-            stats->basic.buffers,
-            stats->free_buffers,
-            stats->basic.cmds,
-            stats->free_cmds,
-            stats->basic.conns,
-            stats->free_conns,
-            stats->basic.conn_info,
-            stats->free_conn_info,
             stats->remote_nodes);
 }
 
@@ -532,13 +519,73 @@ int cmd_info(struct command *cmd)
     return CORVUS_OK;
 }
 
-int cmd_proxy(struct command *cmd)
+int cmd_proxy_info(struct command *cmd)
+{
+    struct memory_stats stats;
+    memset(&stats, 0, sizeof(stats));
+    stats_get_memory(&stats);
+
+    int n = 1024;
+    char data[n + 1];
+    snprintf(data, n,
+        "in_use_buffers:%lld\n"
+        "free_buffers:%lld\n"
+        "in_use_cmds:%lld\n"
+        "free_cmds:%lld\n"
+        "in_use_conns:%lld\n"
+        "free_conns:%lld\n"
+        "in_use_conn_info:%lld\n"
+        "free_conn_info:%lld",
+        stats.buffers, stats.free_buffers, stats.cmds, stats.free_cmds,
+        stats.conns, stats.free_conns, stats.conn_info, stats.free_conn_info);
+    n = strlen(data);
+    char *fmt = "$%lu\r\n";
+    int size = snprintf(NULL, 0, fmt, n);
+    char head[size + 1];
+    snprintf(head, sizeof(head), fmt, n);
+
+    conn_add_data(cmd->client, (uint8_t*)"+", 1, &cmd->rep_buf[0], NULL);
+    cmd->rep_buf[0].buf->refcount++;
+    conn_add_data(cmd->client, (uint8_t*)data, n, NULL, NULL);
+    conn_add_data(cmd->client, (uint8_t*)"\r\n", 2, NULL, &cmd->rep_buf[1]);
+    if (cmd->rep_buf[1].buf != cmd->rep_buf[0].buf) {
+        cmd->rep_buf[1].buf->refcount++;
+    }
+    cmd_mark_done(cmd);
+    return CORVUS_OK;
+}
+
+int cmd_proxy(struct command *cmd, struct redis_data *data)
+{
+    ASSERT_TYPE(data, REP_ARRAY);
+    ASSERT_ELEMENTS(data->elements >= 2, data);
+
+    struct redis_data *op = &data->element[1];
+    ASSERT_TYPE(op, REP_STRING);
+
+    char type[op->pos.str_len + 1];
+    if (pos_to_str(&op->pos, type) == CORVUS_ERR) {
+        LOG(ERROR, "cmd_proxy: parse error");
+        return CORVUS_ERR;
+    }
+
+    if (strcasecmp(type, "INFO") == 0) {
+        return cmd_proxy_info(cmd);
+    } else {
+        cmd_mark_fail(cmd, rep_err);
+    }
+    return CORVUS_OK;
+}
+
+int cmd_extra(struct command *cmd, struct redis_data *data)
 {
     switch (cmd->cmd_type) {
         case CMD_PING:
             return cmd_ping(cmd);
         case CMD_INFO:
             return cmd_info(cmd);
+        case CMD_PROXY:
+            return cmd_proxy(cmd, data);
         default:
             LOG(ERROR, "%s: unknown command type %d", __func__, cmd->cmd_type);
             return CORVUS_ERR;
@@ -555,8 +602,8 @@ int cmd_forward(struct command *cmd, struct redis_data *data)
             return cmd_forward_basic(cmd);
         case CMD_COMPLEX:
             return cmd_forward_complex(cmd, data);
-        case CMD_PROXY:
-            return cmd_proxy(cmd);
+        case CMD_EXTRA:
+            return cmd_extra(cmd, data);
         case CMD_UNIMPL:
             return CORVUS_ERR;
     }
@@ -786,13 +833,13 @@ struct command *cmd_create(struct context *ctx)
         LOG(DEBUG, "cmd get cache");
         cmd = STAILQ_FIRST(&ctx->free_cmdq);
         STAILQ_REMOVE_HEAD(&ctx->free_cmdq, cmd_next);
-        ctx->nfree_cmdq--;
+        ATOMIC_DEC(ctx->mstats.free_cmds, 1);
         STAILQ_NEXT(cmd, cmd_next) = NULL;
     } else {
         cmd = malloc(sizeof(struct command));
     }
     cmd_init(ctx, cmd);
-    ctx->stats.cmds++;
+    ATOMIC_INC(ctx->mstats.cmds, 1);
     return cmd;
 }
 

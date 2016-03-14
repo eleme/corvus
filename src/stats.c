@@ -43,7 +43,6 @@ static void stats_send(char *metric, double value)
     }
 }
 
-
 void stats_global_add(struct stats *stats)
 {
     global_stats.basic.completed_commands += stats->basic.completed_commands;
@@ -51,6 +50,22 @@ void stats_global_add(struct stats *stats)
     global_stats.basic.total_latency += stats->basic.total_latency;
     global_stats.basic.recv_bytes += stats->basic.recv_bytes;
     global_stats.basic.send_bytes += stats->basic.send_bytes;
+}
+
+void stats_get_memory(struct memory_stats *stats)
+{
+    struct context *contexts = get_contexts();
+
+    for (int i = 0; i < config.thread; i++) {
+        stats->buffers        += ATOMIC_GET(contexts[i].mstats.buffers);
+        stats->conns          += ATOMIC_GET(contexts[i].mstats.conns);
+        stats->cmds           += ATOMIC_GET(contexts[i].mstats.cmds);
+        stats->conn_info      += ATOMIC_GET(contexts[i].mstats.conn_info);
+        stats->free_buffers   += ATOMIC_GET(contexts[i].mstats.free_buffers);
+        stats->free_cmds      += ATOMIC_GET(contexts[i].mstats.free_cmds);
+        stats->free_conns     += ATOMIC_GET(contexts[i].mstats.free_conns);
+        stats->free_conn_info += ATOMIC_GET(contexts[i].mstats.free_conn_info);
+    }
 }
 
 void stats_get_simple(struct stats *stats)
@@ -70,20 +85,11 @@ void stats_get_simple(struct stats *stats)
     int i;
     for (i = 0; i < config.thread; i++) {
         stats->basic.completed_commands += ATOMIC_IGET(contexts[i].stats.completed_commands, 0);
-        stats->basic.remote_latency += ATOMIC_IGET(contexts[i].stats.remote_latency, 0);
-        stats->basic.total_latency += ATOMIC_IGET(contexts[i].stats.total_latency, 0);
-        stats->basic.recv_bytes += ATOMIC_IGET(contexts[i].stats.recv_bytes, 0);
-        stats->basic.send_bytes += ATOMIC_IGET(contexts[i].stats.send_bytes, 0);
-
-        stats->basic.connected_clients += ATOMIC_GET(contexts[i].stats.connected_clients);
-        stats->basic.buffers += ATOMIC_GET(contexts[i].stats.buffers);
-        stats->basic.conns += contexts[i].stats.conns;
-        stats->basic.cmds += contexts[i].stats.cmds;
-        stats->basic.conn_info += contexts[i].stats.conn_info;
-        stats->free_buffers += contexts[i].nfree_mbufq;
-        stats->free_cmds += contexts[i].nfree_cmdq;
-        stats->free_conns += contexts[i].nfree_connq;
-        stats->free_conn_info += contexts[i].nfree_conn_infoq;
+        stats->basic.remote_latency     += ATOMIC_IGET(contexts[i].stats.remote_latency, 0);
+        stats->basic.total_latency      += ATOMIC_IGET(contexts[i].stats.total_latency, 0);
+        stats->basic.recv_bytes         += ATOMIC_IGET(contexts[i].stats.recv_bytes, 0);
+        stats->basic.send_bytes         += ATOMIC_IGET(contexts[i].stats.send_bytes, 0);
+        stats->basic.connected_clients  += ATOMIC_GET(contexts[i].stats.connected_clients);
     }
     stats_global_add(stats);
 }
@@ -116,9 +122,9 @@ void stats_node_info_agg(struct bytes *bytes)
                 b->completed = 0;
                 dict_set(&bytes_map, b->key, (void*)b);
             }
-            b->send += server->info->send_bytes;
-            b->recv += server->info->recv_bytes;
-            b->completed += server->info->completed_commands;
+            b->send += ATOMIC_GET(server->info->send_bytes);
+            b->recv += ATOMIC_GET(server->info->recv_bytes);
+            b->completed += ATOMIC_GET(server->info->completed_commands);
         }
     }
 }
