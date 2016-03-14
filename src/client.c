@@ -103,15 +103,17 @@ int client_write(struct connection *client)
 
     if (info->iov.cursor >= info->iov.len) {
         cmd_iov_reset(&info->iov);
-    }
-
-    if (event_reregister(&ctx->loop, client, E_READABLE) == CORVUS_ERR) {
+        if (event_reregister(&ctx->loop, client, E_READABLE) == CORVUS_ERR) {
+            LOG(ERROR, "client_write: fail to reregister client %d", client->fd);
+            return CORVUS_ERR;
+        }
+        if (client_trigger_event(client, conn_get_buf(client)) == CORVUS_ERR) {
+            LOG(ERROR, "client_write: fail to trigger event %d %d",
+                    client->fd, client->ev->fd);
+            return CORVUS_ERR;
+        }
+    } else if (event_reregister(&ctx->loop, client, E_WRITABLE) == CORVUS_ERR) {
         LOG(ERROR, "client_write: fail to reregister client %d", client->fd);
-        return CORVUS_ERR;
-    }
-    if (client_trigger_event(client, conn_get_buf(client)) == CORVUS_ERR) {
-        LOG(ERROR, "client_write: fail to trigger event %d %d",
-                client->fd, client->ev->fd);
         return CORVUS_ERR;
     }
 
