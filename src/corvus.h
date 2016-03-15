@@ -27,6 +27,21 @@
 
 #define CLUSTER_NAME_SIZE 127
 
+#define ATOMIC_GET(data) \
+    __atomic_load_n(&(data), __ATOMIC_SEQ_CST)
+
+#define ATOMIC_IGET(data, value) \
+    __atomic_exchange_n(&(data), value, __ATOMIC_SEQ_CST)
+
+#define ATOMIC_SET(data, value) \
+    __atomic_store_n(&(data), value, __ATOMIC_SEQ_CST)
+
+#define ATOMIC_INC(data, value) \
+    __atomic_add_fetch(&(data), value, __ATOMIC_SEQ_CST)
+
+#define ATOMIC_DEC(data, value) \
+    __atomic_sub_fetch(&(data), value, __ATOMIC_SEQ_CST)
+
 enum thread_role {
     THREAD_UNKNOWN,
     THREAD_MAIN_WORKER,
@@ -47,12 +62,11 @@ struct node_conf {
 
 struct context {
     /* buffer related */
-    uint32_t nfree_mbufq;
-    struct mhdr free_mbufq;
     size_t mbuf_offset;
 
-    uint32_t nfree_cmdq;
+    struct mhdr free_mbufq;
     struct cmd_tqh free_cmdq;
+    struct conn_info_tqh free_conn_infoq;
 
     struct connection proxy;
     struct connection timer;
@@ -60,9 +74,6 @@ struct context {
     /* connection pool */
     struct dict server_table;
     struct conn_tqh conns;
-    uint32_t nfree_connq;
-    struct conn_info_tqh free_conn_infoq;
-    uint32_t nfree_conn_infoq;
 
     struct conn_tqh servers;
 
@@ -77,7 +88,8 @@ struct context {
 
     /* stats */
     struct basic_stats stats;
-    double last_command_latency;
+    struct memory_stats mstats;
+    long long last_command_latency;
 };
 
 struct {

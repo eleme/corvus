@@ -41,7 +41,7 @@ int proxy_accept(struct connection *proxy)
     }
     TAILQ_INSERT_TAIL(&ctx->conns, client, next);
 
-    ctx->stats.connected_clients++;
+    ATOMIC_INC(ctx->stats.connected_clients, 1);
     return CORVUS_OK;
 }
 

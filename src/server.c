@@ -82,7 +82,7 @@ int server_write(struct connection *server)
     }
     if (status == CORVUS_AGAIN) return CORVUS_OK;
 
-    info->send_bytes += status;
+    ATOMIC_INC(info->send_bytes, status);
 
     if (info->iov.cursor >= info->iov.len) {
         cmd_iov_reset(&info->iov);
@@ -160,7 +160,8 @@ int server_read_reply(struct connection *server, struct command *cmd)
     int status = cmd_read_rep(cmd, server);
     if (status != CORVUS_OK) return status;
 
-    server->info->completed_commands++;
+    ATOMIC_INC(server->info->completed_commands, 1);
+
     if (cmd->asking) return CORVUS_ASKING;
 
     if (cmd->stale) {
