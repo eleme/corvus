@@ -153,6 +153,14 @@
     HANDLER(QUIT, UNIMPL)            \
     HANDLER(SELECT, UNIMPL)
 
+#define CMD_INCREF(cmd)                                   \
+do {                                                      \
+    (cmd)->rep_buf[0].buf->refcount++;                    \
+    if ((cmd)->rep_buf[1].buf != (cmd)->rep_buf[0].buf) { \
+        (cmd)->rep_buf[1].buf->refcount++;                \
+    }                                                     \
+} while (0)
+
 enum {
     CMD_DO(CMD_DEFINE)
 };
@@ -471,11 +479,7 @@ int cmd_ping(struct command *cmd)
 {
     conn_add_data(cmd->client, (uint8_t*)rep_ping, 7,
             &cmd->rep_buf[0], &cmd->rep_buf[1]);
-
-    cmd->rep_buf[0].buf->refcount++;
-    if (cmd->rep_buf[1].buf != cmd->rep_buf[0].buf) {
-        cmd->rep_buf[1].buf->refcount++;
-    }
+    CMD_INCREF(cmd);
 
     cmd_mark_done(cmd);
     return CORVUS_OK;
@@ -509,12 +513,10 @@ int cmd_info(struct command *cmd)
     snprintf(head, sizeof(head), fmt, n);
 
     conn_add_data(cmd->client, (uint8_t*)head, size, &cmd->rep_buf[0], NULL);
-    cmd->rep_buf[0].buf->refcount++;
     conn_add_data(cmd->client, (uint8_t*)info, n, NULL, NULL);
     conn_add_data(cmd->client, (uint8_t*)"\r\n", 2, NULL, &cmd->rep_buf[1]);
-    if (cmd->rep_buf[1].buf != cmd->rep_buf[0].buf) {
-        cmd->rep_buf[1].buf->refcount++;
-    }
+    CMD_INCREF(cmd);
+
     cmd_mark_done(cmd);
     return CORVUS_OK;
 }
@@ -528,6 +530,7 @@ int cmd_proxy_info(struct command *cmd)
     int n = 1024;
     char data[n + 1];
     snprintf(data, n,
+        "+"
         "in_use_buffers:%lld\n"
         "free_buffers:%lld\n"
         "in_use_cmds:%lld\n"
@@ -535,22 +538,15 @@ int cmd_proxy_info(struct command *cmd)
         "in_use_conns:%lld\n"
         "free_conns:%lld\n"
         "in_use_conn_info:%lld\n"
-        "free_conn_info:%lld",
+        "free_conn_info:%lld"
+        "\r\n",
         stats.buffers, stats.free_buffers, stats.cmds, stats.free_cmds,
         stats.conns, stats.free_conns, stats.conn_info, stats.free_conn_info);
-    n = strlen(data);
-    char *fmt = "$%lu\r\n";
-    int size = snprintf(NULL, 0, fmt, n);
-    char head[size + 1];
-    snprintf(head, sizeof(head), fmt, n);
 
-    conn_add_data(cmd->client, (uint8_t*)"+", 1, &cmd->rep_buf[0], NULL);
-    cmd->rep_buf[0].buf->refcount++;
-    conn_add_data(cmd->client, (uint8_t*)data, n, NULL, NULL);
-    conn_add_data(cmd->client, (uint8_t*)"\r\n", 2, NULL, &cmd->rep_buf[1]);
-    if (cmd->rep_buf[1].buf != cmd->rep_buf[0].buf) {
-        cmd->rep_buf[1].buf->refcount++;
-    }
+    conn_add_data(cmd->client, (uint8_t*)data, strlen(data),
+            &cmd->rep_buf[0], &cmd->rep_buf[1]);
+    CMD_INCREF(cmd);
+
     cmd_mark_done(cmd);
     return CORVUS_OK;
 }
