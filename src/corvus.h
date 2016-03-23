@@ -13,7 +13,7 @@
 #include "dict.h"
 #include "event.h"
 
-#define VERSION "0.2.0"
+#define VERSION "0.2.1"
 
 #define CORVUS_OK 0
 #define CORVUS_ERR -1
