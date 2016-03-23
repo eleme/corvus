@@ -3,6 +3,7 @@
 #include <netinet/tcp.h>
 #include <sys/uio.h>
 #include <sys/eventfd.h>
+#include <sys/ioctl.h>
 #include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -399,4 +400,26 @@ int socket_trigger_event(int evfd)
         return CORVUS_ERR;
     }
     return CORVUS_OK;
+}
+
+int socket_get_sndbuf(int fd)
+{
+    int n;
+    socklen_t len = sizeof(n);
+
+    if (getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &n, &len) == -1) {
+        LOG(WARN, "getsockopt SO_SNDBUF: %s", strerror(errno));
+        return CORVUS_ERR;
+    }
+    return n;
+}
+
+int socket_sndbuf_size(int fd)
+{
+    int size = 0;
+    if (ioctl(fd, TIOCOUTQ, &size) == -1) {
+        LOG(WARN, "ioctl TIOCOUTQ: %s", strerror(errno));
+        return CORVUS_ERR;
+    }
+    return size;
 }

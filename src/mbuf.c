@@ -3,6 +3,8 @@
 #include "corvus.h"
 #include "logging.h"
 
+#define RECYCLE_LENGTH 8192 // 128mb
+
 static struct mbuf *_mbuf_get(struct context *ctx)
 {
     struct mbuf *mbuf;
@@ -68,6 +70,11 @@ struct mbuf *mbuf_get(struct context *ctx)
 void mbuf_recycle(struct context *ctx, struct mbuf *mbuf)
 {
     ATOMIC_DEC(ctx->mstats.buffers, 1);
+
+    if (ATOMIC_GET(ctx->mstats.free_buffers) > RECYCLE_LENGTH) {
+        mbuf_free(ctx, mbuf);
+        return;
+    }
 
     TAILQ_NEXT(mbuf, next) = NULL;
     TAILQ_INSERT_HEAD(&ctx->free_mbufq, mbuf, next);

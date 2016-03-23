@@ -85,7 +85,7 @@ int server_write(struct connection *server)
     ATOMIC_INC(info->send_bytes, status);
 
     if (info->iov.cursor >= info->iov.len) {
-        cmd_iov_reset(&info->iov);
+        cmd_iov_free(&info->iov);
     } else if (conn_register(server) == CORVUS_ERR) {
         LOG(ERROR, "server_write: fail to reregister server %d", server->fd);
         return CORVUS_ERR;
@@ -320,7 +320,7 @@ void server_eof(struct connection *server, const char *reason)
     event_deregister(&server->ctx->loop, server);
 
     // drop all unsent requests
-    cmd_iov_reset(&server->info->iov);
+    cmd_iov_free(&server->info->iov);
     conn_free(server);
     slot_create_job(SLOT_UPDATE);
 }

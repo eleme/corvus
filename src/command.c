@@ -591,7 +591,7 @@ int cmd_extra(struct command *cmd, struct redis_data *data)
 
 int cmd_forward(struct command *cmd, struct redis_data *data)
 {
-    LOG(DEBUG, "forward command %d", cmd->cmd_type);
+    LOG(DEBUG, "forward command %p(%d)", cmd, cmd->cmd_type);
     switch (cmd->request_type) {
         case CMD_BASIC:
             cmd->slot = cmd_get_slot(data);
@@ -798,9 +798,7 @@ void cmd_mark(struct command *cmd, int fail)
         }
     }
 
-    if (root != NULL && event_reregister(&cmd->ctx->loop,
-                root->client, E_WRITABLE) == CORVUS_ERR)
-    {
+    if (root != NULL && conn_register(root->client) == CORVUS_ERR) {
         LOG(ERROR, "fail to reregister client %d", root->client->fd);
         client_eof(root->client);
     }
