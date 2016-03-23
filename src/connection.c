@@ -96,6 +96,7 @@ void conn_info_init(struct conn_info *info)
     reader_init(&info->reader);
 
     info->last_active = -1;
+    info->sndbuf = 0;
 
     STAILQ_INIT(&info->cmd_queue);
     STAILQ_INIT(&info->ready_queue);

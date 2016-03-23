@@ -20,23 +20,24 @@ int client_trigger_event(struct connection *client, struct mbuf *buf)
     return CORVUS_OK;
 }
 
-int client_read(struct connection *client, int read_socket)
+int client_read(struct connection *client)
 {
     struct command *cmd;
     struct mbuf *buf;
     int status = CORVUS_OK, limit = 16;
 
-    if (!STAILQ_EMPTY(&client->info->cmd_queue)
-            && STAILQ_FIRST(&client->info->cmd_queue)->parse_done)
-    {
-        event_reregister(&client->ctx->loop, client, E_WRITABLE);
-        return CORVUS_OK;
+    cmd = STAILQ_FIRST(&client->info->cmd_queue);
+    if (cmd != NULL && cmd->parse_done) {
+        int size = socket_sndbuf_size(client->fd);
+        LOG(DEBUG, "%p %d %d", cmd, client->info->sndbuf, size);
+        if (size >= 0 && client->info->sndbuf > size) {
+            return CORVUS_OK;
+        }
     }
 
     do {
         buf = conn_get_buf(client);
         if (mbuf_read_size(buf) <= 0) {
-            if (!read_socket) break;
             buf = conn_get_buf(client);
             status = conn_read(client, buf);
             if (status != CORVUS_OK) return status;
@@ -89,6 +90,10 @@ int client_write(struct connection *client)
     }
 
     if (info->iov.len <= 0) {
+        if (!STAILQ_EMPTY(&info->cmd_queue) && conn_register(client) == CORVUS_ERR) {
+            LOG(ERROR, "client_write: fail to reregister client %d", client->fd);
+            return CORVUS_ERR;
+        }
         cmd_iov_reset(&info->iov);
         return CORVUS_OK;
     }
@@ -102,7 +107,7 @@ int client_write(struct connection *client)
     if (status == CORVUS_AGAIN) return CORVUS_OK;
 
     if (info->iov.cursor >= info->iov.len) {
-        cmd_iov_reset(&info->iov);
+        cmd_iov_free(&info->iov);
         if (event_reregister(&ctx->loop, client, E_READABLE) == CORVUS_ERR) {
             LOG(ERROR, "client_write: fail to reregister client %d", client->fd);
             return CORVUS_ERR;
@@ -112,7 +117,7 @@ int client_write(struct connection *client)
                     client->fd, client->ev->fd);
             return CORVUS_ERR;
         }
-    } else if (event_reregister(&ctx->loop, client, E_WRITABLE) == CORVUS_ERR) {
+    } else if (conn_register(client) == CORVUS_ERR) {
         LOG(ERROR, "client_write: fail to reregister client %d", client->fd);
         return CORVUS_ERR;
     }
@@ -147,7 +152,7 @@ void client_ready(struct connection *self, uint32_t mask)
     if (mask & E_READABLE) {
         LOG(DEBUG, "client readable");
 
-        int status = client_read(self, 1);
+        int status = client_read(self);
         if (status == CORVUS_ERR || status == CORVUS_EOF) {
             client_eof(self);
             return;
@@ -178,7 +183,7 @@ void client_event_ready(struct connection *self, uint32_t mask)
     client->info->last_active = time(NULL);
 
     if (mask & E_READABLE) {
-        if (client_read(client, 0) == CORVUS_ERR) {
+        if (client_read(client) == CORVUS_ERR) {
             client_eof(client);
             return;
         }
@@ -207,6 +212,12 @@ struct connection *client_create(struct context *ctx, int fd)
         conn_recycle(ctx, client);
         return NULL;
     }
+
+    client->info->sndbuf = socket_get_sndbuf(client->fd);
+    if (client->info->sndbuf == -1) {
+        client->info->sndbuf = DEFAULT_SNDBUF;
+    }
+    client->info->sndbuf >>= 1;
 
     int evfd = socket_create_eventfd();
     client->ev = conn_create(ctx);
@@ -248,7 +259,7 @@ void client_eof(struct connection *client)
 
     // don't care response any more
     cmd_iov_clear(client->ctx, &client->info->iov);
-    cmd_iov_reset(&client->info->iov);
+    cmd_iov_free(&client->info->iov);
 
     // request may not write
     if (client->info->refcount <= 0) {

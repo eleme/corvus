@@ -44,6 +44,7 @@ struct conn_info {
     struct reader reader;
 
     int64_t last_active;
+    int sndbuf;
 
     struct cmd_tqh cmd_queue;
     struct cmd_tqh ready_queue;

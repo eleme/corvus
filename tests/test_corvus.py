@@ -3126,3 +3126,13 @@ def test_delete_node(delete_keys):
     cluster.wait()
 
     assert r.get("hello") == "123"
+
+
+def test_writable(delete_keys):
+    delete_keys.keys("hello")
+
+    with r.pipeline(transaction=False) as p:
+        for u in range(20):
+            p.set('hello', 'x' * 1024 * 1024 * 17)
+            p.get('hello')
+        p.execute()
