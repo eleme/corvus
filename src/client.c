@@ -90,10 +90,6 @@ int client_write(struct connection *client)
     }
 
     if (info->iov.len <= 0) {
-        if (!STAILQ_EMPTY(&info->cmd_queue) && conn_register(client) == CORVUS_ERR) {
-            LOG(ERROR, "client_write: fail to reregister client %d", client->fd);
-            return CORVUS_ERR;
-        }
         cmd_iov_reset(&info->iov);
         return CORVUS_OK;
     }
