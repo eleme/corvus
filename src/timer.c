@@ -24,7 +24,7 @@ void check_context(struct context *ctx)
 {
     switch (ctx->state) {
         case CTX_BEFORE_QUIT:
-            config.client_timeout = 1;
+            config.client_timeout = 5;
             event_deregister(&ctx->loop, &ctx->proxy);
             conn_free(&ctx->proxy);
             ctx->state = CTX_QUITTING;
@@ -102,7 +102,7 @@ int timer_start(struct connection *timer)
     spec.it_value.tv_sec = now.tv_sec;
     spec.it_value.tv_nsec = now.tv_nsec;
     spec.it_interval.tv_sec = 0;
-    spec.it_interval.tv_nsec = 100000000;
+    spec.it_interval.tv_nsec = 500000000;
 
     if (timerfd_settime(timer->fd, TFD_TIMER_ABSTIME, &spec, NULL) == -1) {
         LOG(ERROR, "timer fail to settime: %s", strerror(errno));
