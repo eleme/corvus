@@ -50,6 +50,7 @@ struct conn_info {
     struct cmd_tqh ready_queue;
     struct cmd_tqh waiting_queue;
 
+    struct mbuf *current_buf; /* point to current parsing buffer in data */
     struct mhdr data;
     struct mhdr local_data;
     struct iov_data iov;

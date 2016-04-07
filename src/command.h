@@ -51,7 +51,7 @@ struct command {
     char *fail_reason;
 
     /* before read, after write*/
-    int64_t req_time[2];
+    int64_t parse_time;
     /* before write, after read */
     int64_t rep_time[2];
 
@@ -102,7 +102,7 @@ int cmd_parse_req(struct command *cmd, struct mbuf *buf);
 int cmd_parse_redirect(struct command *cmd, struct redirect_info *info);
 void cmd_mark_done(struct command *cmd);
 void cmd_mark_fail(struct command *cmd, const char *reason);
-void cmd_stats(struct command *cmd);
+void cmd_stats(struct command *cmd, int64_t end_time);
 void cmd_set_stale(struct command *cmd);
 void cmd_iov_add(struct iov_data *iov, void *buf, size_t len, struct mbuf *b);
 void cmd_iov_reset(struct iov_data *iov);

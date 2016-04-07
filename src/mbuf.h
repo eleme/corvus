@@ -23,6 +23,7 @@ struct mbuf {
     uint8_t *start;
     uint8_t *end;
     struct mhdr *queue; // the queue contain the buf
+    int64_t fill_time; // the time the buffer filled with data from socket
     int refcount;
 };
 

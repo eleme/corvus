@@ -636,8 +636,6 @@ int cmd_parse_req(struct command *cmd, struct mbuf *buf)
     }
 
     if (reader_ready(r)) {
-        cmd->req_time[0] = get_time();
-
         ASSERT_TYPE(&r->data, REP_ARRAY);
         ASSERT_ELEMENTS(r->data.elements >= 1, &r->data);
 
@@ -960,7 +958,7 @@ void cmd_mark_fail(struct command *cmd, const char *reason)
     cmd_mark(cmd, 1);
 }
 
-void cmd_stats(struct command *cmd)
+void cmd_stats(struct command *cmd, int64_t end_time)
 {
     struct context *ctx = cmd->ctx;
     struct command *last, *first;
@@ -968,7 +966,7 @@ void cmd_stats(struct command *cmd)
 
     ATOMIC_INC(ctx->stats.completed_commands, 1);
 
-    latency = cmd->req_time[1] - cmd->req_time[0];
+    latency = end_time - cmd->parse_time;
 
     ATOMIC_INC(ctx->stats.total_latency, latency);
     ATOMIC_SET(ctx->last_command_latency, latency);
@@ -1058,8 +1056,8 @@ void cmd_free(struct command *cmd)
     struct command *c;
     struct context *ctx = cmd->ctx;
 
-    if (cmd->parent == NULL) {
-        mbuf_range_clear(ctx, cmd->req_buf);
+    if (cmd->parent == NULL && cmd->client != NULL) {
+        client_range_clear(cmd->client, cmd);
     }
 
     while (!STAILQ_EMPTY(&cmd->sub_cmds)) {

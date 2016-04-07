@@ -97,6 +97,7 @@ void conn_info_init(struct conn_info *info)
 
     info->last_active = -1;
     info->sndbuf = 0;
+    info->current_buf = NULL;
 
     STAILQ_INIT(&info->cmd_queue);
     STAILQ_INIT(&info->ready_queue);

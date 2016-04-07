@@ -59,6 +59,7 @@ struct mbuf *mbuf_get(struct context *ctx)
     mbuf->pos = mbuf->start;
     mbuf->last = mbuf->start;
     mbuf->queue = NULL;
+    mbuf->fill_time = 0;
     mbuf->refcount = 0;
     TAILQ_NEXT(mbuf, next) = NULL;
 
