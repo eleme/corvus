@@ -232,7 +232,7 @@ int slot_read_data(struct connection *server, int *count)
     struct reader *r = &server->info->reader;
 
     while (1) {
-        buf = conn_get_buf(server);
+        buf = conn_get_buf(server, true);
         rsize = mbuf_read_size(buf);
 
         if (rsize > 0) {

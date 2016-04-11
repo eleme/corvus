@@ -151,16 +151,29 @@ void mbuf_decref(struct context *ctx, struct mbuf **bufs, int n)
     }
 }
 
-struct buf_time *buf_time_new(struct mbuf *buf, int64_t read_time)
+void buf_time_append(struct context *ctx, struct buf_time_tqh *queue,
+        struct mbuf *buf, int64_t read_time)
 {
-    struct buf_time *t = calloc(1, sizeof(struct buf_time));
+    struct buf_time *t;
+    if (!STAILQ_EMPTY(&ctx->free_buf_timeq)) {
+        t = STAILQ_FIRST(&ctx->free_buf_timeq);
+        STAILQ_REMOVE_HEAD(&ctx->free_buf_timeq, next);
+        ATOMIC_DEC(ctx->mstats.free_buf_times, 1);
+    } else {
+        t = calloc(1, sizeof(struct buf_time));
+    }
+    t->ctx = ctx;
     t->buf = buf;
     t->pos = buf->last;
     t->read_time = read_time;
-    return t;
+    STAILQ_INSERT_TAIL(queue, t, next);
+    ATOMIC_INC(ctx->mstats.buf_times, 1);
 }
 
 void buf_time_free(struct buf_time *t)
 {
-    free(t);
+    ATOMIC_DEC(t->ctx->mstats.buf_times, 1);
+    STAILQ_NEXT(t, next) = NULL;
+    STAILQ_INSERT_HEAD(&t->ctx->free_buf_timeq, t, next);
+    ATOMIC_INC(t->ctx->mstats.free_buf_times, 1);
 }

@@ -203,7 +203,14 @@ void conn_buf_free(struct connection *conn)
 {
     if (conn->info == NULL) return;
     struct conn_info *info = conn->info;
+    struct buf_time *t;
     struct mbuf *buf;
+
+    while (!STAILQ_EMPTY(&info->buf_times)) {
+        t = STAILQ_FIRST(&info->buf_times);
+        STAILQ_REMOVE_HEAD(&info->buf_times, next);
+        buf_time_free(t);
+    }
     while (!TAILQ_EMPTY(&info->data)) {
         buf = TAILQ_FIRST(&info->data);
         TAILQ_REMOVE(&info->data, buf, next);
@@ -303,14 +310,22 @@ struct connection *conn_get_server(struct context *ctx, uint16_t slot)
     return server;
 }
 
-struct mbuf *conn_get_buf(struct connection *conn)
+// 'unprocessed buf': buf is full and has data unprocessed.
+//
+// 1. If last buf is nut full, it is returned.
+// 2. If `unprocessed` is true and the last buf is the unprocessed buf,
+//    the last buf is returned.
+// 3. Otherwise a new buf is returned.
+struct mbuf *conn_get_buf(struct connection *conn, bool unprocessed)
 {
     struct mbuf *buf = NULL;
     struct conn_info *info = conn->info;
 
-    if (!TAILQ_EMPTY(&info->data)) buf = TAILQ_LAST(&info->data, mhdr);
+    if (!TAILQ_EMPTY(&info->data)) {
+        buf = TAILQ_LAST(&info->data, mhdr);
+    }
 
-    if (buf == NULL || buf->pos >= buf->end) {
+    if (buf == NULL || (unprocessed ? buf->pos : buf->last) >= buf->end) {
         buf = mbuf_get(conn->ctx);
         buf->queue = &info->data;
         TAILQ_INSERT_TAIL(&info->data, buf, next);

@@ -28,39 +28,21 @@ int client_trigger_event(struct connection *client)
 
 void client_range_clear(struct connection *client, struct command *cmd)
 {
-    struct mbuf *n, *b = cmd->req_buf[0].buf,
-                **cur = &client->info->current_buf;
-
-    while (b != NULL) {
-        n = TAILQ_NEXT(b, next);
-        b->refcount--;
-        if (b->refcount <= 0 && b->pos >= b->last) {
-            if (b == *cur) {
-                *cur = n;
-            }
-            TAILQ_REMOVE(b->queue, b, next);
-            mbuf_recycle(client->ctx, b);
-        }
-        if (b == cmd->req_buf[1].buf) break;
-        b = n;
+    struct mbuf *end = cmd->req_buf[1].buf;
+    if (end == NULL) {
+        client->info->current_buf = NULL;
+    } else if (end == client->info->current_buf && end->pos >= end->last) {
+        client->info->current_buf = TAILQ_NEXT(end, next);
     }
-    memset(cmd->req_buf, 0, sizeof(cmd->req_buf));
+    mbuf_range_clear(client->ctx, cmd->req_buf);
 }
 
 struct mbuf *client_get_buf(struct connection *client)
 {
-    struct mbuf *buf = NULL;
-    struct conn_info *info = client->info;
-
-    if (!TAILQ_EMPTY(&info->data)) buf = TAILQ_LAST(&info->data, mhdr);
-
-    if (buf == NULL || buf->last >= buf->end) {
-        buf = mbuf_get(client->ctx);
-        buf->queue = &info->data;
-        TAILQ_INSERT_TAIL(&info->data, buf, next);
-    }
-    if (info->current_buf == NULL) {
-        info->current_buf = buf;
+    // not get unprocessed buf
+    struct mbuf *buf=  conn_get_buf(client, false);
+    if (client->info->current_buf == NULL) {
+        client->info->current_buf = buf;
     }
     return buf;
 }
@@ -74,9 +56,9 @@ int client_read_socket(struct connection *client)
             return status;
         }
 
-        // append time to queue after read, this is the start time of cmd
-        struct buf_time *t = buf_time_new(buf, get_time());
-        STAILQ_INSERT_TAIL(&client->info->buf_times, t, next);
+        // Append time to queue after read, this is the start time of cmd.
+        // Every read has a corresponding buf_time.
+        buf_time_append(client->ctx, &client->info->buf_times, buf, get_time());
 
         if (buf->last < buf->end) {
             if (conn_register(client) == CORVUS_ERR) {

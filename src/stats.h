@@ -12,11 +12,13 @@ struct memory_stats {
     long long cmds;
     long long conns;
     long long conn_info;
+    long long buf_times;
 
     long long free_buffers;
     long long free_cmds;
     long long free_conns;
     long long free_conn_info;
+    long long free_buf_times;
 };
 
 struct basic_stats {

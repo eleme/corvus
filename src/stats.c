@@ -61,10 +61,12 @@ void stats_get_memory(struct memory_stats *stats)
         stats->conns          += ATOMIC_GET(contexts[i].mstats.conns);
         stats->cmds           += ATOMIC_GET(contexts[i].mstats.cmds);
         stats->conn_info      += ATOMIC_GET(contexts[i].mstats.conn_info);
+        stats->buf_times      += ATOMIC_GET(contexts[i].mstats.buf_times);
         stats->free_buffers   += ATOMIC_GET(contexts[i].mstats.free_buffers);
         stats->free_cmds      += ATOMIC_GET(contexts[i].mstats.free_cmds);
         stats->free_conns     += ATOMIC_GET(contexts[i].mstats.free_conns);
         stats->free_conn_info += ATOMIC_GET(contexts[i].mstats.free_conn_info);
+        stats->free_buf_times += ATOMIC_GET(contexts[i].mstats.free_buf_times);
     }
 }
 

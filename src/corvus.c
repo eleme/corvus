@@ -295,6 +295,14 @@ void context_free(struct context *ctx)
         ATOMIC_DEC(ctx->mstats.free_buffers, 1);
     }
 
+    /* buf_time queue */
+    struct buf_time *t;
+    while (!STAILQ_EMPTY(&ctx->free_buf_timeq)) {
+        t = STAILQ_FIRST(&ctx->free_buf_timeq);
+        STAILQ_REMOVE_HEAD(&ctx->free_buf_timeq, next);
+        free(t);
+    }
+
     /* event loop */
     event_free(&ctx->loop);
 }

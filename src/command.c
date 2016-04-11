@@ -538,10 +538,13 @@ int cmd_proxy_info(struct command *cmd)
         "in_use_conns:%lld\n"
         "free_conns:%lld\n"
         "in_use_conn_info:%lld\n"
-        "free_conn_info:%lld"
+        "free_conn_info:%lld\n"
+        "in_use_buf_times:%lld\n"
+        "free_buf_times:%lld"
         "\r\n",
         stats.buffers, stats.free_buffers, stats.cmds, stats.free_cmds,
-        stats.conns, stats.free_conns, stats.conn_info, stats.free_conn_info);
+        stats.conns, stats.free_conns, stats.conn_info, stats.free_conn_info,
+        stats.buf_times, stats.free_buf_times);
 
     conn_add_data(cmd->client, (uint8_t*)data, strlen(data),
             &cmd->rep_buf[0], &cmd->rep_buf[1]);
@@ -840,7 +843,7 @@ int cmd_read_rep(struct command *cmd, struct connection *server)
     struct mbuf *buf;
 
     while (1) {
-        buf = conn_get_buf(server);
+        buf = conn_get_buf(server, true);
         rsize = mbuf_read_size(buf);
 
         if (rsize <= 0) {

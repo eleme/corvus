@@ -147,7 +147,7 @@ TEST(test_cmd_gen_mget_iovec) {
     struct connection *conn = conn_create(ctx);
     conn->info = conn_info_create(ctx);
 
-    struct mbuf *buf = conn_get_buf(conn);
+    struct mbuf *buf = conn_get_buf(conn, true);
     memcpy(buf->last, data, size);
     buf->last += size;
 
@@ -197,7 +197,7 @@ TEST(test_cmd_gen_mget_iovec_fail) {
     struct connection *conn = conn_create(ctx);
     conn->info = conn_info_create(ctx);
 
-    struct mbuf *buf = conn_get_buf(conn);
+    struct mbuf *buf = conn_get_buf(conn, true);
     memcpy(buf->last, data, size);
     buf->last += size;
 
