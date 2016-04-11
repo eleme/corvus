@@ -631,7 +631,6 @@ int cmd_parse_req(struct command *cmd, struct mbuf *buf)
     reader_feed(r, buf);
 
     if (parse(r, MODE_REQ) == CORVUS_ERR) {
-        LOG(ERROR, "cmd_pares_req: parse_error");
         return CORVUS_ERR;
     }
 

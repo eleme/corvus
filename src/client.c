@@ -73,9 +73,11 @@ int client_read_socket(struct connection *client)
         if (status != CORVUS_OK) {
             return status;
         }
-        if (buf->fill_time <= 0) {
-            buf->fill_time = get_time();
-        }
+
+        // append time to queue after read, this is the start time of cmd
+        struct buf_time *t = buf_time_new(buf, get_time());
+        STAILQ_INSERT_TAIL(&client->info->buf_times, t, next);
+
         if (buf->last < buf->end) {
             if (conn_register(client) == CORVUS_ERR) {
                 LOG(ERROR, "%s: fail to reregister client %d", __func__, client->fd);
@@ -125,10 +127,21 @@ int client_read(struct connection *client, bool read_socket)
 
         cmd = conn_get_cmd(client);
         cmd->client = client;
+
+        struct buf_time *t = STAILQ_FIRST(&client->info->buf_times);
+        if (t == NULL) {
+            LOG(ERROR, "client_read: fail to get buffer read time %d", client->fd);
+            return CORVUS_ERR;
+        }
         if (cmd->parse_time <= 0) {
-            cmd->parse_time = buf->fill_time;
+            cmd->parse_time = t->read_time;
         }
         status = cmd_parse_req(cmd, buf);
+        if (status == CORVUS_ERR) {
+            LOG(ERROR, "client_read: command parse error");
+            return CORVUS_ERR;
+        }
+
         if (buf->pos >= buf->end) {
             client->info->current_buf = TAILQ_NEXT(buf, next);
             if (client->info->current_buf == NULL) {
@@ -226,7 +239,7 @@ void client_ready(struct connection *self, uint32_t mask)
     self->info->last_active = time(NULL);
 
     if (mask & E_ERROR) {
-        LOG(ERROR, "client error");
+        LOG(DEBUG, "client error");
         client_eof(self);
         return;
     }
@@ -293,12 +306,6 @@ struct connection *client_create(struct context *ctx, int fd)
         conn_recycle(ctx, client);
         return NULL;
     }
-
-    client->info->sndbuf = socket_get_sndbuf(client->fd);
-    if (client->info->sndbuf == -1) {
-        client->info->sndbuf = DEFAULT_SNDBUF;
-    }
-    client->info->sndbuf >>= 1;
 
     int evfd = socket_create_eventfd();
     client->ev = conn_create(ctx);

@@ -119,6 +119,7 @@ struct reader {
     int8_t redis_data_type;
     int8_t sign;
 
+    struct conn_info *conn_info;
     struct reader_task rstack[9];
     int8_t sidx;
 

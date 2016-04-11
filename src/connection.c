@@ -94,14 +94,15 @@ void conn_info_init(struct conn_info *info)
     memset(info->dsn, 0, sizeof(info->dsn));
 
     reader_init(&info->reader);
+    info->reader.conn_info = info;
 
     info->last_active = -1;
-    info->sndbuf = 0;
     info->current_buf = NULL;
 
     STAILQ_INIT(&info->cmd_queue);
     STAILQ_INIT(&info->ready_queue);
     STAILQ_INIT(&info->waiting_queue);
+    STAILQ_INIT(&info->buf_times);
     TAILQ_INIT(&info->data);
     TAILQ_INIT(&info->local_data);
 

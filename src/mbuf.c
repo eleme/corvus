@@ -59,7 +59,6 @@ struct mbuf *mbuf_get(struct context *ctx)
     mbuf->pos = mbuf->start;
     mbuf->last = mbuf->start;
     mbuf->queue = NULL;
-    mbuf->fill_time = 0;
     mbuf->refcount = 0;
     TAILQ_NEXT(mbuf, next) = NULL;
 
@@ -150,4 +149,18 @@ void mbuf_decref(struct context *ctx, struct mbuf **bufs, int n)
             bufs[i] = NULL;
         }
     }
+}
+
+struct buf_time *buf_time_new(struct mbuf *buf, int64_t read_time)
+{
+    struct buf_time *t = calloc(1, sizeof(struct buf_time));
+    t->buf = buf;
+    t->pos = buf->last;
+    t->read_time = read_time;
+    return t;
+}
+
+void buf_time_free(struct buf_time *t)
+{
+    free(t);
 }
