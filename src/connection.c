@@ -125,12 +125,12 @@ struct connection *conn_create(struct context *ctx)
     if ((conn = TAILQ_FIRST(&ctx->conns)) != NULL && conn->fd == -1) {
         LOG(DEBUG, "connection get cache");
         TAILQ_REMOVE(&ctx->conns, conn, next);
-        ATOMIC_DEC(ctx->mstats.free_conns, 1);
+        ctx->mstats.free_conns--;
     } else {
         conn = malloc(sizeof(struct connection));
     }
     conn_init(conn, ctx);
-    ATOMIC_INC(ctx->mstats.conns, 1);
+    ctx->mstats.conns++;
     return conn;
 }
 
@@ -140,14 +140,14 @@ struct conn_info *conn_info_create(struct context *ctx)
     if (!STAILQ_EMPTY(&ctx->free_conn_infoq)) {
         info = STAILQ_FIRST(&ctx->free_conn_infoq);
         STAILQ_REMOVE_HEAD(&ctx->free_conn_infoq, next);
-        ATOMIC_DEC(ctx->mstats.free_conn_info, 1);
+        ctx->mstats.free_conn_info--;
     } else {
         info = malloc(sizeof(struct conn_info));
         // init iov here
         memset(&info->iov, 0, sizeof(info->iov));
     }
     conn_info_init(info);
-    ATOMIC_INC(ctx->mstats.conn_info, 1);
+    ctx->mstats.conn_info++;
     return info;
 }
 
@@ -225,7 +225,7 @@ void conn_buf_free(struct connection *conn)
 void conn_recycle(struct context *ctx, struct connection *conn)
 {
     if (conn->info != NULL) {
-        ATOMIC_DEC(ctx->mstats.conn_info, 1);
+        ctx->mstats.conn_info--;
 
         struct conn_info *info = conn->info;
         if (!TAILQ_EMPTY(&info->data)) {
@@ -233,11 +233,11 @@ void conn_recycle(struct context *ctx, struct connection *conn)
         }
         STAILQ_INSERT_TAIL(&ctx->free_conn_infoq, info, next);
 
-        ATOMIC_INC(ctx->mstats.free_conn_info, 1);
+        ctx->mstats.free_conn_info++;
         conn->info = NULL;
     }
 
-    ATOMIC_DEC(ctx->mstats.conns, 1);
+    ctx->mstats.conns--;
 
     if (conn->next.tqe_next != NULL || conn->next.tqe_prev != NULL) {
         TAILQ_REMOVE(&ctx->conns, conn, next);
@@ -245,7 +245,7 @@ void conn_recycle(struct context *ctx, struct connection *conn)
     }
     TAILQ_INSERT_HEAD(&ctx->conns, conn, next);
 
-    ATOMIC_INC(ctx->mstats.free_conns, 1);
+    ctx->mstats.free_conns++;
 }
 
 int conn_create_fd()

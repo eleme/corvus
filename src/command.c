@@ -232,7 +232,7 @@ static void cmd_init(struct context *ctx, struct command *cmd)
 
 static void cmd_recycle(struct context *ctx, struct command *cmd)
 {
-    ATOMIC_DEC(ctx->mstats.cmds, 1);
+    ctx->mstats.cmds--;
 
     STAILQ_NEXT(cmd, cmd_next) = NULL;
     STAILQ_NEXT(cmd, ready_next) = NULL;
@@ -240,7 +240,7 @@ static void cmd_recycle(struct context *ctx, struct command *cmd)
     STAILQ_NEXT(cmd, sub_cmd_next) = NULL;
     STAILQ_INSERT_HEAD(&ctx->free_cmdq, cmd, cmd_next);
 
-    ATOMIC_INC(ctx->mstats.free_cmds, 1);
+    ctx->mstats.free_cmds++;
 }
 
 static int cmd_in_queue(struct command *cmd, struct connection *server)
@@ -827,13 +827,13 @@ struct command *cmd_create(struct context *ctx)
         LOG(DEBUG, "cmd get cache");
         cmd = STAILQ_FIRST(&ctx->free_cmdq);
         STAILQ_REMOVE_HEAD(&ctx->free_cmdq, cmd_next);
-        ATOMIC_DEC(ctx->mstats.free_cmds, 1);
+        ctx->mstats.free_cmds--;
         STAILQ_NEXT(cmd, cmd_next) = NULL;
     } else {
         cmd = malloc(sizeof(struct command));
     }
     cmd_init(ctx, cmd);
-    ATOMIC_INC(ctx->mstats.cmds, 1);
+    ctx->mstats.cmds++;
     return cmd;
 }
 

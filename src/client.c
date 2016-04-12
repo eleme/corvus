@@ -71,7 +71,6 @@ int client_read_socket(struct connection *client)
     return CORVUS_OK;
 }
 
-
 int client_read(struct connection *client, bool read_socket)
 {
     struct command *cmd;
@@ -91,7 +90,7 @@ int client_read(struct connection *client, bool read_socket)
     }
 
     // calculate limit
-    long long free_cmds = ATOMIC_GET(client->ctx->mstats.free_cmds);
+    long long free_cmds = client->ctx->mstats.free_cmds;
     long long clients = ATOMIC_GET(client->ctx->stats.connected_clients);
     free_cmds /= clients;
     limit = free_cmds > limit ? free_cmds : limit;
