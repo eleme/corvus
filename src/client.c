@@ -85,16 +85,16 @@ int client_read(struct connection *client, bool read_socket)
         }
     }
 
-    long long free_cmds = ATOMIC_GET(client->ctx->mstats.free_cmds);
-    long long clients = ATOMIC_GET(client->ctx->stats.connected_clients);
-    free_cmds /= clients;
-
-    limit = free_cmds > limit ? free_cmds : limit;
-
     cmd = STAILQ_FIRST(&client->info->cmd_queue);
     if (cmd != NULL && cmd->parse_done) {
         return CORVUS_OK;
     }
+
+    // calculate limit
+    long long free_cmds = ATOMIC_GET(client->ctx->mstats.free_cmds);
+    long long clients = ATOMIC_GET(client->ctx->stats.connected_clients);
+    free_cmds /= clients;
+    limit = free_cmds > limit ? free_cmds : limit;
 
     while (true) {
         buf = client->info->current_buf;
@@ -110,6 +110,7 @@ int client_read(struct connection *client, bool read_socket)
         cmd = conn_get_cmd(client);
         cmd->client = client;
 
+        // get current buf time before parse
         struct buf_time *t = STAILQ_FIRST(&client->info->buf_times);
         if (t == NULL) {
             LOG(ERROR, "client_read: fail to get buffer read time %d", client->fd);
@@ -123,7 +124,17 @@ int client_read(struct connection *client, bool read_socket)
             LOG(ERROR, "client_read: command parse error");
             return CORVUS_ERR;
         }
+        // pop buf times after parse
+        while (true) {
+            struct buf_time *t = STAILQ_FIRST(&client->info->buf_times);
+            if (t == NULL || buf != t->buf || buf->pos < t->pos) {
+                break;
+            }
+            STAILQ_REMOVE_HEAD(&client->info->buf_times, next);
+            buf_time_free(t);
+        }
 
+        // if buf is full point current_buf to the next buf
         if (buf->pos >= buf->end) {
             client->info->current_buf = TAILQ_NEXT(buf, next);
             if (client->info->current_buf == NULL) {

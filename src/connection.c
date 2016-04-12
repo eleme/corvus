@@ -94,7 +94,6 @@ void conn_info_init(struct conn_info *info)
     memset(info->dsn, 0, sizeof(info->dsn));
 
     reader_init(&info->reader);
-    info->reader.conn_info = info;
 
     info->last_active = -1;
     info->current_buf = NULL;

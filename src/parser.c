@@ -18,19 +18,21 @@ do {                                                           \
     v += c - '0';                                              \
 } while (0);
 
-#define POS_FORWARD(reader, offset)                                                    \
-do {                                                                                   \
-    (reader)->buf->pos += (offset);                                                    \
-    if ((reader)->conn_info != NULL) {                                                 \
-        while (true) {                                                                 \
-            struct buf_time *t = STAILQ_FIRST(&(reader)->conn_info->buf_times);        \
-            if (t == NULL || (reader)->buf != t->buf || (reader)->buf->pos < t->pos) { \
-                break;                                                                 \
-            }                                                                          \
-            STAILQ_REMOVE_HEAD(&(reader)->conn_info->buf_times, next);                 \
-            buf_time_free(t);                                                          \
-        }                                                                              \
-    }                                                                                  \
+#define _END(reader, elements, end_char)                               \
+do {                                                                   \
+    if ((end_char) != '\n') {                                          \
+        LOG(ERROR, "%s: unexpected charactor %c", __func__, end_char); \
+        (reader)->buf->pos++;                                          \
+        return CORVUS_ERR;                                             \
+    }                                                                  \
+    if ((elements) <= 0 && stack_pop(reader) == 0) {                   \
+        /* forward pos in `func:parse` */                              \
+        (reader)->type = PARSE_END;                                    \
+    } else {                                                           \
+        (reader)->type = PARSE_TYPE;                                   \
+        (reader)->buf->pos++;                                          \
+    }                                                                  \
+    return CORVUS_OK;                                                  \
 } while (0)
 
 int stack_pop(struct reader *r)
@@ -70,23 +72,6 @@ int stack_push(struct reader *r, int type)
     task->elements = -1;
     task->type = type;
     task->data.type = type;
-    return CORVUS_OK;
-}
-
-int parse_end(struct reader *r, int elements, char end_char)
-{
-    if (end_char != '\n') {
-        LOG(ERROR, "parse_end: unexpected charactor %c", end_char);
-        POS_FORWARD(r, 1); // r->buf->pos++;
-        return CORVUS_ERR;
-    }
-    if (elements <= 0 && stack_pop(r) == 0) {
-        // do POS_FORWARD in `func:parse`
-        r->type = PARSE_END;
-    } else {
-        r->type = PARSE_TYPE;
-        POS_FORWARD(r, 1); // r->buf->pos++;
-    }
     return CORVUS_OK;
 }
 
@@ -217,9 +202,9 @@ int process_array(struct reader *r)
                     for (size = 1; size * ARRAY_BASE_SIZE  < task->data.elements; size *= 2);
                     task->data.element = calloc(size * ARRAY_BASE_SIZE, sizeof(struct redis_data));
                 }
-                return parse_end(r, task->data.elements, *p);
+                _END(r, task->data.elements, *p);
         }
-        POS_FORWARD(r, 1); // r->buf->pos++;
+        r->buf->pos++;
     }
     return CORVUS_OK;
 }
@@ -281,13 +266,15 @@ int process_string(struct reader *r)
                 remain = r->buf->last - p;
                 if (r->item_size < remain) {
                     r->item_type = PARSE_STRING_END;
-                    POS_FORWARD(r, r->item_size); // r->buf->pos += r->item_size;
-                    if (arr != NULL) pos_array_push(arr, r->item_size, p);
-                    r->item_size = 0;
+                    if (r->item_size != 0) {
+                        r->buf->pos += r->item_size;
+                        if (arr != NULL) pos_array_push(arr, r->item_size, p);
+                        r->item_size = 0;
+                    }
                 } else {
                     r->item_size -= remain;
                     // add 1 to pos after break
-                    POS_FORWARD(r, remain - 1); // r->buf->pos += remain - 1;
+                    r->buf->pos += remain - 1;
                     if (arr != NULL) pos_array_push(arr, remain, p);
                 }
                 break;
@@ -300,9 +287,9 @@ int process_string(struct reader *r)
                     data->buf[1].pos = r->buf->pos + 1;
                 }
 
-                return parse_end(r, task->elements, *p);
+                _END(r, task->elements, *p);
         }
-        POS_FORWARD(r, 1); // r->buf->pos++;
+        r->buf->pos++;
     }
     return CORVUS_OK;
 }
@@ -348,9 +335,9 @@ int process_integer(struct reader *r)
                 break;
             case PARSE_INTEGER_END:
                 task->cur_data = NULL;
-                return parse_end(r, task->elements, *p);
+                _END(r, task->elements, *p);
         }
-        POS_FORWARD(r, 1); // r->buf->pos++;
+        r->buf->pos++;
     }
     return CORVUS_OK;
 }
@@ -410,9 +397,9 @@ int process_simple_string(struct reader *r, int type)
             case PARSE_SIMPLE_STRING_END:
                 task->cur_data = NULL;
                 task->prev_buf = NULL;
-                return parse_end(r, task->elements, *p);
+                _END(r, task->elements, *p);
         }
-        POS_FORWARD(r, 1); // r->buf->pos++;
+        r->buf->pos++;
     }
     return CORVUS_OK;
 }
@@ -420,17 +407,12 @@ int process_simple_string(struct reader *r, int type)
 int parse(struct reader *r, int mode)
 {
     struct mbuf *buf;
-    struct conn_info *info;
     while (r->buf->pos < r->buf->last) {
         switch (r->type) {
             case PARSE_BEGIN:
                 buf = r->buf;
                 buf->refcount++;
-
-                info = r->conn_info;
                 reader_init(r);
-                r->conn_info = info;
-
                 r->buf = buf;
                 r->mode = mode;
 
@@ -473,7 +455,7 @@ int parse(struct reader *r, int mode)
                     LOG(ERROR, "parse: unexpected charactor %c", &r->buf->pos);
                     return CORVUS_ERR;
                 }
-                POS_FORWARD(r, 1); // r->buf->pos++;
+                r->buf->pos++;
                 r->type = PARSE_BEGIN;
                 r->ready = true;
                 r->end.buf = r->buf;
