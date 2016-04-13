@@ -184,6 +184,12 @@ int client_write(struct connection *client)
         return CORVUS_OK;
     }
 
+    // wait for all cmds in cmd_queue to be done
+    struct command *cmd = STAILQ_FIRST(&client->info->cmd_queue);
+    if (cmd != NULL && cmd->parse_done) {
+        return CORVUS_OK;
+    }
+
     int status = conn_write(client, 1);
 
     if (status == CORVUS_ERR) {
