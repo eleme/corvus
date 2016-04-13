@@ -44,12 +44,14 @@ struct conn_info {
     struct reader reader;
 
     int64_t last_active;
-    int sndbuf;
+
+    struct buf_time_tqh buf_times;
 
     struct cmd_tqh cmd_queue;
     struct cmd_tqh ready_queue;
     struct cmd_tqh waiting_queue;
 
+    struct mbuf *current_buf; /* point to current parsing buffer in data */
     struct mhdr data;
     struct mhdr local_data;
     struct iov_data iov;
@@ -73,7 +75,7 @@ void conn_buf_free(struct connection *conn);
 void conn_recycle(struct context *ctx, struct connection *conn);
 struct connection *conn_get_server_from_pool(struct context *ctx, struct address *addr);
 struct connection *conn_get_server(struct context *ctx, uint16_t slot);
-struct mbuf *conn_get_buf(struct connection *conn);
+struct mbuf *conn_get_buf(struct connection *conn, bool unprocessed);
 int conn_create_fd();
 int conn_register(struct connection *conn);
 void conn_add_data(struct connection *conn, uint8_t *data, int n,

@@ -1,6 +1,5 @@
 #include <stdlib.h>
 #include <stdint.h>
-#include <assert.h>
 #include <string.h>
 #include "corvus.h"
 #include "parser.h"
@@ -17,6 +16,23 @@ do {                                                           \
     v *= 10;                                                   \
     v += c - '0';                                              \
 } while (0);
+
+#define _END(reader, elements, end_char)                               \
+do {                                                                   \
+    if ((end_char) != '\n') {                                          \
+        LOG(ERROR, "%s: unexpected charactor %c", __func__, end_char); \
+        (reader)->buf->pos++;                                          \
+        return CORVUS_ERR;                                             \
+    }                                                                  \
+    if ((elements) <= 0 && stack_pop(reader) == 0) {                   \
+        /* forward pos in `func:parse` */                              \
+        (reader)->type = PARSE_END;                                    \
+    } else {                                                           \
+        (reader)->type = PARSE_TYPE;                                   \
+        (reader)->buf->pos++;                                          \
+    }                                                                  \
+    return CORVUS_OK;                                                  \
+} while (0)
 
 int stack_pop(struct reader *r)
 {
@@ -180,27 +196,12 @@ int process_array(struct reader *r)
                 }
                 break;
             case PARSE_ARRAY_END:
-                r->buf->pos++;
-                if (*p != '\n') {
-                    LOG(ERROR, "process_array: unexpected charactor %c", *p);
-                    return CORVUS_ERR;
+                task->data.element = NULL;
+                if (*p == '\n' && task->data.elements > 0 && r->mode == MODE_REQ) {
+                    for (size = 1; size * ARRAY_BASE_SIZE  < task->data.elements; size *= 2);
+                    task->data.element = calloc(size * ARRAY_BASE_SIZE, sizeof(struct redis_data));
                 }
-
-                if (task->data.elements > 0) {
-                    if (r->mode == MODE_REQ) {
-                        for (size = 1; size * ARRAY_BASE_SIZE  < task->data.elements; size *= 2);
-                        task->data.element = calloc(size * ARRAY_BASE_SIZE, sizeof(struct redis_data));
-                    } else {
-                        task->data.element = NULL;
-                    }
-                    r->type = PARSE_TYPE;
-                } else {
-                    switch (stack_pop(r)) {
-                        case 0: r->buf->pos--; r->type = PARSE_END; break;
-                        case 1: r->type = PARSE_TYPE; break;
-                    }
-                }
-                return CORVUS_OK;
+                _END(r, task->data.elements, *p);
         }
         r->buf->pos++;
     }
@@ -264,37 +265,28 @@ int process_string(struct reader *r)
                 remain = r->buf->last - p;
                 if (r->item_size < remain) {
                     r->item_type = PARSE_STRING_END;
-                    r->buf->pos += r->item_size;
-                    if (arr != NULL) pos_array_push(arr, r->item_size, p);
-                    r->item_size = 0;
+                    if (r->item_size != 0) {
+                        r->buf->pos += r->item_size;
+                        if (arr != NULL) pos_array_push(arr, r->item_size, p);
+                        r->item_size = 0;
+                    }
                 } else {
                     r->item_size -= remain;
+                    // add 1 to pos after break
                     r->buf->pos += remain - 1;
                     if (arr != NULL) pos_array_push(arr, remain, p);
                 }
                 break;
             case PARSE_STRING_END:
                 task->cur_data = NULL;
-                r->buf->pos++;
 
                 if (data != NULL) {
                     data->buf[1].buf = r->buf;
-                    data->buf[1].pos = r->buf->pos;
+                    // r->buf->pos is '\n'
+                    data->buf[1].pos = r->buf->pos + 1;
                 }
 
-                if (*p != '\n') {
-                    LOG(ERROR, "process_string: unexpected charactor %c", *p);
-                    return CORVUS_ERR;
-                }
-                if (task->elements <= 0) {
-                    switch (stack_pop(r)) {
-                        case 0: r->buf->pos--; r->type = PARSE_END; break;
-                        case 1: r->type = PARSE_TYPE; break;
-                    }
-                } else {
-                    r->type = PARSE_TYPE;
-                }
-                return CORVUS_OK;
+                _END(r, task->elements, *p);
         }
         r->buf->pos++;
     }
@@ -342,20 +334,7 @@ int process_integer(struct reader *r)
                 break;
             case PARSE_INTEGER_END:
                 task->cur_data = NULL;
-                r->buf->pos++;
-                if (*p != '\n') {
-                    LOG(ERROR, "process_integer: unexpected charactor %c", *p);
-                    return CORVUS_ERR;
-                }
-                if (task->elements <= 0) {
-                    switch (stack_pop(r)) {
-                        case 0: r->buf->pos--; r->type = PARSE_END; break;
-                        case 1: r->type = PARSE_TYPE; break;
-                    }
-                } else {
-                    r->type = PARSE_TYPE;
-                }
-                return CORVUS_OK;
+                _END(r, task->elements, *p);
         }
         r->buf->pos++;
     }
@@ -417,20 +396,7 @@ int process_simple_string(struct reader *r, int type)
             case PARSE_SIMPLE_STRING_END:
                 task->cur_data = NULL;
                 task->prev_buf = NULL;
-                r->buf->pos++;
-                if (*p != '\n') {
-                    LOG(ERROR, "process_simple_string: unexpected charactor %c", *p);
-                    return CORVUS_ERR;
-                }
-                if (task->elements <= 0) {
-                    switch (stack_pop(r)) {
-                        case 0: r->buf->pos--; r->type = PARSE_END; break;
-                        case 1: r->type = PARSE_TYPE; break;
-                    }
-                } else {
-                    r->type = PARSE_TYPE;
-                }
-                return CORVUS_OK;
+                _END(r, task->elements, *p);
         }
         r->buf->pos++;
     }

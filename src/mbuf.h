@@ -26,7 +26,17 @@ struct mbuf {
     int refcount;
 };
 
+// tracking the time after reading from client socket
+struct buf_time {
+    STAILQ_ENTRY(buf_time) next;
+    struct context *ctx;
+    struct mbuf *buf;
+    uint8_t *pos;
+    int64_t read_time;
+};
+
 TAILQ_HEAD(mhdr, mbuf);
+STAILQ_HEAD(buf_time_tqh, buf_time);
 
 struct buf_ptr {
     struct mbuf *buf;
@@ -52,5 +62,8 @@ void mbuf_destroy(struct context *ctx);
 struct mbuf *mbuf_queue_get(struct context *ctx, struct mhdr *q);
 void mbuf_range_clear(struct context *ctx, struct buf_ptr ptr[]);
 void mbuf_decref(struct context *ctx, struct mbuf **bufs, int n);
+void buf_time_append(struct context *ctx, struct buf_time_tqh *queue,
+        struct mbuf *buf, int64_t read_time);
+void buf_time_free(struct buf_time *t);
 
 #endif

@@ -232,7 +232,7 @@ static void cmd_init(struct context *ctx, struct command *cmd)
 
 static void cmd_recycle(struct context *ctx, struct command *cmd)
 {
-    ATOMIC_DEC(ctx->mstats.cmds, 1);
+    ctx->mstats.cmds--;
 
     STAILQ_NEXT(cmd, cmd_next) = NULL;
     STAILQ_NEXT(cmd, ready_next) = NULL;
@@ -240,7 +240,7 @@ static void cmd_recycle(struct context *ctx, struct command *cmd)
     STAILQ_NEXT(cmd, sub_cmd_next) = NULL;
     STAILQ_INSERT_HEAD(&ctx->free_cmdq, cmd, cmd_next);
 
-    ATOMIC_INC(ctx->mstats.free_cmds, 1);
+    ctx->mstats.free_cmds++;
 }
 
 static int cmd_in_queue(struct command *cmd, struct connection *server)
@@ -538,10 +538,13 @@ int cmd_proxy_info(struct command *cmd)
         "in_use_conns:%lld\n"
         "free_conns:%lld\n"
         "in_use_conn_info:%lld\n"
-        "free_conn_info:%lld"
+        "free_conn_info:%lld\n"
+        "in_use_buf_times:%lld\n"
+        "free_buf_times:%lld"
         "\r\n",
         stats.buffers, stats.free_buffers, stats.cmds, stats.free_cmds,
-        stats.conns, stats.free_conns, stats.conn_info, stats.free_conn_info);
+        stats.conns, stats.free_conns, stats.conn_info, stats.free_conn_info,
+        stats.buf_times, stats.free_buf_times);
 
     conn_add_data(cmd->client, (uint8_t*)data, strlen(data),
             &cmd->rep_buf[0], &cmd->rep_buf[1]);
@@ -631,13 +634,10 @@ int cmd_parse_req(struct command *cmd, struct mbuf *buf)
     reader_feed(r, buf);
 
     if (parse(r, MODE_REQ) == CORVUS_ERR) {
-        LOG(ERROR, "cmd_pares_req: parse_error");
         return CORVUS_ERR;
     }
 
     if (reader_ready(r)) {
-        cmd->req_time[0] = get_time();
-
         ASSERT_TYPE(&r->data, REP_ARRAY);
         ASSERT_ELEMENTS(r->data.elements >= 1, &r->data);
 
@@ -827,13 +827,13 @@ struct command *cmd_create(struct context *ctx)
         LOG(DEBUG, "cmd get cache");
         cmd = STAILQ_FIRST(&ctx->free_cmdq);
         STAILQ_REMOVE_HEAD(&ctx->free_cmdq, cmd_next);
-        ATOMIC_DEC(ctx->mstats.free_cmds, 1);
+        ctx->mstats.free_cmds--;
         STAILQ_NEXT(cmd, cmd_next) = NULL;
     } else {
         cmd = malloc(sizeof(struct command));
     }
     cmd_init(ctx, cmd);
-    ATOMIC_INC(ctx->mstats.cmds, 1);
+    ctx->mstats.cmds++;
     return cmd;
 }
 
@@ -843,7 +843,7 @@ int cmd_read_rep(struct command *cmd, struct connection *server)
     struct mbuf *buf;
 
     while (1) {
-        buf = conn_get_buf(server);
+        buf = conn_get_buf(server, true);
         rsize = mbuf_read_size(buf);
 
         if (rsize <= 0) {
@@ -960,7 +960,7 @@ void cmd_mark_fail(struct command *cmd, const char *reason)
     cmd_mark(cmd, 1);
 }
 
-void cmd_stats(struct command *cmd)
+void cmd_stats(struct command *cmd, int64_t end_time)
 {
     struct context *ctx = cmd->ctx;
     struct command *last, *first;
@@ -968,7 +968,7 @@ void cmd_stats(struct command *cmd)
 
     ATOMIC_INC(ctx->stats.completed_commands, 1);
 
-    latency = cmd->req_time[1] - cmd->req_time[0];
+    latency = end_time - cmd->parse_time;
 
     ATOMIC_INC(ctx->stats.total_latency, latency);
     ATOMIC_SET(ctx->last_command_latency, latency);
@@ -1058,8 +1058,8 @@ void cmd_free(struct command *cmd)
     struct command *c;
     struct context *ctx = cmd->ctx;
 
-    if (cmd->parent == NULL) {
-        mbuf_range_clear(ctx, cmd->req_buf);
+    if (cmd->parent == NULL && cmd->client != NULL) {
+        client_range_clear(cmd->client, cmd);
     }
 
     while (!STAILQ_EMPTY(&cmd->sub_cmds)) {

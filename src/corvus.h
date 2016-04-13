@@ -67,6 +67,7 @@ struct context {
     struct mhdr free_mbufq;
     struct cmd_tqh free_cmdq;
     struct conn_info_tqh free_conn_infoq;
+    struct buf_time_tqh free_buf_timeq;
 
     struct connection proxy;
     struct connection timer;

@@ -4,6 +4,7 @@
 #include "logging.h"
 
 #define RECYCLE_LENGTH 8192 // 128mb
+#define BUF_TIME_LIMIT 512
 
 static struct mbuf *_mbuf_get(struct context *ctx)
 {
@@ -14,7 +15,7 @@ static struct mbuf *_mbuf_get(struct context *ctx)
         mbuf = TAILQ_FIRST(&ctx->free_mbufq);
         TAILQ_REMOVE(&ctx->free_mbufq, mbuf, next);
 
-        ATOMIC_DEC(ctx->mstats.free_buffers, 1);
+        ctx->mstats.free_buffers--;
     } else {
         buf = (uint8_t*)malloc(config.bufsize);
         if (buf == NULL) {
@@ -36,7 +37,7 @@ void mbuf_free(struct context *ctx, struct mbuf *mbuf)
 
 void mbuf_init(struct context *ctx)
 {
-    ATOMIC_SET(ctx->mstats.free_buffers, 0);
+    ctx->mstats.free_buffers = 0;
 
     TAILQ_INIT(&ctx->free_mbufq);
     ctx->mbuf_offset = config.bufsize - sizeof(struct mbuf);
@@ -62,16 +63,16 @@ struct mbuf *mbuf_get(struct context *ctx)
     mbuf->refcount = 0;
     TAILQ_NEXT(mbuf, next) = NULL;
 
-    ATOMIC_INC(ctx->mstats.buffers, 1);
+    ctx->mstats.buffers++;
 
     return mbuf;
 }
 
 void mbuf_recycle(struct context *ctx, struct mbuf *mbuf)
 {
-    ATOMIC_DEC(ctx->mstats.buffers, 1);
+    ctx->mstats.buffers--;
 
-    if (ATOMIC_GET(ctx->mstats.free_buffers) > RECYCLE_LENGTH) {
+    if (ctx->mstats.free_buffers > RECYCLE_LENGTH) {
         mbuf_free(ctx, mbuf);
         return;
     }
@@ -79,7 +80,7 @@ void mbuf_recycle(struct context *ctx, struct mbuf *mbuf)
     TAILQ_NEXT(mbuf, next) = NULL;
     TAILQ_INSERT_HEAD(&ctx->free_mbufq, mbuf, next);
 
-    ATOMIC_INC(ctx->mstats.free_buffers, 1);
+    ctx->mstats.free_buffers++;
 }
 
 uint32_t mbuf_read_size(struct mbuf *mbuf)
@@ -100,7 +101,7 @@ void mbuf_destroy(struct context *ctx)
         TAILQ_REMOVE(&ctx->free_mbufq, buf, next);
         mbuf_free(ctx, buf);
 
-        ATOMIC_DEC(ctx->mstats.free_buffers, 1);
+        ctx->mstats.free_buffers--;
     }
 }
 
@@ -149,4 +150,37 @@ void mbuf_decref(struct context *ctx, struct mbuf **bufs, int n)
             bufs[i] = NULL;
         }
     }
+}
+
+void buf_time_append(struct context *ctx, struct buf_time_tqh *queue,
+        struct mbuf *buf, int64_t read_time)
+{
+    struct buf_time *t;
+    if (!STAILQ_EMPTY(&ctx->free_buf_timeq)) {
+        t = STAILQ_FIRST(&ctx->free_buf_timeq);
+        STAILQ_REMOVE_HEAD(&ctx->free_buf_timeq, next);
+        ctx->mstats.free_buf_times--;
+    } else {
+        t = calloc(1, sizeof(struct buf_time));
+    }
+    t->ctx = ctx;
+    t->buf = buf;
+    t->pos = buf->last;
+    t->read_time = read_time;
+    STAILQ_INSERT_TAIL(queue, t, next);
+    ctx->mstats.buf_times++;
+}
+
+void buf_time_free(struct buf_time *t)
+{
+    t->ctx->mstats.buf_times--;
+
+    if (t->ctx->mstats.free_buf_times > BUF_TIME_LIMIT) {
+        free(t);
+        return;
+    }
+
+    STAILQ_NEXT(t, next) = NULL;
+    STAILQ_INSERT_HEAD(&t->ctx->free_buf_timeq, t, next);
+    t->ctx->mstats.free_buf_times++;
 }

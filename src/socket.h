@@ -34,7 +34,5 @@ int socket_parse_ip(char *addr, struct address *address);
 void socket_get_key(struct address *addr, char *dst);
 int socket_create_eventfd();
 int socket_trigger_event(int evfd);
-int socket_sndbuf_size(int fd);
-int socket_get_sndbuf(int fd);
 
 #endif /* end of include guard: __SOCKET_H */

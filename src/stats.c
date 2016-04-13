@@ -57,14 +57,16 @@ void stats_get_memory(struct memory_stats *stats)
     struct context *contexts = get_contexts();
 
     for (int i = 0; i < config.thread; i++) {
-        stats->buffers        += ATOMIC_GET(contexts[i].mstats.buffers);
-        stats->conns          += ATOMIC_GET(contexts[i].mstats.conns);
-        stats->cmds           += ATOMIC_GET(contexts[i].mstats.cmds);
-        stats->conn_info      += ATOMIC_GET(contexts[i].mstats.conn_info);
-        stats->free_buffers   += ATOMIC_GET(contexts[i].mstats.free_buffers);
-        stats->free_cmds      += ATOMIC_GET(contexts[i].mstats.free_cmds);
-        stats->free_conns     += ATOMIC_GET(contexts[i].mstats.free_conns);
-        stats->free_conn_info += ATOMIC_GET(contexts[i].mstats.free_conn_info);
+        stats->buffers        += contexts[i].mstats.buffers;
+        stats->conns          += contexts[i].mstats.conns;
+        stats->cmds           += contexts[i].mstats.cmds;
+        stats->conn_info      += contexts[i].mstats.conn_info;
+        stats->buf_times      += contexts[i].mstats.buf_times;
+        stats->free_buffers   += contexts[i].mstats.free_buffers;
+        stats->free_cmds      += contexts[i].mstats.free_cmds;
+        stats->free_conns     += contexts[i].mstats.free_conns;
+        stats->free_conn_info += contexts[i].mstats.free_conn_info;
+        stats->free_buf_times += contexts[i].mstats.free_buf_times;
     }
 }
 

@@ -96,11 +96,12 @@ void conn_info_init(struct conn_info *info)
     reader_init(&info->reader);
 
     info->last_active = -1;
-    info->sndbuf = 0;
+    info->current_buf = NULL;
 
     STAILQ_INIT(&info->cmd_queue);
     STAILQ_INIT(&info->ready_queue);
     STAILQ_INIT(&info->waiting_queue);
+    STAILQ_INIT(&info->buf_times);
     TAILQ_INIT(&info->data);
     TAILQ_INIT(&info->local_data);
 
@@ -124,12 +125,12 @@ struct connection *conn_create(struct context *ctx)
     if ((conn = TAILQ_FIRST(&ctx->conns)) != NULL && conn->fd == -1) {
         LOG(DEBUG, "connection get cache");
         TAILQ_REMOVE(&ctx->conns, conn, next);
-        ATOMIC_DEC(ctx->mstats.free_conns, 1);
+        ctx->mstats.free_conns--;
     } else {
         conn = malloc(sizeof(struct connection));
     }
     conn_init(conn, ctx);
-    ATOMIC_INC(ctx->mstats.conns, 1);
+    ctx->mstats.conns++;
     return conn;
 }
 
@@ -139,14 +140,14 @@ struct conn_info *conn_info_create(struct context *ctx)
     if (!STAILQ_EMPTY(&ctx->free_conn_infoq)) {
         info = STAILQ_FIRST(&ctx->free_conn_infoq);
         STAILQ_REMOVE_HEAD(&ctx->free_conn_infoq, next);
-        ATOMIC_DEC(ctx->mstats.free_conn_info, 1);
+        ctx->mstats.free_conn_info--;
     } else {
         info = malloc(sizeof(struct conn_info));
         // init iov here
         memset(&info->iov, 0, sizeof(info->iov));
     }
     conn_info_init(info);
-    ATOMIC_INC(ctx->mstats.conn_info, 1);
+    ctx->mstats.conn_info++;
     return info;
 }
 
@@ -201,7 +202,14 @@ void conn_buf_free(struct connection *conn)
 {
     if (conn->info == NULL) return;
     struct conn_info *info = conn->info;
+    struct buf_time *t;
     struct mbuf *buf;
+
+    while (!STAILQ_EMPTY(&info->buf_times)) {
+        t = STAILQ_FIRST(&info->buf_times);
+        STAILQ_REMOVE_HEAD(&info->buf_times, next);
+        buf_time_free(t);
+    }
     while (!TAILQ_EMPTY(&info->data)) {
         buf = TAILQ_FIRST(&info->data);
         TAILQ_REMOVE(&info->data, buf, next);
@@ -217,7 +225,7 @@ void conn_buf_free(struct connection *conn)
 void conn_recycle(struct context *ctx, struct connection *conn)
 {
     if (conn->info != NULL) {
-        ATOMIC_DEC(ctx->mstats.conn_info, 1);
+        ctx->mstats.conn_info--;
 
         struct conn_info *info = conn->info;
         if (!TAILQ_EMPTY(&info->data)) {
@@ -225,11 +233,11 @@ void conn_recycle(struct context *ctx, struct connection *conn)
         }
         STAILQ_INSERT_TAIL(&ctx->free_conn_infoq, info, next);
 
-        ATOMIC_INC(ctx->mstats.free_conn_info, 1);
+        ctx->mstats.free_conn_info++;
         conn->info = NULL;
     }
 
-    ATOMIC_DEC(ctx->mstats.conns, 1);
+    ctx->mstats.conns--;
 
     if (conn->next.tqe_next != NULL || conn->next.tqe_prev != NULL) {
         TAILQ_REMOVE(&ctx->conns, conn, next);
@@ -237,7 +245,7 @@ void conn_recycle(struct context *ctx, struct connection *conn)
     }
     TAILQ_INSERT_HEAD(&ctx->conns, conn, next);
 
-    ATOMIC_INC(ctx->mstats.free_conns, 1);
+    ctx->mstats.free_conns++;
 }
 
 int conn_create_fd()
@@ -301,14 +309,22 @@ struct connection *conn_get_server(struct context *ctx, uint16_t slot)
     return server;
 }
 
-struct mbuf *conn_get_buf(struct connection *conn)
+// 'unprocessed buf': buf is full and has data unprocessed.
+//
+// 1. If last buf is nut full, it is returned.
+// 2. If `unprocessed` is true and the last buf is the unprocessed buf,
+//    the last buf is returned.
+// 3. Otherwise a new buf is returned.
+struct mbuf *conn_get_buf(struct connection *conn, bool unprocessed)
 {
     struct mbuf *buf = NULL;
     struct conn_info *info = conn->info;
 
-    if (!TAILQ_EMPTY(&info->data)) buf = TAILQ_LAST(&info->data, mhdr);
+    if (!TAILQ_EMPTY(&info->data)) {
+        buf = TAILQ_LAST(&info->data, mhdr);
+    }
 
-    if (buf == NULL || buf->pos >= buf->end) {
+    if (buf == NULL || (unprocessed ? buf->pos : buf->last) >= buf->end) {
         buf = mbuf_get(conn->ctx);
         buf->queue = &info->data;
         TAILQ_INSERT_TAIL(&info->data, buf, next);
