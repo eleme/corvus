@@ -4,6 +4,7 @@
 #include "logging.h"
 
 #define RECYCLE_LENGTH 8192 // 128mb
+#define BUF_TIME_LIMIT 512
 
 static struct mbuf *_mbuf_get(struct context *ctx)
 {
@@ -173,6 +174,12 @@ void buf_time_append(struct context *ctx, struct buf_time_tqh *queue,
 void buf_time_free(struct buf_time *t)
 {
     t->ctx->mstats.buf_times--;
+
+    if (t->ctx->mstats.free_buf_times > BUF_TIME_LIMIT) {
+        free(t);
+        return;
+    }
+
     STAILQ_NEXT(t, next) = NULL;
     STAILQ_INSERT_HEAD(&t->ctx->free_buf_timeq, t, next);
     t->ctx->mstats.free_buf_times++;

@@ -9,6 +9,9 @@
 #include "logging.h"
 #include "event.h"
 
+#define CMD_MIN_LIMIT 64
+#define CMD_MAX_LIMIT 512
+
 int client_trigger_event(struct connection *client)
 {
     struct mbuf *buf = client->info->current_buf;
@@ -75,7 +78,7 @@ int client_read(struct connection *client, bool read_socket)
 {
     struct command *cmd;
     struct mbuf *buf;
-    int status = CORVUS_OK, limit = 64;
+    int status = CORVUS_OK;
 
     if (read_socket) {
         status = client_read_socket(client);
@@ -93,7 +96,10 @@ int client_read(struct connection *client, bool read_socket)
     long long free_cmds = client->ctx->mstats.free_cmds;
     long long clients = ATOMIC_GET(client->ctx->stats.connected_clients);
     free_cmds /= clients;
-    limit = free_cmds > limit ? free_cmds : limit;
+    int limit = free_cmds > CMD_MIN_LIMIT ? free_cmds : CMD_MIN_LIMIT;
+    if (limit > CMD_MAX_LIMIT) {
+        limit = CMD_MAX_LIMIT;
+    }
 
     while (true) {
         buf = client->info->current_buf;
@@ -106,15 +112,14 @@ int client_read(struct connection *client, bool read_socket)
             break;
         }
 
-        cmd = conn_get_cmd(client);
-        cmd->client = client;
-
         // get current buf time before parse
         struct buf_time *t = STAILQ_FIRST(&client->info->buf_times);
         if (t == NULL) {
             LOG(ERROR, "client_read: fail to get buffer read time %d", client->fd);
             return CORVUS_ERR;
         }
+        cmd = conn_get_cmd(client);
+        cmd->client = client;
         if (cmd->parse_time <= 0) {
             cmd->parse_time = t->read_time;
         }

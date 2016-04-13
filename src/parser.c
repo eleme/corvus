@@ -1,6 +1,5 @@
 #include <stdlib.h>
 #include <stdint.h>
-#include <assert.h>
 #include <string.h>
 #include "corvus.h"
 #include "parser.h"
