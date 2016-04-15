@@ -10,10 +10,11 @@ Why
 
 Most redis client implementations don't support redis cluster. We have a lot of services relying
 on redis, which are written in Python, Java, Go, Nodejs etc. It's hard to provide redis client
-libraries for multiple languages without breaking compatibilities. We use [twemproxy](https://github.com/twitter/twemproxy)
-before, but it requires restarting to add or remove backend redis instances, which causes service
-interruption. And twemproxy is single threaded, we have to deploy multiple twemproxy instances
-for large number of clients, which causes the sa headache.
+libraries for multiple languages without breaking compatibilities. We used [twemproxy](https://github.com/twitter/twemproxy)
+before, but it relies on sentinel for high availabity, it also requires restarting to add or
+remove backend redis instances, which causes service interruption. And twemproxy is single
+threaded, we have to deploy multiple twemproxy instances for large number of clients, which
+causes the sa headaches.
 
 Therefore, we made corvus.
 
@@ -22,12 +23,14 @@ Features
 
 * Fast.
 * Lightweight.
+* Painless upgrade to official redis cluster from twemproxy.
 * Zero dependencies.
 * Multiple threading.
 * Reuseport support.
 * Pipeline support.
 * Statsd integration.
 * Syslog integration.
+
 
 Requirements
 ------------
@@ -84,9 +87,9 @@ Commands
 #### Restricted commands
 
 * `EVAL`: at least one key should be given. If there are multiple keys, all of
-   them should belong to the same one node.
+   them should belong to the same node.
 
-The following commands require all argument keys to belong to the same one redis node:
+The following commands require all argument keys to belong to the same redis node:
 
 * `SORT`.
 * `RPOP`, `LPUSH`.
