@@ -483,13 +483,11 @@ int slot_init_updater(struct context *ctx)
     pthread_cond_init(&signal_cond, NULL);
 
     if (pthread_create(&thread, &attr, slot_map_updater, (void*)ctx) != 0) {
-        LOG(ERROR, "can't initialize slot updating thread");
+        LOG(ERROR, "Can't initialize slot updating thread");
         return CORVUS_ERR;
     }
     LOG(INFO, "starting slot updating thread");
 
     ctx->thread = thread;
-    ctx->started = true;
-    ctx->role = THREAD_SLOT_UPDATER;
-    return 0;
+    return CORVUS_OK;
 }

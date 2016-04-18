@@ -42,12 +42,6 @@
 #define ATOMIC_DEC(data, value) \
     __atomic_sub_fetch(&(data), value, __ATOMIC_SEQ_CST)
 
-enum thread_role {
-    THREAD_UNKNOWN,
-    THREAD_MAIN_WORKER,
-    THREAD_SLOT_UPDATER,
-};
-
 enum {
     CTX_UNKNOWN,
     CTX_QUIT,
@@ -84,8 +78,6 @@ struct context {
     /* thread control */
     int state;
     pthread_t thread;
-    bool started;
-    enum thread_role role;
 
     /* stats */
     struct basic_stats stats;
