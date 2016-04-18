@@ -256,6 +256,7 @@ void stats_kill()
             LOG(WARN, "fail to kill stats thread: %s", strerror(err));
         }
     }
+    LOG(DEBUG, "killing stats thread");
 }
 
 int stats_resolve_addr(char *addr)

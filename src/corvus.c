@@ -138,63 +138,29 @@ int read_conf(const char *filename)
     return 0;
 }
 
-void quit()
-{
-    if (config.stats) stats_kill();
-
-    for (int i = 0; i <= config.thread; i++) {
-        if (!contexts[i].started) continue;
-        switch (contexts[i].role) {
-            case THREAD_SLOT_UPDATER:
-                slot_create_job(SLOT_UPDATER_QUIT);
-                break;
-            case THREAD_MAIN_WORKER:
-                contexts[i].state = CTX_BEFORE_QUIT;
-                break;
-            case THREAD_UNKNOWN: break;
-        }
-    }
-}
-
-void log_traceback()
-{
-    void *stack[64];
-    char **symbols;
-    int size, i, j;
-
-    size = backtrace(stack, 64);
-    symbols = backtrace_symbols(stack, size);
-    if (symbols == NULL || size <= 5) {
-        LOG(ERROR, "segmentation fault");
-        exit(EXIT_FAILURE);
-    }
-
-    const int msg_len = 2048;
-    char msg[(size - 5) * msg_len];
-    int n, len = 0;
-
-    for (i = 3, j = 0; i < size - 2; i++, j++) {
-        n = snprintf(msg + len, msg_len, "  [%d] %s", j, symbols[i]);
-        len += n;
-        if (i < size - 3) {
-            msg[len++] = '\n';
-        }
-    }
-    free(symbols);
-
-    LOG(ERROR, "segmentation fault: \n%s", msg);
-    exit(EXIT_FAILURE);
-}
-
 void sig_handler(int sig)
 {
+    int i;
+    struct sigaction act;
+    void *trace[100];
+
     switch (sig) {
         case SIGINT:
         case SIGTERM:
-            quit();
+            for (i = 0; i < config.thread; i++) {
+                contexts[i].state = CTX_BEFORE_QUIT;
+            }
             break;
         case SIGSEGV:
-            log_traceback();
+            i = backtrace(trace, 100);
+            backtrace_symbols_fd(trace, i, STDOUT_FILENO);
+
+            // restore default signal handlers
+            sigemptyset(&act.sa_mask);
+            act.sa_flags = SA_NODEFER | SA_ONSTACK | SA_RESETHAND;
+            act.sa_handler = SIG_DFL;
+            sigaction(sig, &act, NULL);
+            kill(getpid(), sig);
             break;
     }
 }
@@ -230,8 +196,6 @@ void context_init(struct context *ctx)
     memset(ctx, 0, sizeof(struct context));
 
     dict_init(&ctx->server_table);
-    ctx->started = false;
-    ctx->role = THREAD_UNKNOWN;
     ctx->state = CTX_UNKNOWN;
     mbuf_init(ctx);
 
@@ -370,14 +334,12 @@ void start_worker(int i)
         exit(EXIT_FAILURE);
     }
     ctx->thread = thread;
-    ctx->started = true;
-    ctx->role = THREAD_MAIN_WORKER;
 }
 
 #ifndef CORVUS_TEST
 int main(int argc, const char *argv[])
 {
-    int i;
+    int i, err;
     if (argc != 2) {
         fprintf(stderr, "Usage: %s corvus.conf\n", argv[0]);
         return EXIT_FAILURE;
@@ -400,11 +362,12 @@ int main(int argc, const char *argv[])
     contexts = malloc(sizeof(struct context) * (config.thread + 1));
     for (i = 0; i <= config.thread; i++) {
         context_init(&contexts[i]);
-        contexts[i].role = THREAD_UNKNOWN;
     }
 
     cmd_map_init();
-    slot_init_updater(&contexts[config.thread]);
+    if (slot_init_updater(&contexts[config.thread]) == CORVUS_ERR) {
+        return EXIT_FAILURE;
+    }
     slot_create_job(SLOT_UPDATE);
 
     for (i = 0; i < config.thread; i++) {
@@ -427,9 +390,20 @@ int main(int argc, const char *argv[])
 
     if (config.stats) stats_init(config.metric_interval);
 
-    for (i = 0; i <= config.thread; i++) {
-        if (!contexts[i].started) continue;
-        pthread_join(contexts[i].thread, NULL);
+    for (i = 0; i < config.thread; i++) {
+        if ((err = pthread_join(contexts[i].thread, NULL)) != 0) {
+            LOG(WARN, "pthread_join: %s", strerror(err));
+        }
+    }
+
+    // stop stats thread
+    if (config.stats) {
+        stats_kill();
+    }
+    // stop slot updater thread
+    slot_create_job(SLOT_UPDATER_QUIT);
+    if ((err = pthread_join(contexts[config.thread].thread, NULL)) != 0) {
+        LOG(WARN, "pthread_join: %s", strerror(err));
     }
 
     free(contexts);
