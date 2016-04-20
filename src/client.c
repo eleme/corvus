@@ -43,7 +43,7 @@ void client_range_clear(struct connection *client, struct command *cmd)
 struct mbuf *client_get_buf(struct connection *client)
 {
     // not get unprocessed buf
-    struct mbuf *buf=  conn_get_buf(client, false);
+    struct mbuf *buf = conn_get_buf(client, false, false);
     if (client->info->current_buf == NULL) {
         client->info->current_buf = buf;
     }

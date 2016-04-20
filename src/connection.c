@@ -309,25 +309,29 @@ struct connection *conn_get_server(struct context *ctx, uint16_t slot)
     return server;
 }
 
-// 'unprocessed buf': buf is full and has data unprocessed.
-//
-// 1. If last buf is nut full, it is returned.
-// 2. If `unprocessed` is true and the last buf is the unprocessed buf,
-//    the last buf is returned.
-// 3. Otherwise a new buf is returned.
-struct mbuf *conn_get_buf(struct connection *conn, bool unprocessed)
+/*
+ * 'unprocessed buf': buf is full and has data unprocessed.
+ *
+ * 1. If last buf is nut full, it is returned.
+ * 2. If `unprocessed` is true and the last buf is the unprocessed buf,
+ *    the last buf is returned.
+ * 3. Otherwise a new buf is returned.
+ *
+ * `local` means whether to get buf from `info->local_data` or `info->data`.
+ */
+struct mbuf *conn_get_buf(struct connection *conn, bool unprocessed, bool local)
 {
     struct mbuf *buf = NULL;
-    struct conn_info *info = conn->info;
+    struct mhdr *queue = local ? &conn->info->local_data : &conn->info->data;
 
-    if (!TAILQ_EMPTY(&info->data)) {
-        buf = TAILQ_LAST(&info->data, mhdr);
+    if (!TAILQ_EMPTY(queue)) {
+        buf = TAILQ_LAST(queue, mhdr);
     }
 
     if (buf == NULL || (unprocessed ? buf->pos : buf->last) >= buf->end) {
         buf = mbuf_get(conn->ctx);
-        buf->queue = &info->data;
-        TAILQ_INSERT_TAIL(&info->data, buf, next);
+        buf->queue = queue;
+        TAILQ_INSERT_TAIL(queue, buf, next);
     }
     return buf;
 }
@@ -345,9 +349,8 @@ int conn_register(struct connection *conn)
 void conn_add_data(struct connection *conn, uint8_t *data, int n,
         struct buf_ptr *start, struct buf_ptr *end)
 {
-    struct mhdr *queue = &conn->info->local_data;
-    struct context *ctx = conn->ctx;
-    struct mbuf *buf = mbuf_queue_get(ctx, queue);
+    // get buffer from local_data.
+    struct mbuf *buf = conn_get_buf(conn, false, true);
     int remain = n, wlen, size, len = 0;
 
     if (remain > 0 && start != NULL) {
@@ -367,7 +370,7 @@ void conn_add_data(struct connection *conn, uint8_t *data, int n,
             end->buf = buf;
         }
         if (wlen - size <= 0) {
-            buf = mbuf_queue_get(ctx, queue);
+            buf = conn_get_buf(conn, false, true);
         }
     }
 }
