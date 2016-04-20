@@ -1011,7 +1011,7 @@ void cmd_iov_add(struct iov_data *iov, void *buf, size_t len, struct mbuf *b)
     if (iov->cursor >= CORVUS_IOV_MAX) {
         iov->len -= iov->cursor;
         memmove(iov->data, iov->data + iov->cursor, iov->len * sizeof(struct iovec));
-        memmove(iov->buf_ptr, iov->buf_ptr + iov->cursor, iov->len * sizeof(struct buf_ptr*));
+        memmove(iov->buf_ptr, iov->buf_ptr + iov->cursor, iov->len * sizeof(struct mbuf*));
         iov->cursor = 0;
     }
 
@@ -1019,7 +1019,7 @@ void cmd_iov_add(struct iov_data *iov, void *buf, size_t len, struct mbuf *b)
         iov->max_size *= 2;
         if (iov->max_size == 0) iov->max_size = CORVUS_IOV_MAX;
         iov->data = realloc(iov->data, sizeof(struct iovec) * iov->max_size);
-        iov->buf_ptr = realloc(iov->buf_ptr, sizeof(struct buf_ptr*) * iov->max_size);
+        iov->buf_ptr = realloc(iov->buf_ptr, sizeof(struct mbuf*) * iov->max_size);
     }
 
     iov->data[iov->len].iov_base = buf;
