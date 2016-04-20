@@ -105,20 +105,6 @@ void mbuf_destroy(struct context *ctx)
     }
 }
 
-struct mbuf *mbuf_queue_get(struct context *ctx, struct mhdr *q)
-{
-    struct mbuf *buf = NULL;
-
-    if (!TAILQ_EMPTY(q)) buf = TAILQ_LAST(q, mhdr);
-
-    if (buf == NULL || mbuf_full(buf)) {
-        buf = mbuf_get(ctx);
-        buf->queue = q;
-        TAILQ_INSERT_TAIL(q, buf, next);
-    }
-    return buf;
-}
-
 void mbuf_range_clear(struct context *ctx, struct buf_ptr ptr[])
 {
     struct mbuf *n, *b = ptr[0].buf;

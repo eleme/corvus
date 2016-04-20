@@ -67,7 +67,7 @@ TEST(test_server_data_clear) {
 
     struct command *cmd = cmd_create(ctx);
 
-    struct mbuf *buf = conn_get_buf(conn, true);
+    struct mbuf *buf = conn_get_buf(conn, true, false);
     int size = strlen(data);
     memcpy(buf->last, data, size);
     buf->last += size;

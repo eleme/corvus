@@ -43,23 +43,12 @@ struct buf_ptr {
     uint8_t *pos;
 };
 
-static inline bool mbuf_empty(struct mbuf *mbuf)
-{
-    return mbuf->pos == mbuf->last ? true : false;
-}
-
-static inline bool mbuf_full(struct mbuf *mbuf)
-{
-    return mbuf->last == mbuf->end ? true : false;
-}
-
 void mbuf_init(struct context *);
 struct mbuf *mbuf_get(struct context *);
 void mbuf_recycle(struct context *, struct mbuf *);
 uint32_t mbuf_read_size(struct mbuf *);
 uint32_t mbuf_write_size(struct mbuf *);
 void mbuf_destroy(struct context *ctx);
-struct mbuf *mbuf_queue_get(struct context *ctx, struct mhdr *q);
 void mbuf_range_clear(struct context *ctx, struct buf_ptr ptr[]);
 void mbuf_decref(struct context *ctx, struct mbuf **bufs, int n);
 void buf_time_append(struct context *ctx, struct buf_time_tqh *queue,

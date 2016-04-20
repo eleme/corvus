@@ -843,7 +843,7 @@ int cmd_read_rep(struct command *cmd, struct connection *server)
     struct mbuf *buf;
 
     while (1) {
-        buf = conn_get_buf(server, true);
+        buf = conn_get_buf(server, true, false);
         rsize = mbuf_read_size(buf);
 
         if (rsize <= 0) {
