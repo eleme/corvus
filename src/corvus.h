@@ -94,7 +94,7 @@ struct {
     bool syslog;
     char statsd_addr[DSN_LEN + 1];
     int metric_interval;
-    int stats;
+    bool stats;
     int64_t client_timeout;
     int64_t server_timeout;
     int bufsize;

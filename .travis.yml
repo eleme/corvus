@@ -31,8 +31,9 @@ install:
   - sudo pip install ruskit
   - ruskit create localhost:800{0,1,2}
 
+  - sed -i 's/node localhost:8000,localhost:8001,localhost:8002/node 127.0.0.1:8000/' corvus.conf
   - sed -i 's/loglevel debug/loglevel info/' corvus.conf
-  - sed -i 's/# statsd localhost/statsd localhost/' corvus.conf
+  - sed -i 's/# statsd localhost/statsd 127.0.0.1/' corvus.conf
   - sed -i 's/# metric_interval 10/metric_interval 3/' corvus.conf
   - cat corvus.conf
 

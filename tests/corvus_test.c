@@ -92,6 +92,7 @@ int main(int argc, const char *argv[])
     usleep(10000);
     slot_create_job(SLOT_UPDATER_QUIT);
     pthread_join(ctx.thread, NULL);
+    context_free(&ctx);
 
     report();
     return manager.failed == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

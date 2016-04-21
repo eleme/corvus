@@ -31,7 +31,7 @@ void config_init()
     config.thread = 4;
     config.loglevel = INFO;
     config.syslog = 0;
-    config.stats = 0;
+    config.stats = false;
     config.client_timeout = 0;
     config.server_timeout = 0;
     config.bufsize = DEFAULT_BUFSIZE;
@@ -220,9 +220,7 @@ int thread_spawn(struct context *ctx, void *(*start_routine) (void *))
         pthread_attr_destroy(&attr);
         return CORVUS_ERR;
     }
-    if (ctx != NULL) {
-        ctx->thread = thread;
-    }
+    ctx->thread = thread;
     pthread_attr_destroy(&attr);
     return CORVUS_OK;
 }
@@ -345,8 +343,6 @@ void *main_loop(void *data)
     while (ctx->state != CTX_QUIT) {
         event_wait(&ctx->loop, -1);
     }
-    context_free(ctx);
-
     LOG(DEBUG, "main loop quiting");
     return NULL;
 }
@@ -405,7 +401,7 @@ int main(int argc, const char *argv[])
         if (stats_resolve_addr(config.statsd_addr) == CORVUS_ERR) {
             LOG(WARN, "fail to resolve statsd address");
         } else {
-            config.stats = 1;
+            config.stats = true;
         }
     }
 
@@ -430,6 +426,10 @@ int main(int argc, const char *argv[])
     slot_create_job(SLOT_UPDATER_QUIT);
     if ((err = pthread_join(contexts[config.thread].thread, NULL)) != 0) {
         LOG(WARN, "pthread_join: %s", strerror(err));
+    }
+
+    for (i = 0; i <= config.thread; i++) {
+        context_free(&contexts[i]);
     }
 
     free(contexts);

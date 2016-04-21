@@ -20,9 +20,12 @@ struct bytes {
 
 static int statsd_fd = -1;
 static struct sockaddr_in dest;
-static pthread_t stats_thread;
 static struct dict bytes_map;
 static char hostname[HOST_LEN + 1];
+
+// context for stats thread, no need to init,
+// only used `stats_ctx.thread` currently
+static struct context stats_ctx;
 
 struct stats global_stats;
 
@@ -225,7 +228,7 @@ int stats_init()
     }
 
     LOG(INFO, "starting stats thread");
-    return thread_spawn(NULL, stats_daemon);
+    return thread_spawn(&stats_ctx, stats_daemon);
 }
 
 void stats_kill()
@@ -234,8 +237,8 @@ void stats_kill()
 
     dict_free(&bytes_map);
 
-    if (pthread_cancel(stats_thread) == 0) {
-        if ((err = pthread_join(stats_thread, NULL)) != 0) {
+    if (pthread_cancel(stats_ctx.thread) == 0) {
+        if ((err = pthread_join(stats_ctx.thread, NULL)) != 0) {
             LOG(WARN, "fail to kill stats thread: %s", strerror(err));
         }
     }

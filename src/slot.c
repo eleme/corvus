@@ -23,8 +23,6 @@ enum {
     SLOT_MAP_DIRTY,
 };
 
-extern void context_free(struct context *ctx);
-
 static struct node_info *slot_map[REDIS_CLUSTER_SLOTS];
 static const char SLOTS_CMD[] = "*2\r\n$7\r\nCLUSTER\r\n$5\r\nSLOTS\r\n";
 
@@ -359,7 +357,6 @@ void *slot_manager(void *data)
     pthread_rwlock_destroy(&slot_map_lock);
     pthread_rwlock_destroy(&addr_list_lock);
     pthread_mutex_destroy(&job_mutex);
-    context_free(ctx);
 
     LOG(DEBUG, "slot map update thread quiting");
     return NULL;
