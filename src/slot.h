@@ -25,6 +25,6 @@ uint16_t slot_get(struct pos_array *pos);
 void slot_get_addr_list(char *dest);
 int slot_get_node_addr(uint16_t slot, struct address *addr);
 void slot_create_job(int type);
-int slot_init_updater(struct context *ctx);
+int slot_start_manager(struct context *ctx);
 
 #endif /* end of include guard: __SLOT_H */

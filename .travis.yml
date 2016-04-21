@@ -31,13 +31,24 @@ install:
   - sudo pip install ruskit
   - ruskit create localhost:800{0,1,2}
 
+  - sed -i 's/node localhost:8000,localhost:8001,localhost:8002/node 127.0.0.1:8000/' corvus.conf
+  - sed -i 's/loglevel debug/loglevel info/' corvus.conf
+  - sed -i 's/# statsd localhost/statsd 127.0.0.1/' corvus.conf
+  - sed -i 's/# metric_interval 10/metric_interval 3/' corvus.conf
+  - cat corvus.conf
+
 before_script:
   - sudo pip install -r tests/requirements.txt
   - make
-  - sed -i 's/loglevel debug/loglevel info/' corvus.conf
+  - valgrind --leak-check=full ./src/corvus ./corvus.conf > valgrind.log 2>&1 &
+  - sleep 1 && redis-benchmark -h localhost -p 12345 -t ping_mbulk,get,set,incr,mset,lrange,sadd -q -n 10000 -r 1000000 -P 12
+  - kill -INT `pgrep -f corvus` && sleep 1
+  - cat valgrind.log
+  - for p in {8000..8002}; do redis-cli -h localhost -p $p flushall; done
   - ./src/corvus ./corvus.conf > corvus.log 2>&1 &
 
 script:
+  - awk '/ERROR SUMMARY/ {if ($4 == 0) exit 0; else exit 1}' valgrind.log
   - make clean || true
   - make test
   - valgrind --error-exitcode=1 --leak-check=full ./tests/corvus_test --silent

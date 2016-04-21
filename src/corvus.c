@@ -31,7 +31,7 @@ void config_init()
     config.thread = 4;
     config.loglevel = INFO;
     config.syslog = 0;
-    config.stats = 0;
+    config.stats = false;
     config.client_timeout = 0;
     config.server_timeout = 0;
     config.bufsize = DEFAULT_BUFSIZE;
@@ -186,6 +186,45 @@ int64_t get_time()
     return ns;
 }
 
+int thread_spawn(struct context *ctx, void *(*start_routine) (void *))
+{
+    pthread_attr_t attr;
+    pthread_t thread;
+    size_t stacksize = 0;
+    int err;
+
+    /* Set the stack size as by default it may be small in some system */
+    if ((err = pthread_attr_init(&attr)) != 0) {
+        LOG(ERROR, "pthread_attr_init: %s", strerror(err));
+        return CORVUS_ERR;
+    }
+    if ((err = pthread_attr_getstacksize(&attr, &stacksize)) != 0) {
+        LOG(ERROR, "pthread_attr_getstacksize: %s", strerror(err));
+        pthread_attr_destroy(&attr);
+        return CORVUS_ERR;
+    }
+    if (stacksize <= 0) {
+        stacksize = 1;
+    }
+    while (stacksize < THREAD_STACK_SIZE) {
+        stacksize <<= 1;
+    }
+    if ((err = pthread_attr_setstacksize(&attr, stacksize)) != 0) {
+        LOG(ERROR, "pthread_attr_setstacksize: %s", strerror(err));
+        pthread_attr_destroy(&attr);
+        return CORVUS_ERR;
+    }
+
+    if ((err = pthread_create(&thread, &attr, start_routine, (void*)ctx)) != 0) {
+        LOG(ERROR, "pthread_create: %s", strerror(err));
+        pthread_attr_destroy(&attr);
+        return CORVUS_ERR;
+    }
+    ctx->thread = thread;
+    pthread_attr_destroy(&attr);
+    return CORVUS_OK;
+}
+
 struct context *get_contexts()
 {
     return contexts;
@@ -304,36 +343,8 @@ void *main_loop(void *data)
     while (ctx->state != CTX_QUIT) {
         event_wait(&ctx->loop, -1);
     }
-    context_free(ctx);
-
     LOG(DEBUG, "main loop quiting");
     return NULL;
-}
-
-void start_worker(int i)
-{
-    pthread_attr_t attr;
-    pthread_t thread;
-    size_t stacksize;
-
-    struct context *ctx = &contexts[i];
-
-    /* Make the thread killable at any time can work reliably. */
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
-
-    /* Set the stack size as by default it may be small in some system */
-    pthread_attr_init(&attr);
-    pthread_attr_getstacksize(&attr, &stacksize);
-    if (!stacksize) stacksize = 1; /* The world is full of Solaris Fixes */
-    while (stacksize < THREAD_STACK_SIZE) stacksize *= 2;
-    pthread_attr_setstacksize(&attr, stacksize);
-
-    if (pthread_create(&thread, &attr, main_loop, (void*)ctx) != 0) {
-        LOG(ERROR, "can't initialize slot updating thread");
-        exit(EXIT_FAILURE);
-    }
-    ctx->thread = thread;
 }
 
 #ifndef CORVUS_TEST
@@ -364,31 +375,42 @@ int main(int argc, const char *argv[])
         context_init(&contexts[i]);
     }
 
-    cmd_map_init();
-    if (slot_init_updater(&contexts[config.thread]) == CORVUS_ERR) {
-        return EXIT_FAILURE;
-    }
-    slot_create_job(SLOT_UPDATE);
-
-    for (i = 0; i < config.thread; i++) {
-        start_worker(i);
-    }
-
     signal(SIGHUP, SIG_IGN);
     signal(SIGPIPE, SIG_IGN);
     setup_signal();
 
-    LOG(INFO, "serve at 0.0.0.0:%d", config.bind);
+    cmd_map_init();
+
+    // start slot management thread
+    if (slot_start_manager(&contexts[config.thread]) == CORVUS_ERR) {
+        LOG(ERROR, "fail to start slot manager thread");
+        return EXIT_FAILURE;
+    }
+    // create first slot updating job
+    slot_create_job(SLOT_UPDATE);
+
+    // start worker threads
+    for (i = 0; i < config.thread; i++) {
+        if (thread_spawn(&contexts[i], main_loop) == CORVUS_ERR) {
+            LOG(ERROR, "fail to start worker thread: %d", i);
+            return EXIT_FAILURE;
+        }
+    }
 
     if (strlen(config.statsd_addr) > 0) {
         if (stats_resolve_addr(config.statsd_addr) == CORVUS_ERR) {
             LOG(WARN, "fail to resolve statsd address");
         } else {
-            config.stats = 1;
+            config.stats = true;
         }
     }
 
-    if (config.stats) stats_init(config.metric_interval);
+    // start stats thread
+    if (config.stats) {
+        stats_init();
+    }
+
+    LOG(INFO, "serve at 0.0.0.0:%d", config.bind);
 
     for (i = 0; i < config.thread; i++) {
         if ((err = pthread_join(contexts[i].thread, NULL)) != 0) {
@@ -404,6 +426,10 @@ int main(int argc, const char *argv[])
     slot_create_job(SLOT_UPDATER_QUIT);
     if ((err = pthread_join(contexts[config.thread].thread, NULL)) != 0) {
         LOG(WARN, "pthread_join: %s", strerror(err));
+    }
+
+    for (i = 0; i <= config.thread; i++) {
+        context_free(&contexts[i]);
     }
 
     free(contexts);

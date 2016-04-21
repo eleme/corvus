@@ -94,7 +94,7 @@ struct {
     bool syslog;
     char statsd_addr[DSN_LEN + 1];
     int metric_interval;
-    int stats;
+    bool stats;
     int64_t client_timeout;
     int64_t server_timeout;
     int bufsize;
@@ -102,5 +102,6 @@ struct {
 
 int64_t get_time();
 struct context *get_contexts();
+int thread_spawn(struct context *ctx, void *(*start_routine) (void *));
 
 #endif /* end of include guard: __CORVUS_H */

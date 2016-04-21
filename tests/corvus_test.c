@@ -76,7 +76,7 @@ int main(int argc, const char *argv[])
     struct context ctx;
     context_init(&ctx);
     memcpy(&config.node, &conf, sizeof(config.node));
-    slot_init_updater(&ctx);
+    slot_start_manager(&ctx);
 
     RUN_CASE(test_slot);
     RUN_CASE(test_hash);
@@ -92,6 +92,7 @@ int main(int argc, const char *argv[])
     usleep(10000);
     slot_create_job(SLOT_UPDATER_QUIT);
     pthread_join(ctx.thread, NULL);
+    context_free(&ctx);
 
     report();
     return manager.failed == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

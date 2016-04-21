@@ -44,7 +44,7 @@ struct stats {
     struct basic_stats basic;
 };
 
-int stats_init(int interval);
+int stats_init();
 void stats_kill();
 int stats_resolve_addr(char *addr);
 void stats_get(struct stats *stats);
