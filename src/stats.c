@@ -21,7 +21,6 @@ struct bytes {
 static int statsd_fd = -1;
 static struct sockaddr_in dest;
 static pthread_t stats_thread;
-static int metric_interval = 10;
 static struct dict bytes_map;
 static char hostname[HOST_LEN + 1];
 
@@ -194,8 +193,12 @@ void stats_get(struct stats *stats)
 
 void *stats_daemon(void *data)
 {
+    /* Make the thread killable at any time can work reliably. */
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+
     while (1) {
-        sleep(metric_interval);
+        sleep(config.metric_interval);
         stats_send_simple();
         stats_send_node_info();
         LOG(DEBUG, "sending metrics");
@@ -203,10 +206,8 @@ void *stats_daemon(void *data)
     return NULL;
 }
 
-int stats_init(int interval)
+int stats_init()
 {
-    size_t stacksize;
-    pthread_attr_t attr;
     int len;
     dict_init(&bytes_map);
 
@@ -223,26 +224,8 @@ int stats_init(int interval)
         if (hostname[i] == '.') hostname[i] = '-';
     }
 
-    metric_interval = interval;
-
-    /* Make the thread killable at any time can work reliably. */
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
-
-    /* Set the stack size as by default it may be small in some system */
-    pthread_attr_init(&attr);
-    pthread_attr_getstacksize(&attr, &stacksize);
-    if (!stacksize) stacksize = 1; /* The world is full of Solaris Fixes */
-    while (stacksize < THREAD_STACK_SIZE) stacksize *= 2;
-    pthread_attr_setstacksize(&attr, stacksize);
-
-    if (pthread_create(&stats_thread, &attr, stats_daemon, NULL) != 0) {
-        LOG(ERROR, "can't initialize stats thread");
-        return CORVUS_ERR;
-    }
     LOG(INFO, "starting stats thread");
-
-    return CORVUS_OK;
+    return thread_spawn(NULL, stats_daemon);
 }
 
 void stats_kill()

@@ -76,7 +76,7 @@ int main(int argc, const char *argv[])
     struct context ctx;
     context_init(&ctx);
     memcpy(&config.node, &conf, sizeof(config.node));
-    slot_init_updater(&ctx);
+    slot_start_manager(&ctx);
 
     RUN_CASE(test_slot);
     RUN_CASE(test_hash);

@@ -102,5 +102,6 @@ struct {
 
 int64_t get_time();
 struct context *get_contexts();
+int thread_spawn(struct context *ctx, void *(*start_routine) (void *));
 
 #endif /* end of include guard: __CORVUS_H */

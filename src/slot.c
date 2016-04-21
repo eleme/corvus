@@ -53,12 +53,12 @@ static struct {
     int idx;
 } node_store;
 
-void node_list_init()
+static inline void node_list_init()
 {
     memset(&node_list, 0, sizeof(node_list));
-    for (int i = 0; i < config.node.len; i++, node_list.len++) {
-        if (node_list.len >= MAX_UPDATE_NODES) break;
+    for (int i = 0; i < MIN(config.node.len, MAX_UPDATE_NODES); i++) {
         memcpy(&node_list.nodes[i], &config.node.addr[i], sizeof(struct address));
+        node_list.len++;
     }
 }
 
@@ -327,14 +327,10 @@ void do_job(struct context *ctx, int job)
     }
 }
 
-void *slot_map_updater(void *data)
+void *slot_manager(void *data)
 {
     int job;
     struct context *ctx = data;
-
-    /* Make the thread killable at any time can work reliably. */
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
     pthread_mutex_lock(&job_mutex);
     in_progress = 0;
@@ -456,38 +452,23 @@ void slot_create_job(int type)
     pthread_mutex_unlock(&job_mutex);
 }
 
-int slot_init_updater(struct context *ctx)
+int slot_start_manager(struct context *ctx)
 {
-    pthread_t thread;
-    pthread_attr_t attr;
-    size_t stacksize;
-
-    /* Make the thread killable at any time can work reliably. */
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
-
-    /* Set the stack size as by default it may be small in some system */
-    pthread_attr_init(&attr);
-    pthread_attr_getstacksize(&attr, &stacksize);
-    if (!stacksize) stacksize = 1; /* The world is full of Solaris Fixes */
-    while (stacksize < THREAD_STACK_SIZE) stacksize *= 2;
-    pthread_attr_setstacksize(&attr, stacksize);
-
+    int err;
     memset(slot_map, 0, sizeof(struct node_info*) * REDIS_CLUSTER_SLOTS);
     memset(&node_store, 0, sizeof(node_store));
     dict_init(&node_store.map);
-
     node_list_init();
 
-    pthread_mutex_init(&job_mutex, NULL);
-    pthread_cond_init(&signal_cond, NULL);
-
-    if (pthread_create(&thread, &attr, slot_map_updater, (void*)ctx) != 0) {
-        LOG(ERROR, "Can't initialize slot updating thread");
+    if ((err = pthread_mutex_init(&job_mutex, NULL)) != 0) {
+        LOG(ERROR, "pthread_mutex_init: %s", strerror(err));
         return CORVUS_ERR;
     }
-    LOG(INFO, "starting slot updating thread");
+    if ((err = pthread_cond_init(&signal_cond, NULL)) != 0) {
+        LOG(ERROR, "pthread_cond_init: %s", strerror(err));
+        return CORVUS_ERR;
+    }
 
-    ctx->thread = thread;
-    return CORVUS_OK;
+    LOG(INFO, "starting slot manager thread");
+    return thread_spawn(ctx, slot_manager);
 }
