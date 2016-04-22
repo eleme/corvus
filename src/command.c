@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include <limits.h>
 #include <time.h>
+#include <unistd.h>
 #include "corvus.h"
 #include "socket.h"
 #include "logging.h"
@@ -299,7 +300,7 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             "total_latency:%.6f\r\n"
             "last_command_latency:%s\r\n"
             "remotes:%s\r\n",
-            config.cluster, VERSION, stats->pid, stats->threads,
+            config.cluster, VERSION, getpid(), config.thread,
             stats->used_cpu_sys, stats->used_cpu_user,
             stats->basic.connected_clients,
             stats->basic.completed_commands,
@@ -492,15 +493,14 @@ int cmd_info(struct command *cmd)
     memset(&stats, 0, sizeof(stats));
     stats_get(&stats);
 
-    char latency[16 * stats.threads];
+    char latency[16 * config.thread];
     memset(latency, 0, sizeof(latency));
 
-    for (i = 0; i < stats.threads; i++) {
+    for (i = 0; i < config.thread; i++) {
         n = snprintf(latency + size, 16, "%.6f", stats.last_command_latency[i] / 1000000.0);
         size += n;
-        if (i < stats.threads - 1) {
-            latency[size] = ',';
-            size += 1;
+        if (i < config.thread - 1) {
+            latency[size++] = ',';
         }
     }
     n = cmd_format_stats(NULL, 0, &stats, latency);

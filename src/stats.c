@@ -27,7 +27,26 @@ static char hostname[HOST_LEN + 1];
 // only used `stats_ctx.thread` currently
 static struct context stats_ctx;
 
-struct stats global_stats;
+struct stats cumulation;
+
+static inline void stats_get_cpu_usage(struct stats *stats)
+{
+    struct rusage ru;
+    memset(&ru, 0, sizeof(ru));
+    getrusage(RUSAGE_SELF, &ru);
+
+    stats->used_cpu_sys = ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1000000.0;
+    stats->used_cpu_user = ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1000000.0;
+}
+
+static inline void stats_cumulate(struct stats *stats)
+{
+    cumulation.basic.completed_commands += stats->basic.completed_commands;
+    cumulation.basic.remote_latency += stats->basic.remote_latency;
+    cumulation.basic.total_latency += stats->basic.total_latency;
+    cumulation.basic.recv_bytes += stats->basic.recv_bytes;
+    cumulation.basic.send_bytes += stats->basic.send_bytes;
+}
 
 static void stats_send(char *metric, double value)
 {
@@ -43,15 +62,6 @@ static void stats_send(char *metric, double value)
     if (sendto(statsd_fd, buf, n, 0, (struct sockaddr*)&dest, sizeof(dest)) == -1) {
         LOG(WARN, "fail to send metrics data: %s", strerror(errno));
     }
-}
-
-void stats_global_add(struct stats *stats)
-{
-    global_stats.basic.completed_commands += stats->basic.completed_commands;
-    global_stats.basic.remote_latency += stats->basic.remote_latency;
-    global_stats.basic.total_latency += stats->basic.total_latency;
-    global_stats.basic.recv_bytes += stats->basic.recv_bytes;
-    global_stats.basic.send_bytes += stats->basic.send_bytes;
 }
 
 void stats_get_memory(struct memory_stats *stats)
@@ -72,30 +82,34 @@ void stats_get_memory(struct memory_stats *stats)
     }
 }
 
-void stats_get_simple(struct stats *stats)
+void stats_get_simple(struct stats *stats, bool reset)
 {
-    struct rusage ru;
-    memset(&ru, 0, sizeof(ru));
-    getrusage(RUSAGE_SELF, &ru);
+    if (!reset) {
+        // TODO use lock to protect `cumulation`?
+        memcpy(stats, &cumulation, sizeof(cumulation));
+    }
+
+    stats_get_cpu_usage(stats);
 
     struct context *contexts = get_contexts();
 
-    stats->pid = getpid();
-    stats->threads = config.thread;
+#define STATS_ASSIGN(field) \
+    stats->basic.field += reset ? \
+        ATOMIC_IGET(contexts[i].stats.field, 0) : \
+        ATOMIC_GET(contexts[i].stats.field)
 
-    stats->used_cpu_sys = ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1000000.0;
-    stats->used_cpu_user = ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1000000.0;
-
-    int i;
-    for (i = 0; i < config.thread; i++) {
-        stats->basic.completed_commands += ATOMIC_IGET(contexts[i].stats.completed_commands, 0);
-        stats->basic.remote_latency     += ATOMIC_IGET(contexts[i].stats.remote_latency, 0);
-        stats->basic.total_latency      += ATOMIC_IGET(contexts[i].stats.total_latency, 0);
-        stats->basic.recv_bytes         += ATOMIC_IGET(contexts[i].stats.recv_bytes, 0);
-        stats->basic.send_bytes         += ATOMIC_IGET(contexts[i].stats.send_bytes, 0);
-        stats->basic.connected_clients  += ATOMIC_GET(contexts[i].stats.connected_clients);
+    for (int i = 0; i < config.thread; i++) {
+        STATS_ASSIGN(completed_commands);
+        STATS_ASSIGN(remote_latency);
+        STATS_ASSIGN(total_latency);
+        STATS_ASSIGN(recv_bytes);
+        STATS_ASSIGN(send_bytes);
+        stats->basic.connected_clients += ATOMIC_GET(contexts[i].stats.connected_clients);
     }
-    stats_global_add(stats);
+
+    if (reset) {
+        stats_cumulate(stats);
+    }
 }
 
 void stats_node_info_agg(struct bytes *bytes)
@@ -137,7 +151,7 @@ void stats_send_simple()
 {
     struct stats stats;
     memset(&stats, 0, sizeof(stats));
-    stats_get_simple(&stats);
+    stats_get_simple(&stats, true);
     stats_send("connected_clients", stats.basic.connected_clients);
     stats_send("completed_commands", stats.basic.completed_commands);
     stats_send("used_cpu_sys", stats.used_cpu_sys);
@@ -174,13 +188,7 @@ void stats_send_node_info()
 
 void stats_get(struct stats *stats)
 {
-    stats_get_simple(stats);
-
-    stats->basic.completed_commands = global_stats.basic.completed_commands;
-    stats->basic.remote_latency = global_stats.basic.remote_latency;
-    stats->basic.total_latency = global_stats.basic.total_latency;
-    stats->basic.recv_bytes = global_stats.basic.recv_bytes;
-    stats->basic.send_bytes = global_stats.basic.send_bytes;
+    stats_get_simple(stats, false);
 
     memset(stats->remote_nodes, 0, sizeof(stats->remote_nodes));
     slot_get_addr_list(stats->remote_nodes);
@@ -188,7 +196,7 @@ void stats_get(struct stats *stats)
     struct context *contexts = get_contexts();
 
     memset(stats->last_command_latency, 0, sizeof(stats->last_command_latency));
-    for (int i = 0; i < stats->threads; i++) {
+    for (int i = 0; i < config.thread; i++) {
         if (i >= ADDR_MAX) break;
         stats->last_command_latency[i] = ATOMIC_GET(contexts[i].last_command_latency);
     }
@@ -214,7 +222,7 @@ int stats_init()
     int len;
     dict_init(&bytes_map);
 
-    memset(&global_stats, 0, sizeof(global_stats));
+    memset(&cumulation, 0, sizeof(cumulation));
 
     gethostname(hostname, HOST_LEN + 1);
     len = strlen(hostname);
