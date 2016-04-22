@@ -32,9 +32,6 @@ struct basic_stats {
 };
 
 struct stats {
-    pid_t pid;
-    int threads;
-
     double used_cpu_sys;
     double used_cpu_user;
 
