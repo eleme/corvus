@@ -244,6 +244,19 @@ void context_init(struct context *ctx)
     TAILQ_INIT(&ctx->conns);
 }
 
+void build_contexts()
+{
+    contexts = malloc(sizeof(struct context) * (config.thread + 1));
+    for (int i = 0; i <= config.thread; i++) {
+        context_init(&contexts[i]);
+    }
+}
+
+void destroy_contexts()
+{
+    free(contexts);
+}
+
 void context_free(struct context *ctx)
 {
     /* server pool */
@@ -370,10 +383,8 @@ int main(int argc, const char *argv[])
         openlog(NULL, LOG_NDELAY | LOG_NOWAIT, LOG_USER);
     }
 
-    contexts = malloc(sizeof(struct context) * (config.thread + 1));
-    for (i = 0; i <= config.thread; i++) {
-        context_init(&contexts[i]);
-    }
+    // allocate memory for `contexts`
+    build_contexts();
 
     signal(SIGHUP, SIG_IGN);
     signal(SIGPIPE, SIG_IGN);
@@ -432,7 +443,8 @@ int main(int argc, const char *argv[])
         context_free(&contexts[i]);
     }
 
-    free(contexts);
+    // free `contexts`
+    destroy_contexts();
     cmd_map_destroy();
     free(config.node.addr);
     if (config.syslog) closelog();

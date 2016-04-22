@@ -50,6 +50,9 @@ static void report()
             manager.skipped);
 }
 
+extern void build_contexts();
+extern void destroy_contexts();
+
 extern TEST_CASE(test_slot);
 extern TEST_CASE(test_hash);
 extern TEST_CASE(test_parser);
@@ -60,6 +63,7 @@ extern TEST_CASE(test_socket);
 extern TEST_CASE(test_client);
 extern TEST_CASE(test_timer);
 extern TEST_CASE(test_config);
+extern TEST_CASE(test_stats);
 
 int main(int argc, const char *argv[])
 {
@@ -71,12 +75,14 @@ int main(int argc, const char *argv[])
     config.syslog = 0;
     config.loglevel = CRIT;
     config.bufsize = 16384;
+    config.thread = 1;
 
     struct node_conf conf = {NULL, 0};
-    struct context ctx;
-    context_init(&ctx);
+    build_contexts();
+    struct context *contexts = get_contexts();
+
     memcpy(&config.node, &conf, sizeof(config.node));
-    slot_start_manager(&ctx);
+    slot_start_manager(&contexts[config.thread]);
 
     RUN_CASE(test_slot);
     RUN_CASE(test_hash);
@@ -88,11 +94,17 @@ int main(int argc, const char *argv[])
     RUN_CASE(test_client);
     RUN_CASE(test_timer);
     RUN_CASE(test_config);
+    RUN_CASE(test_stats);
 
     usleep(10000);
     slot_create_job(SLOT_UPDATER_QUIT);
-    pthread_join(ctx.thread, NULL);
-    context_free(&ctx);
+    pthread_join(contexts[config.thread].thread, NULL);
+
+    for (int i = 0; i <= config.thread; i++) {
+        context_free(&contexts[i]);
+    }
+
+    destroy_contexts();
 
     report();
     return manager.failed == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
