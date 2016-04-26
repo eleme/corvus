@@ -87,10 +87,11 @@ int client_read(struct connection *client, bool read_socket)
         }
     }
 
-    cmd = STAILQ_FIRST(&client->info->cmd_queue);
-    if (cmd != NULL && cmd->parse_done) {
-        return CORVUS_OK;
-    }
+    // TODO wait for commands in cmd_queue to finish
+    // cmd = STAILQ_FIRST(&client->info->cmd_queue);
+    // if (cmd != NULL && cmd->parse_done) {
+    //     return CORVUS_OK;
+    // }
 
     // calculate limit
     long long free_cmds = client->ctx->mstats.free_cmds;
