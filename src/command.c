@@ -146,7 +146,7 @@
     HANDLER(EVAL, COMPLEX)           \
     HANDLER(EVALSHA, UNIMPL)         \
     /* misc */                       \
-    HANDLER(AUTH, UNIMPL)            \
+    HANDLER(AUTH, EXTRA)             \
     HANDLER(ECHO, UNIMPL)            \
     HANDLER(PING, EXTRA)             \
     HANDLER(INFO, EXTRA)             \
@@ -193,6 +193,9 @@ static const char *rep_del = "*2\r\n$3\r\nDEL\r\n";
 static const char *rep_exists = "*2\r\n$6\r\nEXISTS\r\n";
 static const char *rep_ok = "+OK\r\n";
 static const char *rep_ping = "+PONG\r\n";
+static const char *rep_noauth = "-NOAUTH Authentication required.\r\n";
+static const char *rep_auth_err = "-ERR invalid password\r\n";
+static const char *rep_auth_not_set = "-ERR Client sent AUTH, but no password is set\r\n";
 
 static struct cmd_item cmds[] = {CMD_DO(CMD_BUILD_MAP)};
 static struct dict command_map;
@@ -576,6 +579,35 @@ int cmd_proxy(struct command *cmd, struct redis_data *data)
     return CORVUS_OK;
 }
 
+int cmd_auth(struct command *cmd, struct redis_data *data)
+{
+    ASSERT_TYPE(data, REP_ARRAY);
+    ASSERT_ELEMENTS(data->elements == 2, data);
+
+    struct redis_data *pass_data = &data->element[1];
+    ASSERT_TYPE(pass_data, REP_STRING);
+
+    char password[pass_data->pos.str_len + 1];
+    if (pos_to_str(&pass_data->pos, password) == CORVUS_ERR) {
+        LOG(ERROR, "cmd_auth: parse error");
+        return CORVUS_ERR;
+    }
+
+    if (config.requirepass == NULL) {
+        cmd_mark_fail(cmd, rep_auth_not_set);
+    } else if (strcmp(config.requirepass, password) == 0) {
+        conn_add_data(cmd->client, (uint8_t*)rep_ok, strlen(rep_ok),
+                &cmd->rep_buf[0], &cmd->rep_buf[1]);
+        CMD_INCREF(cmd);
+        cmd->client->info->authenticated = true;
+        cmd_mark_done(cmd);
+    } else {
+        cmd->client->info->authenticated = false;
+        cmd_mark_fail(cmd, rep_auth_err);
+    }
+    return CORVUS_OK;
+}
+
 int cmd_extra(struct command *cmd, struct redis_data *data)
 {
     switch (cmd->cmd_type) {
@@ -585,6 +617,8 @@ int cmd_extra(struct command *cmd, struct redis_data *data)
             return cmd_info(cmd);
         case CMD_PROXY:
             return cmd_proxy(cmd, data);
+        case CMD_AUTH:
+            return cmd_auth(cmd, data);
         default:
             LOG(ERROR, "%s: unknown command type %d", __func__, cmd->cmd_type);
             return CORVUS_ERR;
@@ -595,6 +629,14 @@ int cmd_extra(struct command *cmd, struct redis_data *data)
 int cmd_forward(struct command *cmd, struct redis_data *data)
 {
     LOG(DEBUG, "forward command %p(%d)", cmd, cmd->cmd_type);
+    struct connection *client = cmd->client;
+    if (config.requirepass != NULL && !client->info->authenticated
+            && cmd->cmd_type != CMD_AUTH)
+    {
+        cmd_mark_fail(cmd, rep_noauth);
+        return CORVUS_OK;
+    }
+
     switch (cmd->request_type) {
         case CMD_BASIC:
             cmd->slot = cmd_get_slot(data);

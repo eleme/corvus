@@ -35,6 +35,7 @@ void config_init()
     config.client_timeout = 0;
     config.server_timeout = 0;
     config.bufsize = DEFAULT_BUFSIZE;
+    config.requirepass = NULL;
 
     memset(config.statsd_addr, 0, sizeof(config.statsd_addr));
     config.metric_interval = 10;
@@ -84,6 +85,15 @@ int config_add(char *name, char *value)
             config.loglevel = ERROR;
         } else {
             config.loglevel = INFO;
+        }
+    } else if (strcmp(name, "requirepass") == 0) {
+        // Last config overwrites previous ones.
+        if (config.requirepass != NULL) {
+            free(config.requirepass);
+            config.requirepass = NULL;
+        }
+        if (strlen(value) > 0) {
+            config.requirepass = strdup(value);
         }
     } else if (strcmp(name, "node") == 0) {
         if (config.node.addr != NULL) {
@@ -446,6 +456,7 @@ int main(int argc, const char *argv[])
     // free `contexts`
     destroy_contexts();
     cmd_map_destroy();
+    free(config.requirepass);
     free(config.node.addr);
     if (config.syslog) closelog();
     return EXIT_SUCCESS;
