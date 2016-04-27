@@ -31,11 +31,14 @@ int client_trigger_event(struct connection *client)
 
 void client_range_clear(struct connection *client, struct command *cmd)
 {
+    struct mbuf **cur = &client->info->current_buf;
     struct mbuf *end = cmd->req_buf[1].buf;
+
     if (end == NULL) {
-        client->info->current_buf = NULL;
-    } else if (end == client->info->current_buf && end->pos >= end->last) {
-        client->info->current_buf = TAILQ_NEXT(end, next);
+        *cur = NULL;
+    } else if (end == *cur && end->pos >= end->last && end->refcount <= 1) {
+        // end buf will be recycled so point current buf to the next
+        *cur = TAILQ_NEXT(end, next);
     }
     mbuf_range_clear(client->ctx, cmd->req_buf);
 }
@@ -104,12 +107,7 @@ int client_read(struct connection *client, bool read_socket)
 
     while (true) {
         buf = client->info->current_buf;
-        if (buf == NULL) {
-            LOG(ERROR, "client_read: fail to get current buffer %d", client->fd);
-            return CORVUS_ERR;
-        }
-
-        if (mbuf_read_size(buf) <= 0) {
+        if (buf == NULL || mbuf_read_size(buf) <= 0) {
             break;
         }
 
