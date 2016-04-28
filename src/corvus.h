@@ -99,6 +99,7 @@ struct {
     int64_t client_timeout;
     int64_t server_timeout;
     int bufsize;
+    int connections;
 } config;
 
 int64_t get_time();

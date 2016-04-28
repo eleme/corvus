@@ -62,7 +62,10 @@ struct command {
     int16_t request_type;
     int16_t reply_type;
     int keys;
-    int integer_data; /* for integer response */
+    /* for integer response */
+    int integer_data;
+    // The server index in server pool list;
+    int server_index;
 
     int cmd_count;
     int cmd_done_count;
