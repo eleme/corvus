@@ -95,6 +95,7 @@ struct {
     char statsd_addr[DSN_LEN + 1];
     int metric_interval;
     bool stats;
+    char *requirepass;
     int64_t client_timeout;
     int64_t server_timeout;
     int bufsize;

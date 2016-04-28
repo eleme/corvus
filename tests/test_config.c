@@ -29,7 +29,20 @@ TEST(test_config_syslog) {
     PASS(NULL);
 }
 
+TEST(test_config_requirepass) {
+    char n[] = "requirepass";
+
+    ASSERT(config_add(n, "") == 0);
+    ASSERT(config.requirepass == NULL);
+    ASSERT(config_add(n, "123") == 0);
+    ASSERT(strcmp(config.requirepass, "123") == 0);
+
+    free(config.requirepass);
+    PASS(NULL);
+}
+
 TEST_CASE(test_config) {
     RUN_TEST(test_config_bind);
     RUN_TEST(test_config_syslog);
+    RUN_TEST(test_config_requirepass);
 }

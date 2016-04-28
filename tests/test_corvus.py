@@ -43,6 +43,9 @@ class Redis(redis.Redis):
     def pfcount(self, *args):
         return self.execute_command('PFCOUNT', *args)
 
+    def auth(self, password):
+        return self.execute_command('AUTH', password)
+
 
 r = Redis(port=PROXY_PORT)
 
@@ -3002,12 +3005,15 @@ def test_eval(delete_keys):
 #     """
 
 
+# misc
+def test_auth():
+    """ AUTH password
+            Available since 1.0.0.
+    """
+    with pytest.raises(redis.RedisError) as exc:
+        r.auth(123)
+    assert 'Client sent AUTH, but no password is set' in str(exc.value)
 
-###misc
-# def test_auth():
-#     """ AUTH password
-#             Available since 1.0.0.
-#     """
 
 # def test_echo():
 #     """ ECHO message

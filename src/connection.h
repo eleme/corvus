@@ -51,10 +51,14 @@ struct conn_info {
     struct cmd_tqh ready_queue;
     struct cmd_tqh waiting_queue;
 
-    struct mbuf *current_buf; /* point to current parsing buffer in data */
+    // Point to current parsing buffer in data
+    struct mbuf *current_buf;
     struct mhdr data;
     struct mhdr local_data;
     struct iov_data iov;
+
+    // If `requirepass` config is setted the client should be verified.
+    bool authenticated;
 
     long long send_bytes;
     long long recv_bytes;
