@@ -7,6 +7,7 @@
 #include <string.h>
 #include "event.h"
 #include "logging.h"
+#include "alloc.h"
 
 int event_init(struct event_loop *loop, int nevent)
 {
@@ -20,7 +21,7 @@ int event_init(struct event_loop *loop, int nevent)
         return -1;
     }
 
-    events = calloc(nevent, sizeof(struct epoll_event));
+    events = cv_calloc(nevent, sizeof(struct epoll_event));
     if (events == NULL) {
         close(epfd);
         return -1;
@@ -39,7 +40,7 @@ void event_free(struct event_loop *loop)
     if (loop == NULL) return;
 
     close(loop->epfd);
-    free(loop->events);
+    cv_free(loop->events);
 }
 
 int event_register(struct event_loop *loop, struct connection *c, int mask)

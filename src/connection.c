@@ -10,6 +10,7 @@
 #include "event.h"
 #include "server.h"
 #include "dict.h"
+#include "alloc.h"
 
 #define EMPTY_CMD_QUEUE(queue, field)     \
 do {                                      \
@@ -128,7 +129,7 @@ struct connection *conn_create(struct context *ctx)
         TAILQ_REMOVE(&ctx->conns, conn, next);
         ctx->mstats.free_conns--;
     } else {
-        conn = malloc(sizeof(struct connection));
+        conn = cv_malloc(sizeof(struct connection));
     }
     conn_init(conn, ctx);
     ctx->mstats.conns++;
@@ -143,7 +144,7 @@ struct conn_info *conn_info_create(struct context *ctx)
         STAILQ_REMOVE_HEAD(&ctx->free_conn_infoq, next);
         ctx->mstats.free_conn_info--;
     } else {
-        info = malloc(sizeof(struct conn_info));
+        info = cv_malloc(sizeof(struct conn_info));
         // init iov here
         memset(&info->iov, 0, sizeof(info->iov));
     }

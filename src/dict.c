@@ -1,6 +1,7 @@
 #include <string.h>
 #include "hash.h"
 #include "dict.h"
+#include "alloc.h"
 
 #define DICT_BASE_CAPACITY 1024
 #define LOAD_FACTOR 0.909
@@ -21,7 +22,7 @@ inline static uint32_t probe_distance(struct dict *dict, uint32_t hash, uint32_t
 
 static void _dict_init(struct dict *dict)
 {
-    dict->buckets = calloc(dict->capacity, sizeof(struct bucket));
+    dict->buckets = cv_calloc(dict->capacity, sizeof(struct bucket));
     dict->resize_threshold = dict->capacity * LOAD_FACTOR;
     dict->length = 0;
 }
@@ -46,7 +47,7 @@ void dict_resize(struct dict *dict)
             dict_set(dict, bucket->key, bucket->data);
         }
     }
-    free(buckets);
+    cv_free(buckets);
 }
 
 void dict_set(struct dict *dict, const char *key, void *data)
@@ -138,7 +139,7 @@ void dict_delete(struct dict *dict, const char *key)
 void dict_free(struct dict *dict)
 {
     if (dict->buckets == NULL) return;
-    free(dict->buckets);
+    cv_free(dict->buckets);
     memset(dict, 0, sizeof(struct dict));
 }
 

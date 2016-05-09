@@ -4,6 +4,7 @@
 #include "corvus.h"
 #include "parser.h"
 #include "logging.h"
+#include "alloc.h"
 
 #define ARRAY_BASE_SIZE 32
 
@@ -80,7 +81,7 @@ struct pos *pos_array_push(struct pos_array *arr, int len, uint8_t *p)
     if (arr->pos_len >= arr->max_pos_size) {
         arr->max_pos_size *= 2;
         if (arr->max_pos_size == 0) arr->max_pos_size = ARRAY_BASE_SIZE;
-        arr->items = realloc(arr->items, sizeof(struct pos) * arr->max_pos_size);
+        arr->items = cv_realloc(arr->items, sizeof(struct pos) * arr->max_pos_size);
     }
     pos = &arr->items[arr->pos_len++];
     pos->len = len;
@@ -199,7 +200,7 @@ int process_array(struct reader *r)
                 task->data.element = NULL;
                 if (*p == '\n' && task->data.elements > 0 && r->mode == MODE_REQ) {
                     for (size = 1; size * ARRAY_BASE_SIZE  < task->data.elements; size *= 2);
-                    task->data.element = calloc(size * ARRAY_BASE_SIZE, sizeof(struct redis_data));
+                    task->data.element = cv_calloc(size * ARRAY_BASE_SIZE, sizeof(struct redis_data));
                 }
                 _END(r, task->data.elements, *p);
         }
@@ -475,7 +476,7 @@ void pos_array_free(struct pos_array *arr)
 {
     if (arr == NULL) return;
     if (arr->items != NULL) {
-        free(arr->items);
+        cv_free(arr->items);
         arr->items = NULL;
     }
     memset(arr, 0, sizeof(struct pos_array));
@@ -497,7 +498,7 @@ void redis_data_free(struct redis_data *data)
             for (i = 0; i < data->elements; i++) {
                 redis_data_free(&data->element[i]);
             }
-            free(data->element);
+            cv_free(data->element);
             data->element = NULL;
             data->elements = 0;
             break;

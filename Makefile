@@ -3,6 +3,9 @@ default: corvus
 .DEFAULT:
 	@$(MAKE) $@ -C src
 
+deps:
+	@$(MAKE) $@ -C deps
+
 clean:
 	@$(MAKE) $@ -C src
 	@$(MAKE) $@ -C tests
@@ -10,4 +13,4 @@ clean:
 test:
 	@$(MAKE) $@ -C tests
 
-.PHONY: clean init test
+.PHONY: clean init test deps

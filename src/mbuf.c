@@ -2,6 +2,7 @@
 #include <string.h>
 #include "corvus.h"
 #include "logging.h"
+#include "alloc.h"
 
 #define RECYCLE_LENGTH 8192 // 128mb
 #define BUF_TIME_LIMIT 512
@@ -17,7 +18,7 @@ static struct mbuf *_mbuf_get(struct context *ctx)
 
         ctx->mstats.free_buffers--;
     } else {
-        buf = (uint8_t*)malloc(config.bufsize);
+        buf = (uint8_t*)cv_malloc(config.bufsize);
         if (buf == NULL) {
             return NULL;
         }
@@ -32,7 +33,7 @@ void mbuf_free(struct context *ctx, struct mbuf *mbuf)
     uint8_t *buf;
 
     buf = (uint8_t *)mbuf - ctx->mbuf_offset;
-    free(buf);
+    cv_free(buf);
 }
 
 void mbuf_init(struct context *ctx)
@@ -147,7 +148,7 @@ void buf_time_append(struct context *ctx, struct buf_time_tqh *queue,
         STAILQ_REMOVE_HEAD(&ctx->free_buf_timeq, next);
         ctx->mstats.free_buf_times--;
     } else {
-        t = calloc(1, sizeof(struct buf_time));
+        t = cv_calloc(1, sizeof(struct buf_time));
     }
     t->ctx = ctx;
     t->buf = buf;
@@ -162,7 +163,7 @@ void buf_time_free(struct buf_time *t)
     t->ctx->mstats.buf_times--;
 
     if (t->ctx->mstats.free_buf_times > BUF_TIME_LIMIT) {
-        free(t);
+        cv_free(t);
         return;
     }
 
