@@ -41,6 +41,9 @@ void server_make_iov(struct conn_info *info)
     int64_t t = get_time();
 
     while (!STAILQ_EMPTY(&info->ready_queue)) {
+        if (info->iov.len - info->iov.cursor > CORVUS_IOV_MAX) {
+            break;
+        }
         cmd = STAILQ_FIRST(&info->ready_queue);
         STAILQ_REMOVE_HEAD(&info->ready_queue, ready_next);
         STAILQ_NEXT(cmd, ready_next) = NULL;
@@ -86,10 +89,15 @@ int server_write(struct connection *server)
 
     if (info->iov.cursor >= info->iov.len) {
         cmd_iov_free(&info->iov);
-    } else if (conn_register(server) == CORVUS_ERR) {
-        LOG(ERROR, "server_write: fail to reregister server %d", server->fd);
-        return CORVUS_ERR;
     }
+
+    if (!STAILQ_EMPTY(&info->ready_queue) || info->iov.cursor < info->iov.len) {
+        if (conn_register(server) == CORVUS_ERR) {
+            LOG(ERROR, "server_write: fail to reregister server %d", server->fd);
+            return CORVUS_ERR;
+        }
+    }
+
     info->last_active = time(NULL);
 
     return CORVUS_OK;
