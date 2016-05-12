@@ -36,6 +36,7 @@ void config_init()
     config.server_timeout = 0;
     config.bufsize = DEFAULT_BUFSIZE;
     config.requirepass = NULL;
+    config.connections = 1;
 
     memset(config.statsd_addr, 0, sizeof(config.statsd_addr));
     config.metric_interval = 10;
@@ -71,6 +72,9 @@ int config_add(char *name, char *value)
     } else if (strcmp(name, "server_timeout") == 0) {
         val = atoi(value);
         config.server_timeout = val < 0 ? 0 : val;
+    } else if (strcmp(name, "connections") == 0) {
+        val = atoi(value);
+        config.connections = val <= 0 ? 1 : val;
     } else if (strcmp(name, "statsd") == 0) {
         strncpy(config.statsd_addr, value, DSN_LEN);
     } else if (strcmp(name, "metric_interval") == 0) {
@@ -270,15 +274,23 @@ void destroy_contexts()
 void context_free(struct context *ctx)
 {
     /* server pool */
-    struct connection *conn;
     struct dict_iter iter = DICT_ITER_INITIALIZER;
     DICT_FOREACH(&ctx->server_table, &iter) {
-        conn = (struct connection*)(iter.value);
-        cmd_iov_free(&conn->info->iov);
-        conn_free(conn);
-        conn_buf_free(conn);
-        free(conn->info);
-        free(conn);
+        struct connection **conns = (struct connection**)(iter.value);
+        if (conns == NULL) {
+            continue;
+        }
+        for (int i = 0; i < config.connections; i++) {
+            if (conns[i] == NULL) {
+                continue;
+            }
+            cmd_iov_free(&conns[i]->info->iov);
+            conn_free(conns[i]);
+            conn_buf_free(conns[i]);
+            free(conns[i]->info);
+            free(conns[i]);
+        }
+        free(conns);
     }
     dict_free(&ctx->server_table);
 
@@ -296,7 +308,7 @@ void context_free(struct context *ctx)
 
     /* connection queue */
     while (!TAILQ_EMPTY(&ctx->conns)) {
-        conn = TAILQ_FIRST(&ctx->conns);
+        struct connection *conn = TAILQ_FIRST(&ctx->conns);
         TAILQ_REMOVE(&ctx->conns, conn, next);
         if (conn->fd != -1) {
             if (conn->ev != NULL) {

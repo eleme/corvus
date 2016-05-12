@@ -122,7 +122,7 @@ int _server_retry(struct connection *server, struct command *cmd)
 
 int server_retry(struct command *cmd)
 {
-    struct connection *server = conn_get_server(cmd->ctx, cmd->slot);
+    struct connection *server = conn_get_server(cmd->ctx, cmd->slot, cmd->server_index);
 
     switch (_server_retry(server, cmd)) {
         case SERVER_NULL:
@@ -149,7 +149,7 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
         return CORVUS_OK;
     }
 
-    struct connection *server = conn_get_server_from_pool(cmd->ctx, &addr);
+    struct connection *server = conn_get_server_from_pool(cmd->ctx, &addr, cmd->server_index);
 
     switch (_server_retry(server, cmd)) {
         case SERVER_NULL:

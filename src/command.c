@@ -226,6 +226,7 @@ static void cmd_init(struct context *ctx, struct command *cmd)
     cmd->ctx = ctx;
 
     cmd->slot = -1;
+    cmd->server_index = -1;
     cmd->cmd_type = -1;
     cmd->request_type = -1;
     cmd->fail_reason = (char*)rep_err;
@@ -322,6 +323,11 @@ int cmd_get_slot(struct redis_data *data)
     return slot_get(&cmd_key->pos);
 }
 
+int cmd_get_server_index(struct pos_array *data)
+{
+    return crc16(data) % config.connections;
+}
+
 void cmd_add_fragment(struct command *cmd, struct pos_array *data,
         struct buf_ptr *start, struct buf_ptr *end)
 {
@@ -349,8 +355,11 @@ int cmd_forward_basic(struct command *cmd)
         LOG(ERROR, "cmd_forward_basic: slot %d is invalid", slot);
         return CORVUS_ERR;
     }
+    if (cmd->server_index < 0 || cmd->server_index >= config.connections) {
+        LOG(ERROR, "cmd_forward_basic: invalid server index %d", cmd->server_index);
+    }
 
-    server = conn_get_server(ctx, slot);
+    server = conn_get_server(ctx, slot, cmd->server_index);
     if (server == NULL) {
         LOG(ERROR, "cmd_forward_basic: fail to get server with slot %d", slot);
         return CORVUS_ERR;
@@ -396,6 +405,7 @@ int cmd_forward_multikey(struct command *cmd, struct redis_data *data, const cha
         }
 
         ncmd->slot = slot_get(&key->pos);
+        ncmd->server_index = cmd_get_server_index(&key->pos);
 
         // no need to increase buf refcount
         memcpy(&ncmd->req_buf[0], &key->buf[0], sizeof(key->buf[0]));
@@ -436,6 +446,7 @@ int cmd_forward_mset(struct command *cmd, struct redis_data *data)
         }
 
         ncmd->slot = slot_get(&key->pos);
+        ncmd->server_index = cmd_get_server_index(&key->pos);
 
         // no need to increase buf refcount
         memcpy(&ncmd->req_buf[0], &key->buf[0], sizeof(key->buf[0]));
@@ -456,6 +467,7 @@ int cmd_forward_eval(struct command *cmd, struct redis_data *data)
     ASSERT_TYPE(&data->element[3], REP_STRING);
 
     cmd->slot = slot_get(&data->element[3].pos);
+    cmd->server_index = cmd_get_server_index(&data->element[3].pos);
     return cmd_forward_basic(cmd);
 }
 
@@ -640,6 +652,7 @@ int cmd_forward(struct command *cmd, struct redis_data *data)
     switch (cmd->request_type) {
         case CMD_BASIC:
             cmd->slot = cmd_get_slot(data);
+            cmd->server_index = cmd_get_server_index(&data->element[1].pos);
             return cmd_forward_basic(cmd);
         case CMD_COMPLEX:
             return cmd_forward_complex(cmd, data);

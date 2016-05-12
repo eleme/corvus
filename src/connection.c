@@ -60,7 +60,7 @@ static int verify_server(struct connection *server)
     return CORVUS_OK;
 }
 
-static struct connection *conn_create_server(struct context *ctx, struct address *addr, char *key)
+static struct connection *conn_create_server(struct context *ctx, struct address *addr, char *key, int index)
 {
     int fd = conn_create_fd();
     if (fd == -1) {
@@ -81,7 +81,19 @@ static struct connection *conn_create_server(struct context *ctx, struct address
     }
 
     strncpy(info->dsn, key, DSN_LEN);
-    dict_set(&ctx->server_table, info->dsn, (void*)server);
+
+    struct connection **servers = dict_get(&ctx->server_table, key);
+    if (servers == NULL) {
+        servers = calloc(config.connections, sizeof(struct connection*));
+        dict_set(&ctx->server_table, info->dsn, (void*)servers);
+    }
+    if (servers == NULL) {
+        LOG(ERROR, "conn_create_server: fail to get server pool");
+        return NULL;
+    }
+
+    servers[index] = server;
+
     TAILQ_INSERT_TAIL(&ctx->servers, server, next);
     return server;
 }
@@ -266,29 +278,37 @@ int conn_create_fd()
     return fd;
 }
 
-struct connection *conn_get_server_from_pool(struct context *ctx, struct address *addr)
+struct connection *conn_get_server_from_pool(struct context *ctx, struct address *addr, int index)
 {
-    struct connection *server = NULL;
+    struct connection **servers = NULL;
     char key[DSN_LEN + 1];
 
-    socket_get_key(addr, key);
-    server = dict_get(&ctx->server_table, key);
-    if (server != NULL) {
-        if (verify_server(server) == CORVUS_ERR) return NULL;
-        return server;
+    if (index >= config.connections || index < 0) {
+        LOG(ERROR, "conn_get_server_from_pool: wrong server index");
+        return NULL;
     }
 
-    server = conn_create_server(ctx, addr, key);
+    socket_get_key(addr, key);
+    servers = dict_get(&ctx->server_table, key);
+
+    if (servers == NULL || servers[index] == NULL) {
+        return conn_create_server(ctx, addr, key, index);
+    }
+
+    struct connection *server = servers[index];
+    if (verify_server(server) == CORVUS_ERR) {
+        return NULL;
+    }
     return server;
 }
 
-struct connection *conn_get_raw_server(struct context *ctx)
+struct connection *conn_get_raw_server(struct context *ctx, int index)
 {
     int i;
     struct connection *server = NULL;
 
     for (i = 0; i < config.node.len; i++) {
-        server = conn_get_server_from_pool(ctx, &config.node.addr[i]);
+        server = conn_get_server_from_pool(ctx, &config.node.addr[i], index);
         if (server == NULL) continue;
         break;
     }
@@ -299,14 +319,14 @@ struct connection *conn_get_raw_server(struct context *ctx)
     return server;
 }
 
-struct connection *conn_get_server(struct context *ctx, uint16_t slot)
+struct connection *conn_get_server(struct context *ctx, uint16_t slot, int index)
 {
     struct address addr;
     struct connection *server = NULL;
 
     server = slot_get_node_addr(slot, &addr) ?
-        conn_get_server_from_pool(ctx, &addr) :
-        conn_get_raw_server(ctx);
+        conn_get_server_from_pool(ctx, &addr, index) :
+        conn_get_raw_server(ctx, index);
     return server;
 }
 
