@@ -1036,13 +1036,17 @@ void cmd_set_stale(struct command *cmd)
 {
     struct command *c;
     if (!STAILQ_EMPTY(&cmd->sub_cmds)) {
-        cmd->refcount = cmd->cmd_count;
+        cmd->refcount = cmd->cmd_count + 1;
         while (!STAILQ_EMPTY(&cmd->sub_cmds)) {
             c = STAILQ_FIRST(&cmd->sub_cmds);
             STAILQ_REMOVE_HEAD(&cmd->sub_cmds, sub_cmd_next);
             STAILQ_NEXT(c, sub_cmd_next) = NULL;
             c->cmd_ref = cmd;
             cmd_set_stale(c);
+        }
+        cmd->refcount--;
+        if (cmd->refcount <= 0) {
+            cmd_free(cmd);
         }
     } else if (cmd->server != NULL && cmd_in_queue(cmd, cmd->server)) {
         LOG(DEBUG, "command set stale");

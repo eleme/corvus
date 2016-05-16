@@ -1,6 +1,7 @@
 #include "alloc.h"
 #include "logging.h"
 
+#include <stdlib.h>
 #include <jemalloc/jemalloc.h>
 
 void *cv_raw_malloc(size_t size, const char *file, int line)

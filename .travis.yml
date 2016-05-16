@@ -43,7 +43,7 @@ before_script:
   - make
   - valgrind --leak-check=full ./src/corvus ./corvus.conf > valgrind.log 2>&1 &
   - sleep 1 && redis-benchmark -h localhost -p 12345 -t ping_mbulk,get,set,incr,mset,lrange,sadd -q -n 10000 -r 1000000 -P 12
-  - kill -INT `pgrep -f corvus` && sleep 1
+  - sleep 1 && kill -INT `pgrep -f corvus` && sleep 1
   - cat valgrind.log
   - for p in {8000..8002}; do redis-cli -h localhost -p $p flushall; done
   - ./src/corvus ./corvus.conf > corvus.log 2>&1 &
