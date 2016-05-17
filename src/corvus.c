@@ -119,6 +119,32 @@ int config_add(char *name, char *value)
     return 0;
 }
 
+int read_line(char **line, size_t *bytes, FILE *fp)
+{
+    size_t len, index = 0;
+    char buf[1024];
+    bool should_realloc = false;
+
+    while (fgets(buf, 1024, fp) != NULL) {
+        len = strlen(buf);
+        while (*bytes - index <= len) {
+            should_realloc = true;
+            *bytes = (*bytes == 0) ? 1024 : (*bytes << 1);
+        }
+        if (should_realloc) {
+            *line = cv_realloc(*line, (*bytes) * sizeof(char));
+            should_realloc = false;
+        }
+        memcpy(*line + index, buf, len);
+        index += len;
+        if ((*line)[index - 1] == '\n') {
+            (*line)[index] = '\0';
+            return index;
+        }
+    }
+    return -1;
+}
+
 int read_conf(const char *filename)
 {
     FILE *fp = fopen(filename, "r");
@@ -126,28 +152,31 @@ int read_conf(const char *filename)
         fprintf(stderr, "config file: %s", strerror(errno));
         return -1;
     }
-    size_t len = 0;
-    int r, i;
+    int i, len = 0;
+    size_t bytes = 0;
     char *line = NULL;
-    while ((r = getline(&line, &len, fp)) != -1) {
-        char name[r], value[r];
+    while ((len = read_line(&line, &bytes, fp)) != -1) {
+        char name[len + 1], value[len + 1];
         memset(name, 0, sizeof(name));
         memset(value, 0, sizeof(value));
 
-        for (i = 0; i < r && (line[i] == ' ' || line[i] == '\r'
+        for (i = 0; i < len && (line[i] == ' ' || line[i] == '\r'
                     || line[i] == '\t' || line[i] == '\n'); i++);
-        if (i == r || line[i] == '#') continue;
+
+        if (i == len || line[i] == '#') {
+            continue;
+        }
 
         sscanf(line, "%s%s", name, value);
         if (config_add(name, value) == -1) {
-            free(line);
+            cv_free(line);
             fclose(fp);
-            return -1;
+            return CORVUS_ERR;
         }
     }
-    free(line);
+    cv_free(line);
     fclose(fp);
-    return 0;
+    return CORVUS_OK;
 }
 
 void sig_handler(int sig)
