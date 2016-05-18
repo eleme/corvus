@@ -300,6 +300,7 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             "version:%s\r\n"
             "pid:%d\r\n"
             "threads:%d\r\n"
+            "mem_allocator:%s\r\n"
             "used_cpu_sys:%.2f\r\n"
             "used_cpu_user:%.2f\r\n"
             "connected_clients:%lld\r\n"
@@ -311,6 +312,7 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             "last_command_latency:%s\r\n"
             "remotes:%s\r\n",
             config.cluster, VERSION, getpid(), config.thread,
+            CV_MALLOC_LIB,
             stats->used_cpu_sys, stats->used_cpu_user,
             stats->basic.connected_clients,
             stats->basic.completed_commands,

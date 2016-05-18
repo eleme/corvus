@@ -6,7 +6,7 @@ jemalloc_conf:
 	cd jemalloc && autoconf
 
 distclean:
-	-(cd jemalloc && [ -f Makefile ] && $(MAKE) distclean) > /dev/null || true
+	$(MAKE) distclean -C jemalloc > /dev/null
 
 deps: jemalloc_conf
 

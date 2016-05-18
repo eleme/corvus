@@ -5,16 +5,18 @@ OPTIMIZATION?=-O2
 CFLAGS=-std=c99 -Wall $(OPTIMIZATION) $(PROFILE) -g -ggdb -D_GNU_SOURCE -I../deps/jemalloc/include
 LDFLAGS=-pthread -rdynamic $(PROFILE)
 
-JEMALLOC_H=../deps/jemalloc/include/jemalloc/jemalloc.h
 JEMALLOC=../deps/jemalloc/lib/libjemalloc.a
 BIN:=$(NAME)
 SRC:=$(wildcard *.c)
 OBJ:=$(SRC:%.c=%.o)
 
-$(BIN): $(JEMALLOC_H) $(OBJ) $(JEMALLOC)
+%.o: %.c $(JEMALLOC)
+	$(CC) $(CFLAGS) -c $<
 
-$(JEMALLOC_H):
-	-cd ../deps && $(MAKE) jemalloc
+$(BIN): $(OBJ) $(JEMALLOC)
+
+$(JEMALLOC):
+	$(MAKE) jemalloc -C ../deps
 
 debug:
 	$(MAKE) OPTIMIZATION="-O0"
@@ -26,4 +28,4 @@ clean:
 	rm -f $(BIN) $(OBJ)
 
 distclean:
-	-(cd ../deps && $(MAKE) distclean)
+	$(MAKE) distclean -C ../deps

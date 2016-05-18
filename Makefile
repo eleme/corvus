@@ -13,4 +13,4 @@ clean:
 test:
 	@$(MAKE) $@ -C tests
 
-.PHONY: clean init test deps
+.PHONY: clean test deps
