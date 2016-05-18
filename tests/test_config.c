@@ -1,4 +1,5 @@
 #include "test.h"
+#include "alloc.h"
 
 extern int config_add(char *name, char *value);
 
@@ -37,7 +38,7 @@ TEST(test_config_requirepass) {
     ASSERT(config_add(n, "123") == 0);
     ASSERT(strcmp(config.requirepass, "123") == 0);
 
-    free(config.requirepass);
+    cv_free(config.requirepass);
     PASS(NULL);
 }
 

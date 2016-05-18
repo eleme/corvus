@@ -14,6 +14,9 @@
 #include "server.h"
 #include "client.h"
 #include "stats.h"
+#include "alloc.h"
+
+#define CMD_RECYCLE_SIZE 1024
 
 #define CMD_DEFINE(cmd, type) CMD_##cmd,
 #define CMD_BUILD_MAP(cmd, type) {#cmd, CMD_##cmd, CMD_##type},
@@ -238,13 +241,17 @@ static void cmd_recycle(struct context *ctx, struct command *cmd)
 {
     ctx->mstats.cmds--;
 
-    STAILQ_NEXT(cmd, cmd_next) = NULL;
-    STAILQ_NEXT(cmd, ready_next) = NULL;
-    STAILQ_NEXT(cmd, waiting_next) = NULL;
-    STAILQ_NEXT(cmd, sub_cmd_next) = NULL;
-    STAILQ_INSERT_HEAD(&ctx->free_cmdq, cmd, cmd_next);
+    if (ctx->mstats.free_cmds > CMD_RECYCLE_SIZE) {
+        cv_free(cmd);
+    } else {
+        STAILQ_NEXT(cmd, cmd_next) = NULL;
+        STAILQ_NEXT(cmd, ready_next) = NULL;
+        STAILQ_NEXT(cmd, waiting_next) = NULL;
+        STAILQ_NEXT(cmd, sub_cmd_next) = NULL;
+        STAILQ_INSERT_HEAD(&ctx->free_cmdq, cmd, cmd_next);
 
-    ctx->mstats.free_cmds++;
+        ctx->mstats.free_cmds++;
+    }
 }
 
 static int cmd_in_queue(struct command *cmd, struct connection *server)
@@ -293,6 +300,7 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             "version:%s\r\n"
             "pid:%d\r\n"
             "threads:%d\r\n"
+            "mem_allocator:%s\r\n"
             "used_cpu_sys:%.2f\r\n"
             "used_cpu_user:%.2f\r\n"
             "connected_clients:%lld\r\n"
@@ -304,6 +312,7 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             "last_command_latency:%s\r\n"
             "remotes:%s\r\n",
             config.cluster, VERSION, getpid(), config.thread,
+            CV_MALLOC_LIB,
             stats->used_cpu_sys, stats->used_cpu_user,
             stats->basic.connected_clients,
             stats->basic.completed_commands,
@@ -872,7 +881,7 @@ struct command *cmd_create(struct context *ctx)
         ctx->mstats.free_cmds--;
         STAILQ_NEXT(cmd, cmd_next) = NULL;
     } else {
-        cmd = malloc(sizeof(struct command));
+        cmd = cv_malloc(sizeof(struct command));
     }
     cmd_init(ctx, cmd);
     ctx->mstats.cmds++;
@@ -1029,13 +1038,17 @@ void cmd_set_stale(struct command *cmd)
 {
     struct command *c;
     if (!STAILQ_EMPTY(&cmd->sub_cmds)) {
-        cmd->refcount = cmd->cmd_count;
+        cmd->refcount = cmd->cmd_count + 1;
         while (!STAILQ_EMPTY(&cmd->sub_cmds)) {
             c = STAILQ_FIRST(&cmd->sub_cmds);
             STAILQ_REMOVE_HEAD(&cmd->sub_cmds, sub_cmd_next);
             STAILQ_NEXT(c, sub_cmd_next) = NULL;
             c->cmd_ref = cmd;
             cmd_set_stale(c);
+        }
+        cmd->refcount--;
+        if (cmd->refcount <= 0) {
+            cmd_free(cmd);
         }
     } else if (cmd->server != NULL && cmd_in_queue(cmd, cmd->server)) {
         LOG(DEBUG, "command set stale");
@@ -1060,8 +1073,8 @@ void cmd_iov_add(struct iov_data *iov, void *buf, size_t len, struct mbuf *b)
     if (iov->max_size <= iov->len) {
         iov->max_size *= 2;
         if (iov->max_size == 0) iov->max_size = CORVUS_IOV_MAX;
-        iov->data = realloc(iov->data, sizeof(struct iovec) * iov->max_size);
-        iov->buf_ptr = realloc(iov->buf_ptr, sizeof(struct mbuf*) * iov->max_size);
+        iov->data = cv_realloc(iov->data, sizeof(struct iovec) * iov->max_size);
+        iov->buf_ptr = cv_realloc(iov->buf_ptr, sizeof(struct mbuf*) * iov->max_size);
     }
 
     iov->data[iov->len].iov_base = buf;
@@ -1086,8 +1099,8 @@ void cmd_iov_clear(struct context *ctx, struct iov_data *iov)
 
 void cmd_iov_free(struct iov_data *iov)
 {
-    if (iov->data != NULL) free(iov->data);
-    if (iov->buf_ptr != NULL) free(iov->buf_ptr);
+    if (iov->data != NULL) cv_free(iov->data);
+    if (iov->buf_ptr != NULL) cv_free(iov->buf_ptr);
     iov->data = NULL;
     iov->buf_ptr = NULL;
     iov->max_size = 0;

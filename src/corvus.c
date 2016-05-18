@@ -15,6 +15,7 @@
 #include "stats.h"
 #include "dict.h"
 #include "timer.h"
+#include "alloc.h"
 
 #define DEFAULT_BUFSIZE 16384
 #define MIN_BUFSIZE 64
@@ -89,24 +90,25 @@ int config_add(char *name, char *value)
     } else if (strcmp(name, "requirepass") == 0) {
         // Last config overwrites previous ones.
         if (config.requirepass != NULL) {
-            free(config.requirepass);
+            cv_free(config.requirepass);
             config.requirepass = NULL;
         }
         if (strlen(value) > 0) {
-            config.requirepass = strdup(value);
+            config.requirepass = cv_calloc(strlen(value) + 1, sizeof(char));
+            memcpy(config.requirepass, value, strlen(value));
         }
     } else if (strcmp(name, "node") == 0) {
         if (config.node.addr != NULL) {
-            free(config.node.addr);
+            cv_free(config.node.addr);
             memset(&config.node, 0, sizeof(config.node));
         }
         char *p = strtok(value, ",");
         while (p) {
-            config.node.addr = realloc(config.node.addr,
+            config.node.addr = cv_realloc(config.node.addr,
                     sizeof(struct address) * (config.node.len + 1));
 
             if (socket_parse_ip(p, &config.node.addr[config.node.len]) == -1) {
-                free(config.node.addr);
+                cv_free(config.node.addr);
                 return -1;
             }
 
@@ -117,6 +119,32 @@ int config_add(char *name, char *value)
     return 0;
 }
 
+int read_line(char **line, size_t *bytes, FILE *fp)
+{
+    size_t len, index = 0;
+    char buf[1024];
+    bool should_realloc = false;
+
+    while (fgets(buf, 1024, fp) != NULL) {
+        len = strlen(buf);
+        while (*bytes - index <= len) {
+            should_realloc = true;
+            *bytes = (*bytes == 0) ? 1024 : (*bytes << 1);
+        }
+        if (should_realloc) {
+            *line = cv_realloc(*line, (*bytes) * sizeof(char));
+            should_realloc = false;
+        }
+        memcpy(*line + index, buf, len);
+        index += len;
+        if ((*line)[index - 1] == '\n') {
+            (*line)[index] = '\0';
+            return index;
+        }
+    }
+    return -1;
+}
+
 int read_conf(const char *filename)
 {
     FILE *fp = fopen(filename, "r");
@@ -124,28 +152,31 @@ int read_conf(const char *filename)
         fprintf(stderr, "config file: %s", strerror(errno));
         return -1;
     }
-    size_t len = 0;
-    int r, i;
+    int i, len = 0;
+    size_t bytes = 0;
     char *line = NULL;
-    while ((r = getline(&line, &len, fp)) != -1) {
-        char name[r], value[r];
+    while ((len = read_line(&line, &bytes, fp)) != -1) {
+        char name[len + 1], value[len + 1];
         memset(name, 0, sizeof(name));
         memset(value, 0, sizeof(value));
 
-        for (i = 0; i < r && (line[i] == ' ' || line[i] == '\r'
+        for (i = 0; i < len && (line[i] == ' ' || line[i] == '\r'
                     || line[i] == '\t' || line[i] == '\n'); i++);
-        if (i == r || line[i] == '#') continue;
+
+        if (i == len || line[i] == '#') {
+            continue;
+        }
 
         sscanf(line, "%s%s", name, value);
         if (config_add(name, value) == -1) {
-            free(line);
+            cv_free(line);
             fclose(fp);
-            return -1;
+            return CORVUS_ERR;
         }
     }
-    free(line);
+    cv_free(line);
     fclose(fp);
-    return 0;
+    return CORVUS_OK;
 }
 
 void sig_handler(int sig)
@@ -256,7 +287,7 @@ void context_init(struct context *ctx)
 
 void build_contexts()
 {
-    contexts = malloc(sizeof(struct context) * (config.thread + 1));
+    contexts = cv_malloc(sizeof(struct context) * (config.thread + 1));
     for (int i = 0; i <= config.thread; i++) {
         context_init(&contexts[i]);
     }
@@ -264,7 +295,7 @@ void build_contexts()
 
 void destroy_contexts()
 {
-    free(contexts);
+    cv_free(contexts);
 }
 
 void context_free(struct context *ctx)
@@ -277,8 +308,8 @@ void context_free(struct context *ctx)
         cmd_iov_free(&conn->info->iov);
         conn_free(conn);
         conn_buf_free(conn);
-        free(conn->info);
-        free(conn);
+        cv_free(conn->info);
+        cv_free(conn);
     }
     dict_free(&ctx->server_table);
 
@@ -290,7 +321,7 @@ void context_free(struct context *ctx)
     while (!STAILQ_EMPTY(&ctx->free_cmdq)) {
         cmd = STAILQ_FIRST(&ctx->free_cmdq);
         STAILQ_REMOVE_HEAD(&ctx->free_cmdq, cmd_next);
-        free(cmd);
+        cv_free(cmd);
         ctx->mstats.free_cmds--;
     }
 
@@ -301,13 +332,13 @@ void context_free(struct context *ctx)
         if (conn->fd != -1) {
             if (conn->ev != NULL) {
                 conn_free(conn->ev);
-                free(conn->ev);
+                cv_free(conn->ev);
                 conn->ev = NULL;
             }
             conn_free(conn);
             conn_buf_free(conn);
         }
-        free(conn);
+        cv_free(conn);
     }
 
     /* connection info queu */
@@ -316,7 +347,7 @@ void context_free(struct context *ctx)
         info = STAILQ_FIRST(&ctx->free_conn_infoq);
         STAILQ_REMOVE_HEAD(&ctx->free_conn_infoq, next);
         cmd_iov_free(&info->iov);
-        free(info);
+        cv_free(info);
         ctx->mstats.free_buffers--;
     }
 
@@ -325,7 +356,7 @@ void context_free(struct context *ctx)
     while (!STAILQ_EMPTY(&ctx->free_buf_timeq)) {
         t = STAILQ_FIRST(&ctx->free_buf_timeq);
         STAILQ_REMOVE_HEAD(&ctx->free_buf_timeq, next);
-        free(t);
+        cv_free(t);
     }
 
     /* event loop */
@@ -456,8 +487,8 @@ int main(int argc, const char *argv[])
     // free `contexts`
     destroy_contexts();
     cmd_map_destroy();
-    free(config.requirepass);
-    free(config.node.addr);
+    cv_free(config.requirepass);
+    cv_free(config.node.addr);
     if (config.syslog) closelog();
     return EXIT_SUCCESS;
 }
