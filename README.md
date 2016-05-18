@@ -24,7 +24,6 @@ Features
 * Fast.
 * Lightweight.
 * Painless upgrade to official redis cluster from twemproxy.
-* Zero dependencies.
 * Multiple threading.
 * Reuseport support.
 * Pipeline support.
@@ -40,7 +39,8 @@ Requirements
 Build
 -----
 
-Just make:
+If use the releases downloaded from
+[releases page](https://github.com/eleme/corvus/releases), just make:
 
 ```
 $ make
@@ -50,6 +50,15 @@ With debug mode enabled:
 
 ```
 make debug
+```
+
+If build from latest source:
+```bash
+git clone https://github.com/eleme/corvus.git
+cd corvus
+git submodule update --init
+make deps # need autoconf
+make
 ```
 
 Binary can be found at `./src/corvus`.
