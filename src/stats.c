@@ -27,7 +27,11 @@ static char hostname[HOST_LEN + 1];
 // only used `stats_ctx.thread` currently
 static struct context stats_ctx;
 
-struct stats cumulation;
+static struct stats cumulation;
+static struct {
+    double sys;
+    double user;
+} used_cpu;
 
 static inline void stats_get_cpu_usage(struct stats *stats)
 {
@@ -90,6 +94,16 @@ void stats_get_simple(struct stats *stats, bool reset)
     }
 
     stats_get_cpu_usage(stats);
+    if (reset) {
+        double temp_sys = stats->used_cpu_sys;
+        double temp_user = stats->used_cpu_user;
+
+        stats->used_cpu_sys -= used_cpu.sys;
+        stats->used_cpu_user -= used_cpu.user;
+
+        used_cpu.sys = temp_sys;
+        used_cpu.user = temp_user;
+    }
 
     struct context *contexts = get_contexts();
 
@@ -140,9 +154,9 @@ void stats_node_info_agg(struct bytes *bytes)
                 b->completed = 0;
                 dict_set(&bytes_map, b->key, (void*)b);
             }
-            b->send += ATOMIC_GET(server->info->send_bytes);
-            b->recv += ATOMIC_GET(server->info->recv_bytes);
-            b->completed += ATOMIC_GET(server->info->completed_commands);
+            b->send += ATOMIC_IGET(server->info->send_bytes, 0);
+            b->recv += ATOMIC_IGET(server->info->recv_bytes, 0);
+            b->completed += ATOMIC_IGET(server->info->completed_commands, 0);
         }
     }
 }
@@ -223,6 +237,7 @@ int stats_init()
     dict_init(&bytes_map);
 
     memset(&cumulation, 0, sizeof(cumulation));
+    memset(&used_cpu, 0, sizeof(used_cpu));
 
     gethostname(hostname, HOST_LEN + 1);
     len = strlen(hostname);
