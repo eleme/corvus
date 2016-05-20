@@ -295,6 +295,7 @@ void context_init(struct context *ctx)
     dict_init(&ctx->server_table);
     ctx->state = CTX_UNKNOWN;
     mbuf_init(ctx);
+    ctx->seed = time(NULL);
 
     STAILQ_INIT(&ctx->free_cmdq);
     STAILQ_INIT(&ctx->free_conn_infoq);

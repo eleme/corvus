@@ -71,6 +71,8 @@ struct context {
     struct dict server_table;
     struct conn_tqh conns;
 
+    unsigned int seed;
+
     struct conn_tqh servers;
 
     /* event */

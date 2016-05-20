@@ -318,7 +318,7 @@ struct connection *conn_get_server(struct context *ctx, uint16_t slot,
     memset(&slave, 0, sizeof(slave));
     bool readonly;
 
-    bool hitted = slot_get_node_addr(slot, &master, &slave);
+    bool hitted = slot_get_node_addr(ctx, slot, &master, &slave);
     if (hitted) {
         if (!config.readonly || slave.port == 0 || access == CMD_ACCESS_WRITE) {
             addr = &master;

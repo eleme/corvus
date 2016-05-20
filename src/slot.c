@@ -79,9 +79,8 @@ void slot_map_clear()
     struct dict_iter iter = DICT_ITER_INITIALIZER;
     DICT_FOREACH(&node_store.map, &iter) {
         node_info = (struct node_info *)iter.value;
-        if (node_list.len < MAX_UPDATE_NODES) {
-            memcpy(&node_list.nodes[node_list.len++], &node_info->master, sizeof(struct address));
-        }
+        if (node_list.len >= MAX_UPDATE_NODES) break;
+        memcpy(&node_list.nodes[node_list.len++], &node_info->master, sizeof(struct address));
     }
     node_store.idx = 0;
     dict_clear(&node_store.map);
@@ -438,7 +437,8 @@ end:
     return crc16(pos) & 0x3FFF;
 }
 
-bool slot_get_node_addr(uint16_t slot, struct address *addr, struct address *slave)
+bool slot_get_node_addr(struct context *ctx, uint16_t slot, struct address *addr,
+        struct address *slave)
 {
     int res = false;
     struct node_info *info;
@@ -447,7 +447,8 @@ bool slot_get_node_addr(uint16_t slot, struct address *addr, struct address *sla
     if (info != NULL) {
         memcpy(addr, &info->master, sizeof(struct address));
         if (config.readonly && info->slaves.index > 0) {
-            memcpy(slave, &info->slaves.nodes[0], sizeof(struct address));
+            int i = rand_r(&ctx->seed) % info->slaves.index;
+            memcpy(slave, &info->slaves.nodes[i], sizeof(struct address));
         }
         res = true;
     }
