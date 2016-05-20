@@ -165,7 +165,7 @@ int node_info_add_addr(struct redis_data *data, struct node_info *node)
 
     addr_add(addr.ip, addr.port);
 
-    if (config.readonly) {
+    if (config.readslave) {
         pthread_rwlock_wrlock(&slot_map_lock);
         if (node->slaves.len <= node->slaves.index) {
             node->slaves.len = (node->slaves.len == 0) ? SLAVE_NODES : node->slaves.len << 1;
@@ -447,7 +447,7 @@ bool slot_get_node_addr(struct context *ctx, uint16_t slot, struct address *addr
     info = slot_map[slot];
     if (info != NULL) {
         memcpy(addr, &info->master, sizeof(struct address));
-        if (config.readonly && info->slaves.index > 0) {
+        if (config.readslave && info->slaves.index > 0) {
             int i = rand_r(&ctx->seed) % info->slaves.index;
             memcpy(slave, &info->slaves.nodes[i], sizeof(struct address));
         }
