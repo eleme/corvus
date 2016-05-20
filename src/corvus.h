@@ -21,6 +21,7 @@
 #define CORVUS_EOF -3
 #define CORVUS_INPROGRESS -4
 #define CORVUS_ASKING -5
+#define CORVUS_READONLY -6
 
 #define THREAD_STACK_SIZE (1024*1024*4)
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
@@ -95,6 +96,7 @@ struct {
     char statsd_addr[DSN_LEN + 1];
     int metric_interval;
     bool stats;
+    bool readonly;
     char *requirepass;
     int64_t client_timeout;
     int64_t server_timeout;

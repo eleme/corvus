@@ -60,6 +60,9 @@ struct conn_info {
     // If `requirepass` config is setted the client should be verified.
     bool authenticated;
 
+    bool readonly;
+    bool readonly_sent;
+
     long long send_bytes;
     long long recv_bytes;
     long long completed_commands;
@@ -77,8 +80,8 @@ int conn_connect(struct connection *conn);
 void conn_free(struct connection *conn);
 void conn_buf_free(struct connection *conn);
 void conn_recycle(struct context *ctx, struct connection *conn);
-struct connection *conn_get_server_from_pool(struct context *ctx, struct address *addr);
-struct connection *conn_get_server(struct context *ctx, uint16_t slot);
+struct connection *conn_get_server_from_pool(struct context *ctx, struct address *addr, bool readonly);
+struct connection *conn_get_server(struct context *ctx, uint16_t slot, int access);
 struct mbuf *conn_get_buf(struct connection *conn, bool unprocessed, bool local);
 int conn_create_fd();
 int conn_register(struct connection *conn);

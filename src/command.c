@@ -18,144 +18,144 @@
 
 #define CMD_RECYCLE_SIZE 1024
 
-#define CMD_DEFINE(cmd, type) CMD_##cmd,
-#define CMD_BUILD_MAP(cmd, type) {#cmd, CMD_##cmd, CMD_##type},
+#define CMD_DEFINE(cmd, type, access) CMD_##cmd,
+#define CMD_BUILD_MAP(cmd, type, access) {#cmd, CMD_##cmd, CMD_##type, CMD_ACCESS_##access},
 
-#define CMD_DO(HANDLER)              \
-    /* keys command */               \
-    HANDLER(DEL, COMPLEX)            \
-    HANDLER(DUMP, BASIC)             \
-    HANDLER(EXISTS, COMPLEX)         \
-    HANDLER(EXPIRE, BASIC)           \
-    HANDLER(EXPIREAT, BASIC)         \
-    HANDLER(KEYS, UNIMPL)            \
-    HANDLER(MIGRATE, UNIMPL)         \
-    HANDLER(MOVE, UNIMPL)            \
-    HANDLER(OBJECT, UNIMPL)          \
-    HANDLER(PERSIST, BASIC)          \
-    HANDLER(PEXPIRE, BASIC)          \
-    HANDLER(PEXPIREAT, BASIC)        \
-    HANDLER(PTTL, BASIC)             \
-    HANDLER(RANDOMKEY, UNIMPL)       \
-    HANDLER(RENAME, UNIMPL)          \
-    HANDLER(RENAMENX, UNIMPL)        \
-    HANDLER(RESTORE, BASIC)          \
-    HANDLER(SCAN, UNIMPL)            \
-    HANDLER(SORT, BASIC)             \
-    HANDLER(TTL, BASIC)              \
-    HANDLER(TYPE, BASIC)             \
-    HANDLER(WAIT, UNIMPL)            \
-    /* strings command */            \
-    HANDLER(APPEND, BASIC)           \
-    HANDLER(BITCOUNT, BASIC)         \
-    HANDLER(BITOP, UNIMPL)           \
-    HANDLER(BITPOS, BASIC)           \
-    HANDLER(DECR, BASIC)             \
-    HANDLER(DECRBY, BASIC)           \
-    HANDLER(GET, BASIC)              \
-    HANDLER(GETBIT, BASIC)           \
-    HANDLER(GETRANGE, BASIC)         \
-    HANDLER(GETSET, BASIC)           \
-    HANDLER(INCR, BASIC)             \
-    HANDLER(INCRBY, BASIC)           \
-    HANDLER(INCRBYFLOAT, BASIC)      \
-    HANDLER(MGET, COMPLEX)           \
-    HANDLER(MSET, COMPLEX)           \
-    HANDLER(MSETNX, UNIMPL)          \
-    HANDLER(PSETEX, BASIC)           \
-    HANDLER(SET, BASIC)              \
-    HANDLER(SETBIT, BASIC)           \
-    HANDLER(SETEX, BASIC)            \
-    HANDLER(SETNX, BASIC)            \
-    HANDLER(SETRANGE, BASIC)         \
-    HANDLER(STRLEN, BASIC)           \
-    /* hashes */                     \
-    HANDLER(HDEL, BASIC)             \
-    HANDLER(HEXISTS, BASIC)          \
-    HANDLER(HGET, BASIC)             \
-    HANDLER(HGETALL, BASIC)          \
-    HANDLER(HINCRBY, BASIC)          \
-    HANDLER(HINCRBYFLOAT, BASIC)     \
-    HANDLER(HKEYS, BASIC)            \
-    HANDLER(HLEN, BASIC)             \
-    HANDLER(HMGET, BASIC)            \
-    HANDLER(HMSET, BASIC)            \
-    HANDLER(HSET, BASIC)             \
-    HANDLER(HSETNX, BASIC)           \
-    HANDLER(HSTRLEN, BASIC)          \
-    HANDLER(HVALS, BASIC)            \
-    HANDLER(HSCAN, BASIC)            \
-    /* lists */                      \
-    HANDLER(BLPOP, UNIMPL)           \
-    HANDLER(BRPOP, UNIMPL)           \
-    HANDLER(BRPOPLPUSH, UNIMPL)      \
-    HANDLER(LINDEX, BASIC)           \
-    HANDLER(LINSERT, BASIC)          \
-    HANDLER(LLEN, BASIC)             \
-    HANDLER(LPOP, BASIC)             \
-    HANDLER(LPUSH, BASIC)            \
-    HANDLER(LPUSHX, BASIC)           \
-    HANDLER(LRANGE, BASIC)           \
-    HANDLER(LREM, BASIC)             \
-    HANDLER(LSET, BASIC)             \
-    HANDLER(LTRIM, BASIC)            \
-    HANDLER(RPOP, BASIC)             \
-    HANDLER(RPOPLPUSH, BASIC)        \
-    HANDLER(RPUSH, BASIC)            \
-    HANDLER(RPUSHX, BASIC)           \
-    /* sets */                       \
-    HANDLER(SADD, BASIC)             \
-    HANDLER(SCARD, BASIC)            \
-    HANDLER(SDIFF, BASIC)            \
-    HANDLER(SDIFFSTORE, BASIC)       \
-    HANDLER(SINTER, BASIC)           \
-    HANDLER(SINTERSTORE, BASIC)      \
-    HANDLER(SISMEMBER, BASIC)        \
-    HANDLER(SMEMBERS, BASIC)         \
-    HANDLER(SMOVE, BASIC)            \
-    HANDLER(SPOP, BASIC)             \
-    HANDLER(SRANDMEMBER, BASIC)      \
-    HANDLER(SREM, BASIC)             \
-    HANDLER(SUNION, BASIC)           \
-    HANDLER(SUNIONSTORE, BASIC)      \
-    HANDLER(SSCAN, BASIC)            \
-    /* sorted sets */                \
-    HANDLER(ZADD, BASIC)             \
-    HANDLER(ZCARD, BASIC)            \
-    HANDLER(ZCOUNT, BASIC)           \
-    HANDLER(ZINCRBY, BASIC)          \
-    HANDLER(ZINTERSTORE, BASIC)      \
-    HANDLER(ZLEXCOUNT, BASIC)        \
-    HANDLER(ZRANGE, BASIC)           \
-    HANDLER(ZRANGEBYLEX, BASIC)      \
-    HANDLER(ZRANGEBYSCORE, BASIC)    \
-    HANDLER(ZRANK, BASIC)            \
-    HANDLER(ZREM, BASIC)             \
-    HANDLER(ZREMRANGEBYLEX, BASIC)   \
-    HANDLER(ZREMRANGEBYRANK, BASIC)  \
-    HANDLER(ZREMRANGEBYSCORE, BASIC) \
-    HANDLER(ZREVRANGE, BASIC)        \
-    HANDLER(ZREVRANGEBYLEX, BASIC)   \
-    HANDLER(ZREVRANGEBYSCORE, BASIC) \
-    HANDLER(ZREVRANK, BASIC)         \
-    HANDLER(ZSCORE, BASIC)           \
-    HANDLER(ZUNIONSTORE, BASIC)      \
-    HANDLER(ZSCAN, BASIC)            \
-    /* hyperloglog */                \
-    HANDLER(PFADD, BASIC)            \
-    HANDLER(PFCOUNT, BASIC)          \
-    HANDLER(PFMERGE, BASIC)          \
-    /* script */                     \
-    HANDLER(EVAL, COMPLEX)           \
-    HANDLER(EVALSHA, UNIMPL)         \
-    /* misc */                       \
-    HANDLER(AUTH, EXTRA)             \
-    HANDLER(ECHO, UNIMPL)            \
-    HANDLER(PING, EXTRA)             \
-    HANDLER(INFO, EXTRA)             \
-    HANDLER(PROXY, EXTRA)            \
-    HANDLER(QUIT, UNIMPL)            \
-    HANDLER(SELECT, UNIMPL)
+#define CMD_DO(HANDLER)                           \
+    /* keys command */                            \
+    HANDLER(DEL,               COMPLEX,  WRITE)   \
+    HANDLER(DUMP,              BASIC,    READ)    \
+    HANDLER(EXISTS,            COMPLEX,  READ)    \
+    HANDLER(EXPIRE,            BASIC,    READ)    \
+    HANDLER(EXPIREAT,          BASIC,    WRITE)   \
+    HANDLER(KEYS,              UNIMPL,   UNKNOWN) \
+    HANDLER(MIGRATE,           UNIMPL,   UNKNOWN) \
+    HANDLER(MOVE,              UNIMPL,   UNKNOWN) \
+    HANDLER(OBJECT,            UNIMPL,   UNKNOWN) \
+    HANDLER(PERSIST,           BASIC,    WRITE)   \
+    HANDLER(PEXPIRE,           BASIC,    WRITE)   \
+    HANDLER(PEXPIREAT,         BASIC,    WRITE)   \
+    HANDLER(PTTL,              BASIC,    READ)    \
+    HANDLER(RANDOMKEY,         UNIMPL,   UNKNOWN) \
+    HANDLER(RENAME,            UNIMPL,   UNKNOWN) \
+    HANDLER(RENAMENX,          UNIMPL,   UNKNOWN) \
+    HANDLER(RESTORE,           BASIC,    WRITE)   \
+    HANDLER(SCAN,              UNIMPL,   UNKNOWN) \
+    HANDLER(SORT,              BASIC,    WRITE)   \
+    HANDLER(TTL,               BASIC,    READ)    \
+    HANDLER(TYPE,              BASIC,    READ)    \
+    HANDLER(WAIT,              UNIMPL,   UNKNOWN) \
+    /* strings command */                         \
+    HANDLER(APPEND,            BASIC,    WRITE)   \
+    HANDLER(BITCOUNT,          BASIC,    READ)    \
+    HANDLER(BITOP,             UNIMPL,   UNKNOWN) \
+    HANDLER(BITPOS,            BASIC,    READ)    \
+    HANDLER(DECR,              BASIC,    WRITE)   \
+    HANDLER(DECRBY,            BASIC,    WRITE)   \
+    HANDLER(GET,               BASIC,    READ)    \
+    HANDLER(GETBIT,            BASIC,    READ)    \
+    HANDLER(GETRANGE,          BASIC,    READ)    \
+    HANDLER(GETSET,            BASIC,    WRITE)   \
+    HANDLER(INCR,              BASIC,    WRITE)   \
+    HANDLER(INCRBY,            BASIC,    WRITE)   \
+    HANDLER(INCRBYFLOAT,       BASIC,    WRITE)   \
+    HANDLER(MGET,              COMPLEX,  READ)    \
+    HANDLER(MSET,              COMPLEX,  WRITE)   \
+    HANDLER(MSETNX,            UNIMPL,   UNKNOWN) \
+    HANDLER(PSETEX,            BASIC,    WRITE)   \
+    HANDLER(SET,               BASIC,    WRITE)   \
+    HANDLER(SETBIT,            BASIC,    WRITE)   \
+    HANDLER(SETEX,             BASIC,    WRITE)   \
+    HANDLER(SETNX,             BASIC,    WRITE)   \
+    HANDLER(SETRANGE,          BASIC,    WRITE)   \
+    HANDLER(STRLEN,            BASIC,    READ)    \
+    /* hashes */                                  \
+    HANDLER(HDEL,              BASIC,    WRITE)   \
+    HANDLER(HEXISTS,           BASIC,    READ)    \
+    HANDLER(HGET,              BASIC,    READ)    \
+    HANDLER(HGETALL,           BASIC,    READ)    \
+    HANDLER(HINCRBY,           BASIC,    WRITE)   \
+    HANDLER(HINCRBYFLOAT,      BASIC,    WRITE)   \
+    HANDLER(HKEYS,             BASIC,    READ)    \
+    HANDLER(HLEN,              BASIC,    READ)    \
+    HANDLER(HMGET,             BASIC,    READ)    \
+    HANDLER(HMSET,             BASIC,    WRITE)   \
+    HANDLER(HSET,              BASIC,    WRITE)   \
+    HANDLER(HSETNX,            BASIC,    WRITE)   \
+    HANDLER(HSTRLEN,           BASIC,    READ)    \
+    HANDLER(HVALS,             BASIC,    READ)    \
+    HANDLER(HSCAN,             BASIC,    READ)    \
+    /* lists */                                   \
+    HANDLER(BLPOP,             UNIMPL,   UNKNOWN) \
+    HANDLER(BRPOP,             UNIMPL,   UNKNOWN) \
+    HANDLER(BRPOPLPUSH,        UNIMPL,   UNKNOWN) \
+    HANDLER(LINDEX,            BASIC,    READ)    \
+    HANDLER(LINSERT,           BASIC,    WRITE)   \
+    HANDLER(LLEN,              BASIC,    READ)    \
+    HANDLER(LPOP,              BASIC,    WRITE)   \
+    HANDLER(LPUSH,             BASIC,    WRITE)   \
+    HANDLER(LPUSHX,            BASIC,    WRITE)   \
+    HANDLER(LRANGE,            BASIC,    READ)    \
+    HANDLER(LREM,              BASIC,    WRITE)   \
+    HANDLER(LSET,              BASIC,    WRITE)   \
+    HANDLER(LTRIM,             BASIC,    WRITE)   \
+    HANDLER(RPOP,              BASIC,    WRITE)   \
+    HANDLER(RPOPLPUSH,         BASIC,    WRITE)   \
+    HANDLER(RPUSH,             BASIC,    WRITE)   \
+    HANDLER(RPUSHX,            BASIC,    WRITE)   \
+    /* sets */                                    \
+    HANDLER(SADD,              BASIC,    WRITE)   \
+    HANDLER(SCARD,             BASIC,    READ)    \
+    HANDLER(SDIFF,             BASIC,    READ)    \
+    HANDLER(SDIFFSTORE,        BASIC,    WRITE)   \
+    HANDLER(SINTER,            BASIC,    READ)    \
+    HANDLER(SINTERSTORE,       BASIC,    WRITE)   \
+    HANDLER(SISMEMBER,         BASIC,    READ)    \
+    HANDLER(SMEMBERS,          BASIC,    READ)    \
+    HANDLER(SMOVE,             BASIC,    WRITE)   \
+    HANDLER(SPOP,              BASIC,    WRITE)   \
+    HANDLER(SRANDMEMBER,       BASIC,    READ)    \
+    HANDLER(SREM,              BASIC,    WRITE)   \
+    HANDLER(SUNION,            BASIC,    READ)    \
+    HANDLER(SUNIONSTORE,       BASIC,    WRITE)   \
+    HANDLER(SSCAN,             BASIC,    READ)    \
+    /* sorted sets */                             \
+    HANDLER(ZADD,              BASIC,    WRITE)   \
+    HANDLER(ZCARD,             BASIC,    READ)    \
+    HANDLER(ZCOUNT,            BASIC,    READ)    \
+    HANDLER(ZINCRBY,           BASIC,    WRITE)   \
+    HANDLER(ZINTERSTORE,       BASIC,    WRITE)   \
+    HANDLER(ZLEXCOUNT,         BASIC,    READ)    \
+    HANDLER(ZRANGE,            BASIC,    READ)    \
+    HANDLER(ZRANGEBYLEX,       BASIC,    READ)    \
+    HANDLER(ZRANGEBYSCORE,     BASIC,    READ)    \
+    HANDLER(ZRANK,             BASIC,    READ)    \
+    HANDLER(ZREM,              BASIC,    WRITE)   \
+    HANDLER(ZREMRANGEBYLEX,    BASIC,    WRITE)   \
+    HANDLER(ZREMRANGEBYRANK,   BASIC,    WRITE)   \
+    HANDLER(ZREMRANGEBYSCORE,  BASIC,    WRITE)   \
+    HANDLER(ZREVRANGE,         BASIC,    READ)    \
+    HANDLER(ZREVRANGEBYLEX,    BASIC,    READ)    \
+    HANDLER(ZREVRANGEBYSCORE,  BASIC,    READ)    \
+    HANDLER(ZREVRANK,          BASIC,    READ)    \
+    HANDLER(ZSCORE,            BASIC,    READ)    \
+    HANDLER(ZUNIONSTORE,       BASIC,    WRITE)   \
+    HANDLER(ZSCAN,             BASIC,    READ)    \
+    /* hyperloglog */                             \
+    HANDLER(PFADD,             BASIC,    WRITE)   \
+    HANDLER(PFCOUNT,           BASIC,    READ)    \
+    HANDLER(PFMERGE,           BASIC,    WRITE)   \
+    /* script */                                  \
+    HANDLER(EVAL,              COMPLEX,  WRITE)   \
+    HANDLER(EVALSHA,           UNIMPL,   UNKNOWN) \
+    /* misc */                                    \
+    HANDLER(AUTH,              EXTRA,    UNKNOWN) \
+    HANDLER(ECHO,              UNIMPL,   UNKNOWN) \
+    HANDLER(PING,              EXTRA,    UNKNOWN) \
+    HANDLER(INFO,              EXTRA,    UNKNOWN) \
+    HANDLER(PROXY,             EXTRA,    UNKNOWN) \
+    HANDLER(QUIT,              UNIMPL,   UNKNOWN) \
+    HANDLER(SELECT,            UNIMPL,   UNKNOWN)
 
 #define CMD_INCREF(cmd)                                   \
 do {                                                      \
@@ -180,6 +180,7 @@ struct cmd_item {
     char *cmd;
     int value;
     int type;
+    int access;
 };
 
 const char *rep_err = "-ERR Proxy error\r\n";
@@ -290,6 +291,7 @@ static int cmd_get_type(struct command *cmd, struct pos_array *pos)
         return CORVUS_ERR;
     }
     cmd->cmd_type = item->value;
+    cmd->cmd_access = item->access;
     return item->type;
 }
 
@@ -359,7 +361,7 @@ int cmd_forward_basic(struct command *cmd)
         return CORVUS_ERR;
     }
 
-    server = conn_get_server(ctx, slot);
+    server = conn_get_server(ctx, slot, cmd->cmd_access);
     if (server == NULL) {
         LOG(ERROR, "cmd_forward_basic: fail to get server with slot %d", slot);
         return CORVUS_ERR;

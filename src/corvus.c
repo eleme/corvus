@@ -42,6 +42,21 @@ void config_init()
     config.metric_interval = 10;
 }
 
+void config_boolean(bool *item, char *value)
+{
+    if (strcasecmp(value, "false") == 0) {
+        *item = false;
+    } else if (strcasecmp(value, "true") == 0) {
+        *item = true;
+    } else {
+        if (atoi(value) == 0) {
+            *item = false;
+        } else {
+            *item = true;
+        }
+    }
+}
+
 int config_add(char *name, char *value)
 {
     int val;
@@ -53,7 +68,9 @@ int config_add(char *name, char *value)
             return CORVUS_ERR;
         }
     } else if (strcmp(name, "syslog") == 0) {
-        config.syslog = atoi(value) ? 1 : 0;
+        config_boolean(&config.syslog, value);
+    } else if (strcmp(name, "readonly") == 0) {
+        config_boolean(&config.readonly, value);
     } else if (strcmp(name, "thread") == 0) {
         config.thread = atoi(value);
         if (config.thread <= 0) config.thread = 4;

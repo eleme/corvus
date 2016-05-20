@@ -17,13 +17,18 @@ enum {
 };
 
 struct node_info {
+    struct {
+        struct address *nodes;
+        int index;
+        int len;
+    } slaves;
     struct address master;
     int8_t dsn_added;
 };
 
 uint16_t slot_get(struct pos_array *pos);
 void slot_get_addr_list(char *dest);
-int slot_get_node_addr(uint16_t slot, struct address *addr);
+bool slot_get_node_addr(uint16_t slot, struct address *addr, struct address *slave);
 void slot_create_job(int type);
 int slot_start_manager(struct context *ctx);
 
