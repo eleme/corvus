@@ -586,6 +586,12 @@ int cmd_proxy(struct command *cmd, struct redis_data *data)
 
     if (strcasecmp(type, "INFO") == 0) {
         return cmd_proxy_info(cmd);
+    } else if (strcasecmp(type, "UPDATESLOTMAP") == 0) {
+        slot_create_job(SLOT_UPDATE);
+        conn_add_data(cmd->client, (uint8_t*)rep_ok, strlen(rep_ok),
+                &cmd->rep_buf[0], &cmd->rep_buf[1]);
+        CMD_INCREF(cmd);
+        cmd_mark_done(cmd);
     } else {
         cmd_mark_fail(cmd, rep_err);
     }

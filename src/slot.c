@@ -112,6 +112,7 @@ struct node_info *node_info_get(struct address *addr)
     addr_add(addr->ip, addr->port);
 
     memcpy(&node->master, addr, sizeof(struct address));
+    node->dsn_added = false;
     node->slaves.index = 0;
     return node;
 }
@@ -215,7 +216,7 @@ int parse_slots(struct redis_data *data)
                     return CORVUS_ERR;
                 }
             }
-            node->dsn_added = 1;
+            node->dsn_added = true;
         }
     }
 

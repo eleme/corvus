@@ -23,7 +23,7 @@ struct node_info {
         int len;
     } slaves;
     struct address master;
-    int8_t dsn_added;
+    bool dsn_added;
 };
 
 uint16_t slot_get(struct pos_array *pos);
