@@ -79,14 +79,12 @@ void slot_map_clear()
     struct dict_iter iter = DICT_ITER_INITIALIZER;
     DICT_FOREACH(&node_store.map, &iter) {
         node_info = (struct node_info *)iter.value;
-        cv_free(node_info->slaves.nodes);
         if (node_list.len < MAX_UPDATE_NODES) {
             memcpy(&node_list.nodes[node_list.len++], &node_info->master, sizeof(struct address));
         }
     }
     node_store.idx = 0;
     dict_clear(&node_store.map);
-    memset(node_store.nodes, 0, sizeof(node_store.nodes));
 
     if (node_list.len <= 0) node_list_init();
 }
@@ -111,11 +109,11 @@ struct node_info *node_info_get(struct address *addr)
 {
     if (node_store.idx >= REDIS_CLUSTER_SLOTS) return NULL;
     struct node_info *node = &node_store.nodes[node_store.idx++];
-    memset(node, 0, sizeof(struct node_info));
 
     addr_add(addr->ip, addr->port);
 
     memcpy(&node->master, addr, sizeof(struct address));
+    node->slaves.index = 0;
     return node;
 }
 
@@ -373,6 +371,9 @@ void *slot_manager(void *data)
     pthread_mutex_unlock(&job_mutex);
 
     dict_free(&node_store.map);
+    for (int i = 0; i < REDIS_CLUSTER_SLOTS; i++) {
+        cv_free(node_store.nodes[i].slaves.nodes);
+    }
 
     pthread_rwlock_destroy(&slot_map_lock);
     pthread_rwlock_destroy(&addr_list_lock);
