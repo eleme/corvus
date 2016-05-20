@@ -407,6 +407,7 @@ int cmd_forward_multikey(struct command *cmd, struct redis_data *data, const cha
         }
 
         ncmd->slot = slot_get(&key->pos);
+        ncmd->cmd_access = cmd->cmd_access;
 
         // no need to increase buf refcount
         memcpy(&ncmd->req_buf[0], &key->buf[0], sizeof(key->buf[0]));
@@ -447,6 +448,7 @@ int cmd_forward_mset(struct command *cmd, struct redis_data *data)
         }
 
         ncmd->slot = slot_get(&key->pos);
+        ncmd->cmd_access = cmd->cmd_access;
 
         // no need to increase buf refcount
         memcpy(&ncmd->req_buf[0], &key->buf[0], sizeof(key->buf[0]));
