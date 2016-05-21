@@ -24,8 +24,8 @@
 #define CMD_DO(HANDLER)              \
     /* keys command */               \
     HANDLER(DEL, COMPLEX)            \
-    HANDLER(DUMP, BASIC)             \
-    HANDLER(EXISTS, COMPLEX)         \
+    HANDLER(DUMP, BASIC | CMD_TYPE_F_RO)             \
+    HANDLER(EXISTS, COMPLEX | CMD_TYPE_F_RO)         \
     HANDLER(EXPIRE, BASIC)           \
     HANDLER(EXPIREAT, BASIC)         \
     HANDLER(KEYS, UNIMPL)            \
@@ -35,31 +35,31 @@
     HANDLER(PERSIST, BASIC)          \
     HANDLER(PEXPIRE, BASIC)          \
     HANDLER(PEXPIREAT, BASIC)        \
-    HANDLER(PTTL, BASIC)             \
+    HANDLER(PTTL, BASIC | CMD_TYPE_F_RO)             \
     HANDLER(RANDOMKEY, UNIMPL)       \
     HANDLER(RENAME, UNIMPL)          \
     HANDLER(RENAMENX, UNIMPL)        \
     HANDLER(RESTORE, BASIC)          \
     HANDLER(SCAN, UNIMPL)            \
     HANDLER(SORT, BASIC)             \
-    HANDLER(TTL, BASIC)              \
-    HANDLER(TYPE, BASIC)             \
+    HANDLER(TTL, BASIC | CMD_TYPE_F_RO)              \
+    HANDLER(TYPE, BASIC | CMD_TYPE_F_RO)             \
     HANDLER(WAIT, UNIMPL)            \
     /* strings command */            \
     HANDLER(APPEND, BASIC)           \
-    HANDLER(BITCOUNT, BASIC)         \
+    HANDLER(BITCOUNT, BASIC | CMD_TYPE_F_RO)         \
     HANDLER(BITOP, UNIMPL)           \
     HANDLER(BITPOS, BASIC)           \
     HANDLER(DECR, BASIC)             \
     HANDLER(DECRBY, BASIC)           \
-    HANDLER(GET, BASIC)              \
-    HANDLER(GETBIT, BASIC)           \
-    HANDLER(GETRANGE, BASIC)         \
+    HANDLER(GET, BASIC | CMD_TYPE_F_RO)              \
+    HANDLER(GETBIT, BASIC | CMD_TYPE_F_RO)           \
+    HANDLER(GETRANGE, BASIC | CMD_TYPE_F_RO)         \
     HANDLER(GETSET, BASIC)           \
     HANDLER(INCR, BASIC)             \
     HANDLER(INCRBY, BASIC)           \
     HANDLER(INCRBYFLOAT, BASIC)      \
-    HANDLER(MGET, COMPLEX)           \
+    HANDLER(MGET, COMPLEX | CMD_TYPE_F_RO)           \
     HANDLER(MSET, COMPLEX)           \
     HANDLER(MSETNX, UNIMPL)          \
     HANDLER(PSETEX, BASIC)           \
@@ -68,34 +68,34 @@
     HANDLER(SETEX, BASIC)            \
     HANDLER(SETNX, BASIC)            \
     HANDLER(SETRANGE, BASIC)         \
-    HANDLER(STRLEN, BASIC)           \
+    HANDLER(STRLEN, BASIC | CMD_TYPE_F_RO)           \
     /* hashes */                     \
     HANDLER(HDEL, BASIC)             \
-    HANDLER(HEXISTS, BASIC)          \
-    HANDLER(HGET, BASIC)             \
-    HANDLER(HGETALL, BASIC)          \
+    HANDLER(HEXISTS, BASIC | CMD_TYPE_F_RO)          \
+    HANDLER(HGET, BASIC | CMD_TYPE_F_RO)             \
+    HANDLER(HGETALL, BASIC | CMD_TYPE_F_RO)          \
     HANDLER(HINCRBY, BASIC)          \
     HANDLER(HINCRBYFLOAT, BASIC)     \
-    HANDLER(HKEYS, BASIC)            \
-    HANDLER(HLEN, BASIC)             \
-    HANDLER(HMGET, BASIC)            \
+    HANDLER(HKEYS, BASIC | CMD_TYPE_F_RO)            \
+    HANDLER(HLEN, BASIC | CMD_TYPE_F_RO)             \
+    HANDLER(HMGET, BASIC | CMD_TYPE_F_RO)            \
     HANDLER(HMSET, BASIC)            \
     HANDLER(HSET, BASIC)             \
     HANDLER(HSETNX, BASIC)           \
     HANDLER(HSTRLEN, BASIC)          \
-    HANDLER(HVALS, BASIC)            \
-    HANDLER(HSCAN, BASIC)            \
+    HANDLER(HVALS, BASIC | CMD_TYPE_F_RO)            \
+    HANDLER(HSCAN, BASIC | CMD_TYPE_F_RO)            \
     /* lists */                      \
     HANDLER(BLPOP, UNIMPL)           \
     HANDLER(BRPOP, UNIMPL)           \
     HANDLER(BRPOPLPUSH, UNIMPL)      \
-    HANDLER(LINDEX, BASIC)           \
+    HANDLER(LINDEX, BASIC | CMD_TYPE_F_RO)           \
     HANDLER(LINSERT, BASIC)          \
-    HANDLER(LLEN, BASIC)             \
+    HANDLER(LLEN, BASIC | CMD_TYPE_F_RO)             \
     HANDLER(LPOP, BASIC)             \
     HANDLER(LPUSH, BASIC)            \
     HANDLER(LPUSHX, BASIC)           \
-    HANDLER(LRANGE, BASIC)           \
+    HANDLER(LRANGE, BASIC | CMD_TYPE_F_RO)           \
     HANDLER(LREM, BASIC)             \
     HANDLER(LSET, BASIC)             \
     HANDLER(LTRIM, BASIC)            \
@@ -105,42 +105,42 @@
     HANDLER(RPUSHX, BASIC)           \
     /* sets */                       \
     HANDLER(SADD, BASIC)             \
-    HANDLER(SCARD, BASIC)            \
+    HANDLER(SCARD, BASIC | CMD_TYPE_F_RO)            \
     HANDLER(SDIFF, BASIC)            \
     HANDLER(SDIFFSTORE, BASIC)       \
     HANDLER(SINTER, BASIC)           \
     HANDLER(SINTERSTORE, BASIC)      \
-    HANDLER(SISMEMBER, BASIC)        \
-    HANDLER(SMEMBERS, BASIC)         \
+    HANDLER(SISMEMBER, BASIC | CMD_TYPE_F_RO)        \
+    HANDLER(SMEMBERS, BASIC | CMD_TYPE_F_RO)         \
     HANDLER(SMOVE, BASIC)            \
     HANDLER(SPOP, BASIC)             \
-    HANDLER(SRANDMEMBER, BASIC)      \
+    HANDLER(SRANDMEMBER, BASIC | CMD_TYPE_F_RO)      \
     HANDLER(SREM, BASIC)             \
     HANDLER(SUNION, BASIC)           \
     HANDLER(SUNIONSTORE, BASIC)      \
-    HANDLER(SSCAN, BASIC)            \
+    HANDLER(SSCAN, BASIC | CMD_TYPE_F_RO)            \
     /* sorted sets */                \
     HANDLER(ZADD, BASIC)             \
-    HANDLER(ZCARD, BASIC)            \
-    HANDLER(ZCOUNT, BASIC)           \
+    HANDLER(ZCARD, BASIC | CMD_TYPE_F_RO)            \
+    HANDLER(ZCOUNT, BASIC | CMD_TYPE_F_RO)           \
     HANDLER(ZINCRBY, BASIC)          \
     HANDLER(ZINTERSTORE, BASIC)      \
-    HANDLER(ZLEXCOUNT, BASIC)        \
-    HANDLER(ZRANGE, BASIC)           \
-    HANDLER(ZRANGEBYLEX, BASIC)      \
-    HANDLER(ZRANGEBYSCORE, BASIC)    \
-    HANDLER(ZRANK, BASIC)            \
+    HANDLER(ZLEXCOUNT, BASIC | CMD_TYPE_F_RO)        \
+    HANDLER(ZRANGE, BASIC | CMD_TYPE_F_RO)           \
+    HANDLER(ZRANGEBYLEX, BASIC | CMD_TYPE_F_RO)      \
+    HANDLER(ZRANGEBYSCORE, BASIC | CMD_TYPE_F_RO)    \
+    HANDLER(ZRANK, BASIC | CMD_TYPE_F_RO)            \
     HANDLER(ZREM, BASIC)             \
     HANDLER(ZREMRANGEBYLEX, BASIC)   \
     HANDLER(ZREMRANGEBYRANK, BASIC)  \
     HANDLER(ZREMRANGEBYSCORE, BASIC) \
-    HANDLER(ZREVRANGE, BASIC)        \
-    HANDLER(ZREVRANGEBYLEX, BASIC)   \
-    HANDLER(ZREVRANGEBYSCORE, BASIC) \
-    HANDLER(ZREVRANK, BASIC)         \
-    HANDLER(ZSCORE, BASIC)           \
+    HANDLER(ZREVRANGE, BASIC | CMD_TYPE_F_RO)        \
+    HANDLER(ZREVRANGEBYLEX, BASIC | CMD_TYPE_F_RO)   \
+    HANDLER(ZREVRANGEBYSCORE, BASIC | CMD_TYPE_F_RO) \
+    HANDLER(ZREVRANK, BASIC | CMD_TYPE_F_RO)         \
+    HANDLER(ZSCORE, BASIC | CMD_TYPE_F_RO)           \
     HANDLER(ZUNIONSTORE, BASIC)      \
-    HANDLER(ZSCAN, BASIC)            \
+    HANDLER(ZSCAN, BASIC | CMD_TYPE_F_RO)            \
     /* hyperloglog */                \
     HANDLER(PFADD, BASIC)            \
     HANDLER(PFCOUNT, BASIC)          \
@@ -290,7 +290,8 @@ static int cmd_get_type(struct command *cmd, struct pos_array *pos)
         return CORVUS_ERR;
     }
     cmd->cmd_type = item->value;
-    return item->type;
+    cmd->cmd_ro = item->type & CMD_TYPE_F_RO ? 1 : 0;
+    return item->type & CMD_TYPE_F_MASK;
 }
 
 static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *latency)
@@ -359,7 +360,7 @@ int cmd_forward_basic(struct command *cmd)
         return CORVUS_ERR;
     }
 
-    server = conn_get_server(ctx, slot);
+    server = conn_get_server(ctx, slot, cmd->cmd_ro);
     if (server == NULL) {
         LOG(ERROR, "cmd_forward_basic: fail to get server with slot %d", slot);
         return CORVUS_ERR;
@@ -368,7 +369,7 @@ int cmd_forward_basic(struct command *cmd)
 
     server->info->last_active = time(NULL);
 
-    LOG(DEBUG, "command with slot %d ready", slot);
+    LOG(DEBUG, "command with slot %d ready(%d => %d)", slot, cmd->cmd_ro, cmd->cmd_type);
 
     STAILQ_INSERT_TAIL(&server->info->ready_queue, cmd, ready_next);
     if (conn_register(server) == -1) {
@@ -835,7 +836,7 @@ void cmd_gen_multikey_iovec(struct command *cmd, struct iov_data *iov)
 
 void cmd_mark(struct command *cmd, int fail)
 {
-    LOG(DEBUG, "mark cmd %p", cmd);
+    LOG(DEBUG, "mark cmd %p:%d", cmd, fail);
     struct command *root = NULL;
     if (fail) cmd->cmd_fail = true;
 

@@ -8,12 +8,17 @@
 #define DEFAULT_SNDBUF 32768
 #define IP_LEN 45
 #define DSN_LEN (IP_LEN + 8)
+#define ADDR_F_RO      1
+#define ADDR_F_SENT_RO 1 << 1
+#define ADDR_F_RECV_RO 1 << 2
+
 
 struct iovec;
 
 struct address {
     char ip[IP_LEN + 1];
     uint16_t port;
+    uint8_t ro;
 };
 
 int socket_accept(int fd, char *ip, size_t ip_len, int *port);
