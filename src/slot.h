@@ -17,13 +17,10 @@ enum {
 };
 
 struct node_info {
-    struct {
-        struct address *nodes;
-        int index;
-        int len;
-    } slaves;
-    struct address master;
-    bool dsn_added;
+    struct address *nodes;
+    size_t index;
+    size_t len;
+    bool slave_added;
 };
 
 uint16_t slot_get(struct pos_array *pos);

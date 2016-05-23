@@ -69,8 +69,13 @@ int config_add(char *name, char *value)
         }
     } else if (strcmp(name, "syslog") == 0) {
         config_boolean(&config.syslog, value);
-    } else if (strcmp(name, "readslave") == 0) {
+    } else if (strcmp(name, "read-slave") == 0) {
         config_boolean(&config.readslave, value);
+    } else if (strcmp(name, "read-master-slave") == 0) {
+        config_boolean(&config.readmasterslave, value);
+        if (config.readmasterslave) {
+            config.readslave = true;
+        }
     } else if (strcmp(name, "thread") == 0) {
         config.thread = atoi(value);
         if (config.thread <= 0) config.thread = 4;

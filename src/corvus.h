@@ -99,6 +99,7 @@ struct {
     int metric_interval;
     bool stats;
     bool readslave;
+    bool readmasterslave;
     char *requirepass;
     int64_t client_timeout;
     int64_t server_timeout;
