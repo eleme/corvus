@@ -155,7 +155,8 @@
     HANDLER(INFO,              EXTRA,    UNKNOWN) \
     HANDLER(PROXY,             EXTRA,    UNKNOWN) \
     HANDLER(QUIT,              UNIMPL,   UNKNOWN) \
-    HANDLER(SELECT,            UNIMPL,   UNKNOWN)
+    HANDLER(SELECT,            UNIMPL,   UNKNOWN) \
+    HANDLER(TIME,              EXTRA,    UNKNOWN)
 
 #define CMD_INCREF(cmd)                                   \
 do {                                                      \
@@ -627,6 +628,32 @@ int cmd_auth(struct command *cmd, struct redis_data *data)
     return CORVUS_OK;
 }
 
+int cmd_time(struct command *cmd)
+{
+	struct timeval tm;
+	int ret = gettimeofday(&tm, NULL);
+	if (ret) {
+		return CORVUS_ERR;
+	}
+	char time_fmt[100];
+	char time_sec[15];
+	char time_us[10];
+	snprintf(time_sec, sizeof(time_sec), "%d", tm.tv_sec);
+	snprintf(time_us, sizeof(time_us), "%d", tm.tv_usec);
+	int size = snprintf(time_fmt, sizeof(time_fmt),
+	        "*2\r\n"
+	        "$%d\r\n"
+	        "%s\r\n"
+	        "$%d\r\n"
+			"%s\r\n",
+	        strlen(time_sec), time_sec, strlen(time_us), time_us);
+	conn_add_data(cmd->client, (uint8_t*)time_fmt, size,
+			&cmd->rep_buf[0], &cmd->rep_buf[1]);
+	CMD_INCREF(cmd);
+	cmd_mark_done(cmd);
+    return CORVUS_OK;
+}
+
 int cmd_extra(struct command *cmd, struct redis_data *data)
 {
     switch (cmd->cmd_type) {
@@ -638,6 +665,8 @@ int cmd_extra(struct command *cmd, struct redis_data *data)
             return cmd_proxy(cmd, data);
         case CMD_AUTH:
             return cmd_auth(cmd, data);
+        case CMD_TIME:
+        	return cmd_time(cmd);
         default:
             LOG(ERROR, "%s: unknown command type %d", __func__, cmd->cmd_type);
             return CORVUS_ERR;
