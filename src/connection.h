@@ -78,7 +78,7 @@ void conn_free(struct connection *conn);
 void conn_buf_free(struct connection *conn);
 void conn_recycle(struct context *ctx, struct connection *conn);
 struct connection *conn_get_server_from_pool(struct context *ctx, struct address *addr);
-struct connection *conn_get_server(struct context *ctx, uint16_t slot);
+struct connection *conn_get_server(struct context *ctx, uint16_t slot, uint8_t cmd_ro);
 struct mbuf *conn_get_buf(struct connection *conn, bool unprocessed, bool local);
 int conn_create_fd();
 int conn_register(struct connection *conn);

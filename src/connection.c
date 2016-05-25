@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <errno.h>
 #include "corvus.h"
 #include "socket.h"
 #include "command.h"
@@ -71,6 +72,8 @@ static struct connection *conn_create_server(struct context *ctx, struct address
     struct connection *server = server_create(ctx, fd);
     struct conn_info *info = server->info;
     memcpy(&info->addr, addr, sizeof(info->addr));
+    LOG(ERROR, "conn_create_server: connect %s:%d",
+                    info->addr.ip, info->addr.port);
 
     if (conn_connect(server) == CORVUS_ERR) {
         LOG(ERROR, "conn_create_server: fail to connect %s:%d",
@@ -280,6 +283,7 @@ struct connection *conn_get_server_from_pool(struct context *ctx, struct address
     }
 
     server = conn_create_server(ctx, addr, key);
+
     return server;
 }
 
@@ -300,12 +304,12 @@ struct connection *conn_get_raw_server(struct context *ctx)
     return server;
 }
 
-struct connection *conn_get_server(struct context *ctx, uint16_t slot)
+struct connection *conn_get_server(struct context *ctx, uint16_t slot, uint8_t cmd_ro)
 {
     struct address addr;
     struct connection *server = NULL;
 
-    server = slot_get_node_addr(slot, &addr) ?
+    server = slot_get_node_addr(slot, &addr, cmd_ro) ?
         conn_get_server_from_pool(ctx, &addr) :
         conn_get_raw_server(ctx);
     return server;

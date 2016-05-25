@@ -313,6 +313,7 @@ void socket_address_init(struct address *addr, char *ip, int len, int port)
     }
     addr->ip[size] = '\0';
     addr->port = port;
+    addr->ro = 0;
 }
 
 int socket_parse_port(char *ptr, uint16_t *res)

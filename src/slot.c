@@ -46,7 +46,7 @@ static struct {
 } addr_list;
 
 static struct {
-    struct node_info nodes[REDIS_CLUSTER_SLOTS];
+    struct node_info nodes[REDIS_NODES_MAX];
     struct dict map;
     int idx;
 } node_store;
@@ -103,15 +103,24 @@ void addr_add(char *ip, uint16_t port)
     pthread_rwlock_unlock(&addr_list_lock);
 }
 
-struct node_info *node_info_get(struct address *addr)
+struct node_info *node_info_get(struct address *addrs)
 {
-    if (node_store.idx >= REDIS_CLUSTER_SLOTS) return NULL;
+	int i;
+    if (node_store.idx >= REDIS_NODES_MAX) return NULL;
     struct node_info *node = &node_store.nodes[node_store.idx++];
     memset(node, 0, sizeof(struct node_info));
 
-    addr_add(addr->ip, addr->port);
+    for (i = 0; i < REDIS_NODES_SLAVE_MAX + 1; i ++) {
+    	if (addrs[i].port == 0) break;
+    	addr_add(addrs[i].ip, addrs[i].port);
+    	if (i == 0) {
+    		memcpy(&node->master, &addrs[i], sizeof(struct address));
+    	} else {
+    		memcpy(&node->slaves[i - 1], &addrs[i], sizeof(struct address));
+    		node->slave_count ++;
+    	}
+    }
 
-    memcpy(&node->master, addr, sizeof(struct address));
     return node;
 }
 
@@ -135,19 +144,27 @@ int node_get_addr(struct redis_data *data, struct address *addr)
     return CORVUS_OK;
 }
 
-struct node_info *node_info_find(struct redis_data *data)
+struct node_info *node_info_find(struct redis_data *data, size_t count)
 {
-    struct address addr;
-    if (node_get_addr(data, &addr) == CORVUS_ERR) {
-        return NULL;
+	int i;
+    struct address addrs[REDIS_NODES_SLAVE_MAX + 1];
+    for (i = 0; i < count && i < REDIS_NODES_SLAVE_MAX + 1; i ++) {
+		if (node_get_addr(data, &addrs[i]) == CORVUS_ERR) {
+			//master
+			if (i == 0) return NULL;
+			break;
+		}
+		if (i > 0)
+			addrs[i].ro |= ADDR_F_RO;
+		data ++;
     }
 
     char key[DSN_LEN + 1];
-    socket_get_key(&addr, key);
+    socket_get_key(&addrs[0], key);
 
     struct node_info *node = dict_get(&node_store.map, key);
     if (node == NULL) {
-        node = node_info_get(&addr);
+        node = node_info_get(addrs);
         if (node == NULL) return NULL;
         dict_set(&node_store.map, key, node);
     }
@@ -181,7 +198,7 @@ int parse_slots(struct redis_data *data)
 
         if (d->elements < 3) return CORVUS_ERR;
 
-        node = node_info_find(&d->element[2]);
+        node = node_info_find(&d->element[2], d->elements - 2);
         if (node == NULL) return CORVUS_ERR;
 
         ASSERT_TYPE(&d->element[0], REP_INTEGER);
@@ -417,14 +434,29 @@ end:
     return crc16(pos) & 0x3FFF;
 }
 
-int slot_get_node_addr(uint16_t slot, struct address *addr)
+int slot_get_node_addr(uint16_t slot, struct address *addr, int8_t cmd_ro)
 {
     int res = 0;
     struct node_info *info;
     pthread_rwlock_rdlock(&slot_map_lock);
     info = slot_map[slot];
     if (info != NULL) {
-        memcpy(addr, &info->master, sizeof(struct address));
+    	if (cmd_ro > 0 && info->slave_count > 0) {
+    		//readonly
+    		if (info->slave_last >= info->slave_count)
+    			info->slave_last = 0;
+    		else
+    			info->slave_last ++;
+    		if (info->slave_last == info->slave_count) {
+    			//master
+    			memcpy(addr, &info->master, sizeof(struct address));
+    		} else {
+    			//slave
+    			memcpy(addr, &info->slaves[info->slave_last], sizeof(struct address));
+    		}
+    	} else {
+    		memcpy(addr, &info->master, sizeof(struct address));
+    	}
         res = 1;
     }
     pthread_rwlock_unlock(&slot_map_lock);

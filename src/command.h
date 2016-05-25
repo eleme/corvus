@@ -12,6 +12,9 @@
 
 struct context;
 
+#define CMD_TYPE_F_RO    (1 << 7)
+#define CMD_TYPE_F_MASK    ((1 << 7) - 1)
+
 enum {
     CMD_ERR,
     CMD_ERR_MOVED,
@@ -61,6 +64,7 @@ struct command {
     int32_t cmd_type;
     int16_t request_type;
     int16_t reply_type;
+    int8_t  cmd_ro;
     int keys;
     int integer_data; /* for integer response */
 

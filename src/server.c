@@ -34,6 +34,7 @@ do {                                                                      \
 } while (0)
 
 static const char *req_ask = "*1\r\n$6\r\nASKING\r\n";
+static const char *req_ro = "*1\r\n$8\r\nREADONLY\r\n";
 
 void server_make_iov(struct conn_info *info)
 {
@@ -55,6 +56,10 @@ void server_make_iov(struct conn_info *info)
 
         if (cmd->asking) {
             cmd_iov_add(&info->iov, (void*)req_ask, strlen(req_ask), NULL);
+        }
+        if ((info->addr.ro & ADDR_F_RO) && !(info->addr.ro & ADDR_F_SENT_RO)) {
+        	cmd_iov_add(&info->iov, (void*)req_ro, strlen(req_ro), NULL);
+        	info->addr.ro |= ADDR_F_SENT_RO;
         }
         cmd->rep_time[0] = t;
 
@@ -116,13 +121,14 @@ int _server_retry(struct connection *server, struct command *cmd)
     server->info->last_active = time(NULL);
     mbuf_range_clear(cmd->ctx, cmd->rep_buf);
     cmd->server = server;
+    LOG(DEBUG, "server_retry: %p", cmd);
     STAILQ_INSERT_TAIL(&server->info->ready_queue, cmd, ready_next);
     return CORVUS_OK;
 }
 
 int server_retry(struct command *cmd)
 {
-    struct connection *server = conn_get_server(cmd->ctx, cmd->slot);
+    struct connection *server = conn_get_server(cmd->ctx, cmd->slot, cmd->cmd_ro);
 
     switch (_server_retry(server, cmd)) {
         case SERVER_NULL:
@@ -171,6 +177,9 @@ int server_read_reply(struct connection *server, struct command *cmd)
     ATOMIC_INC(server->info->completed_commands, 1);
 
     if (cmd->asking) return CORVUS_ASKING;
+    if ((cmd->server->info->addr.ro & ADDR_F_RO) && (cmd->server->info->addr.ro & ADDR_F_SENT_RO) && !(cmd->server->info->addr.ro & ADDR_F_RECV_RO)) {
+    	return CORVUS_READONLY;
+    }
 
     if (cmd->stale) {
         mbuf_range_clear(cmd->ctx, cmd->rep_buf);
@@ -224,6 +233,12 @@ int server_read(struct connection *server)
         cmd->rep_time[1] = now;
 
         switch (status) {
+        	case CORVUS_READONLY:
+        		LOG(DEBUG, "recv readonly");
+				mbuf_range_clear(cmd->ctx, cmd->rep_buf);
+				cmd->asking = 0;
+				cmd->server->info->addr.ro |= ADDR_F_RECV_RO;
+				continue;
             case CORVUS_ASKING:
                 LOG(DEBUG, "recv asking");
                 mbuf_range_clear(cmd->ctx, cmd->rep_buf);
