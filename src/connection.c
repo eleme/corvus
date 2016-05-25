@@ -28,7 +28,7 @@ do {                                      \
     (var)->field.tqe_prev = NULL;         \
 } while (0)
 
-static int verify_server(struct connection *server)
+static int verify_server(struct connection *server, bool readonly)
 {
     if (server->info == NULL) {
         LOG(ERROR, "verify_server: connection info of server %d is null",
@@ -58,10 +58,14 @@ static int verify_server(struct connection *server)
         return CORVUS_ERR;
     }
     server->registered = false;
+    if (readonly) {
+        server->info->readonly = true;
+    }
     return CORVUS_OK;
 }
 
-static struct connection *conn_create_server(struct context *ctx, struct address *addr, char *key)
+static struct connection *conn_create_server(struct context *ctx,
+        struct address *addr, char *key, bool readonly)
 {
     int fd = conn_create_fd();
     if (fd == -1) {
@@ -81,6 +85,10 @@ static struct connection *conn_create_server(struct context *ctx, struct address
         return NULL;
     }
 
+    if (readonly) {
+        server->info->readonly = true;
+    }
+
     strncpy(info->dsn, key, DSN_LEN);
     dict_set(&ctx->server_table, info->dsn, (void*)server);
     TAILQ_INSERT_TAIL(&ctx->servers, server, next);
@@ -91,6 +99,8 @@ void conn_info_init(struct conn_info *info)
 {
     info->refcount = 0;
     info->authenticated = false;
+    info->readonly = false;
+    info->readonly_sent = false;
 
     memset(&info->addr, 0, sizeof(info->addr));
     memset(info->dsn, 0, sizeof(info->dsn));
@@ -267,7 +277,8 @@ int conn_create_fd()
     return fd;
 }
 
-struct connection *conn_get_server_from_pool(struct context *ctx, struct address *addr)
+struct connection *conn_get_server_from_pool(struct context *ctx,
+        struct address *addr, bool readonly)
 {
     struct connection *server = NULL;
     char key[DSN_LEN + 1];
@@ -275,11 +286,11 @@ struct connection *conn_get_server_from_pool(struct context *ctx, struct address
     socket_get_key(addr, key);
     server = dict_get(&ctx->server_table, key);
     if (server != NULL) {
-        if (verify_server(server) == CORVUS_ERR) return NULL;
+        if (verify_server(server, readonly) == CORVUS_ERR) return NULL;
         return server;
     }
 
-    server = conn_create_server(ctx, addr, key);
+    server = conn_create_server(ctx, addr, key, readonly);
     return server;
 }
 
@@ -289,7 +300,7 @@ struct connection *conn_get_raw_server(struct context *ctx)
     struct connection *server = NULL;
 
     for (i = 0; i < config.node.len; i++) {
-        server = conn_get_server_from_pool(ctx, &config.node.addr[i]);
+        server = conn_get_server_from_pool(ctx, &config.node.addr[i], false);
         if (server == NULL) continue;
         break;
     }
@@ -300,15 +311,25 @@ struct connection *conn_get_raw_server(struct context *ctx)
     return server;
 }
 
-struct connection *conn_get_server(struct context *ctx, uint16_t slot)
+struct connection *conn_get_server(struct context *ctx, uint16_t slot,
+        int access)
 {
-    struct address addr;
-    struct connection *server = NULL;
+    struct address master, slave, *addr;
+    memset(&slave, 0, sizeof(slave));
+    bool readonly;
 
-    server = slot_get_node_addr(slot, &addr) ?
-        conn_get_server_from_pool(ctx, &addr) :
-        conn_get_raw_server(ctx);
-    return server;
+    bool hitted = slot_get_node_addr(ctx, slot, &master, &slave);
+    if (hitted) {
+        if (!config.readslave || slave.port == 0 || access == CMD_ACCESS_WRITE) {
+            addr = &master;
+            readonly = false;
+        } else {
+            addr = &slave;
+            readonly = true;
+        }
+        return conn_get_server_from_pool(ctx, addr, readonly);
+    }
+    return conn_get_raw_server(ctx);
 }
 
 /*

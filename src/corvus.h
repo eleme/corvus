@@ -21,6 +21,7 @@
 #define CORVUS_EOF -3
 #define CORVUS_INPROGRESS -4
 #define CORVUS_ASKING -5
+#define CORVUS_READONLY -6
 
 #define THREAD_STACK_SIZE (1024*1024*4)
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
@@ -70,6 +71,8 @@ struct context {
     struct dict server_table;
     struct conn_tqh conns;
 
+    unsigned int seed;
+
     struct conn_tqh servers;
 
     /* event */
@@ -95,6 +98,8 @@ struct {
     char statsd_addr[DSN_LEN + 1];
     int metric_interval;
     bool stats;
+    bool readslave;
+    bool readmasterslave;
     char *requirepass;
     int64_t client_timeout;
     int64_t server_timeout;

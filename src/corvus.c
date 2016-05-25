@@ -42,6 +42,21 @@ void config_init()
     config.metric_interval = 10;
 }
 
+void config_boolean(bool *item, char *value)
+{
+    if (strcasecmp(value, "false") == 0) {
+        *item = false;
+    } else if (strcasecmp(value, "true") == 0) {
+        *item = true;
+    } else {
+        if (atoi(value) == 0) {
+            *item = false;
+        } else {
+            *item = true;
+        }
+    }
+}
+
 int config_add(char *name, char *value)
 {
     int val;
@@ -53,7 +68,14 @@ int config_add(char *name, char *value)
             return CORVUS_ERR;
         }
     } else if (strcmp(name, "syslog") == 0) {
-        config.syslog = atoi(value) ? 1 : 0;
+        config_boolean(&config.syslog, value);
+    } else if (strcmp(name, "read-slave") == 0) {
+        config_boolean(&config.readslave, value);
+    } else if (strcmp(name, "read-master-slave") == 0) {
+        config_boolean(&config.readmasterslave, value);
+        if (config.readmasterslave) {
+            config.readslave = true;
+        }
     } else if (strcmp(name, "thread") == 0) {
         config.thread = atoi(value);
         if (config.thread <= 0) config.thread = 4;
@@ -278,6 +300,7 @@ void context_init(struct context *ctx)
     dict_init(&ctx->server_table);
     ctx->state = CTX_UNKNOWN;
     mbuf_init(ctx);
+    ctx->seed = time(NULL);
 
     STAILQ_INIT(&ctx->free_cmdq);
     STAILQ_INIT(&ctx->free_conn_infoq);

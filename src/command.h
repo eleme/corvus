@@ -17,6 +17,10 @@ enum {
     CMD_ERR_MOVED,
     CMD_ERR_ASK,
     CMD_ERR_CLUSTERDOWN,
+
+    CMD_ACCESS_UNKNOWN,
+    CMD_ACCESS_WRITE,
+    CMD_ACCESS_READ,
 };
 
 STAILQ_HEAD(cmd_tqh, command);
@@ -59,6 +63,7 @@ struct command {
 
     int32_t slot;
     int32_t cmd_type;
+    int32_t cmd_access;
     int16_t request_type;
     int16_t reply_type;
     int keys;

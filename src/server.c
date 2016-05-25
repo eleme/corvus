@@ -34,11 +34,18 @@ do {                                                                      \
 } while (0)
 
 static const char *req_ask = "*1\r\n$6\r\nASKING\r\n";
+static const char *req_readonly = "*1\r\n$8\r\nREADONLY\r\n";
 
 void server_make_iov(struct conn_info *info)
 {
     struct command *cmd;
     int64_t t = get_time();
+
+    if (info->readonly) {
+        cmd_iov_add(&info->iov, (void*)req_readonly, strlen(req_readonly), NULL);
+        info->readonly = false;
+        info->readonly_sent = true;
+    }
 
     while (!STAILQ_EMPTY(&info->ready_queue)) {
         if (info->iov.len - info->iov.cursor > CORVUS_IOV_MAX) {
@@ -122,7 +129,7 @@ int _server_retry(struct connection *server, struct command *cmd)
 
 int server_retry(struct command *cmd)
 {
-    struct connection *server = conn_get_server(cmd->ctx, cmd->slot);
+    struct connection *server = conn_get_server(cmd->ctx, cmd->slot, cmd->cmd_access);
 
     switch (_server_retry(server, cmd)) {
         case SERVER_NULL:
@@ -149,7 +156,8 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
         return CORVUS_OK;
     }
 
-    struct connection *server = conn_get_server_from_pool(cmd->ctx, &addr);
+    // redirection always points to master
+    struct connection *server = conn_get_server_from_pool(cmd->ctx, &addr, false);
 
     switch (_server_retry(server, cmd)) {
         case SERVER_NULL:
@@ -169,6 +177,10 @@ int server_read_reply(struct connection *server, struct command *cmd)
     if (status != CORVUS_OK) return status;
 
     ATOMIC_INC(server->info->completed_commands, 1);
+
+    if (server->info->readonly_sent) {
+        return CORVUS_READONLY;
+    }
 
     if (cmd->asking) return CORVUS_ASKING;
 
@@ -228,6 +240,11 @@ int server_read(struct connection *server)
                 LOG(DEBUG, "recv asking");
                 mbuf_range_clear(cmd->ctx, cmd->rep_buf);
                 cmd->asking = 0;
+                continue;
+            case CORVUS_READONLY:
+                LOG(DEBUG, "recv readonly");
+                mbuf_range_clear(cmd->ctx, cmd->rep_buf);
+                server->info->readonly_sent = false;
                 continue;
             case CORVUS_OK:
                 STAILQ_REMOVE_HEAD(&info->waiting_queue, waiting_next);

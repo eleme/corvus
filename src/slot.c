@@ -10,8 +10,10 @@
 #include "slot.h"
 #include "socket.h"
 #include "logging.h"
+#include "alloc.h"
 
 #define MAX_UPDATE_NODES 16
+#define SLAVE_NODES 4
 
 struct map_item {
     uint32_t hash;
@@ -78,11 +80,10 @@ void slot_map_clear()
     DICT_FOREACH(&node_store.map, &iter) {
         node_info = (struct node_info *)iter.value;
         if (node_list.len >= MAX_UPDATE_NODES) break;
-        memcpy(&node_list.nodes[node_list.len++], &node_info->master, sizeof(struct address));
+        memcpy(&node_list.nodes[node_list.len++], &node_info->nodes[0], sizeof(struct address));
     }
     node_store.idx = 0;
     dict_clear(&node_store.map);
-    memset(node_store.nodes, 0, sizeof(node_store.nodes));
 
     if (node_list.len <= 0) node_list_init();
 }
@@ -107,11 +108,17 @@ struct node_info *node_info_get(struct address *addr)
 {
     if (node_store.idx >= REDIS_CLUSTER_SLOTS) return NULL;
     struct node_info *node = &node_store.nodes[node_store.idx++];
-    memset(node, 0, sizeof(struct node_info));
+    node->index = 0;
 
     addr_add(addr->ip, addr->port);
 
-    memcpy(&node->master, addr, sizeof(struct address));
+    if (node->len <= node->index) {
+        node->len = (node->len == 0) ? SLAVE_NODES + 1 : node->len << 1;
+        node->nodes = cv_realloc(node->nodes, node->len * sizeof(struct address));
+    }
+
+    memcpy(&node->nodes[node->index++], addr, sizeof(struct address));
+    node->slave_added = false;
     return node;
 }
 
@@ -154,7 +161,7 @@ struct node_info *node_info_find(struct redis_data *data)
     return node;
 }
 
-int node_info_add_addr(struct redis_data *data)
+int node_info_add_addr(struct redis_data *data, struct node_info *node)
 {
     struct address addr;
     if (node_get_addr(data, &addr) == CORVUS_ERR) {
@@ -162,6 +169,15 @@ int node_info_add_addr(struct redis_data *data)
     }
 
     addr_add(addr.ip, addr.port);
+
+    if (config.readslave) {
+        if (node->len <= node->index) {
+            node->len <<= 1;
+            node->nodes = cv_realloc(node->nodes, node->len * sizeof(struct address));
+        }
+        memcpy(&node->nodes[node->index++], &addr, sizeof(addr));
+    }
+
     return CORVUS_OK;
 }
 
@@ -187,18 +203,18 @@ int parse_slots(struct redis_data *data)
         ASSERT_TYPE(&d->element[0], REP_INTEGER);
         ASSERT_TYPE(&d->element[1], REP_INTEGER);
 
-        for (j = d->element[0].integer; j < d->element[1].integer + 1; j++) {
-            count++;
-            slot_map[j] = node;
-        }
-
-        if (!node->dsn_added && d->elements - 3 > 0) {
+        if (!node->slave_added && d->elements - 3 > 0) {
             for (h = 3; h < d->elements; h++) {
-                if (node_info_add_addr(&d->element[h]) == CORVUS_ERR) {
+                if (node_info_add_addr(&d->element[h], node) == CORVUS_ERR) {
                     return CORVUS_ERR;
                 }
             }
-            node->dsn_added = 1;
+            node->slave_added = true;
+        }
+
+        for (j = d->element[0].integer; j < d->element[1].integer + 1; j++) {
+            count++;
+            slot_map[j] = node;
         }
     }
 
@@ -353,6 +369,9 @@ void *slot_manager(void *data)
     pthread_mutex_unlock(&job_mutex);
 
     dict_free(&node_store.map);
+    for (int i = 0; i < REDIS_CLUSTER_SLOTS; i++) {
+        cv_free(node_store.nodes[i].nodes);
+    }
 
     pthread_rwlock_destroy(&slot_map_lock);
     pthread_rwlock_destroy(&addr_list_lock);
@@ -417,15 +436,23 @@ end:
     return crc16(pos) & 0x3FFF;
 }
 
-int slot_get_node_addr(uint16_t slot, struct address *addr)
+bool slot_get_node_addr(struct context *ctx, uint16_t slot, struct address *addr,
+        struct address *slave)
 {
-    int res = 0;
+    bool res = false;
     struct node_info *info;
     pthread_rwlock_rdlock(&slot_map_lock);
     info = slot_map[slot];
     if (info != NULL) {
-        memcpy(addr, &info->master, sizeof(struct address));
-        res = 1;
+        memcpy(addr, &info->nodes[0], sizeof(struct address));
+        if (config.readslave && info->index > 1) {
+            int r = rand_r(&ctx->seed);
+            if (!config.readmasterslave || r % info->index != 0) {
+                int i = r % (info->index - 1);
+                memcpy(slave, &info->nodes[++i], sizeof(struct address));
+            }
+        }
+        res = true;
     }
     pthread_rwlock_unlock(&slot_map_lock);
     return res;
