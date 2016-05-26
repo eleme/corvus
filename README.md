@@ -90,7 +90,7 @@ Commands
 * `DEL`: split to multiple single key `DEL`.
 * `EXISTS`: split to multiple single key `EXISTS`.
 * `PING`: ignored and won't be forwarded.
-* `INFO`: won't be forwarded to backend redis, information collected in proxy
+* `INFO`, `TIME`: won't be forwarded to backend redis, information collected in proxy
    will be returned.
 
 #### Restricted commands
@@ -120,7 +120,7 @@ all backend redis instances.
 * `CLUSTER`.
 * `AUTH`, `ECHO`, `QUIT`, `SELECT`.
 * `BGREWRITEAOF`, `BGSAVE`, `CLIENT`, `COMMAND`, `CONFIG`, `DBSIZE`, `DEBUG`, `FLUSHALL`,
-   `FLUSHDB`, `LASTSAVE`, `MONITOR`, `ROLE`, `SAVE`, `SHUTDOWN`, `SLAVEOF`, `SLOWLOG`, `SYNC`, `TIME`.
+   `FLUSHDB`, `LASTSAVE`, `MONITOR`, `ROLE`, `SAVE`, `SHUTDOWN`, `SLAVEOF`, `SLOWLOG`, `SYNC`.
 
 License
 -------
