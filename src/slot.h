@@ -5,6 +5,7 @@
 #include "parser.h"
 #include "socket.h"
 
+#define MAX_DESC_PART_LEN 64
 #define REDIS_CLUSTER_SLOTS 16384
 
 struct context;
@@ -16,11 +17,24 @@ enum {
     SLOT_UPDATER_QUIT,
 };
 
+struct desc_part {
+    char data[MAX_DESC_PART_LEN];
+    uint8_t len;
+};
+
+struct node_desc {
+    struct desc_part *parts;
+    uint16_t index, len;
+};
+
 struct node_info {
+    char name[64];
     struct address *nodes;
     size_t index;
     size_t len;
     bool slave_added;
+    struct desc_part *slot_spec;
+    int spec_length;
 };
 
 uint16_t slot_get(struct pos_array *pos);

@@ -15,18 +15,8 @@
 #define MAX_UPDATE_NODES 16
 #define SLAVE_NODES 4
 
-struct map_item {
-    uint32_t hash;
-    struct node_info *node;
-};
-
-enum {
-    SLOT_MAP_NEW,
-    SLOT_MAP_DIRTY,
-};
-
 static struct node_info *slot_map[REDIS_CLUSTER_SLOTS];
-static const char SLOTS_CMD[] = "*2\r\n$7\r\nCLUSTER\r\n$5\r\nSLOTS\r\n";
+static const char SLOTS_CMD[] = "*2\r\n$7\r\nCLUSTER\r\n$5\r\nNODES\r\n";
 
 static int8_t in_progress = 0;
 static pthread_mutex_t job_mutex;
@@ -104,121 +94,143 @@ void addr_add(char *ip, uint16_t port)
     pthread_rwlock_unlock(&addr_list_lock);
 }
 
-struct node_info *node_info_get(struct address *addr)
+struct node_info *node_info_get()
 {
-    if (node_store.idx >= REDIS_CLUSTER_SLOTS) return NULL;
-    struct node_info *node = &node_store.nodes[node_store.idx++];
-    node->index = 0;
-
-    addr_add(addr->ip, addr->port);
-
-    if (node->len <= node->index) {
-        node->len = (node->len == 0) ? SLAVE_NODES + 1 : node->len << 1;
-        node->nodes = cv_realloc(node->nodes, node->len * sizeof(struct address));
-    }
-
-    memcpy(&node->nodes[node->index++], addr, sizeof(struct address));
-    node->slave_added = false;
-    return node;
-}
-
-int node_get_addr(struct redis_data *data, struct address *addr)
-{
-    if (data->elements != 2) return CORVUS_ERR;
-
-    ASSERT_TYPE(&data->element[0], REP_STRING);
-    ASSERT_TYPE(&data->element[1], REP_INTEGER);
-
-    struct pos_array *p = &data->element[0].pos;
-    if (p->str_len <= 0) return CORVUS_ERR;
-
-    char ip[p->str_len + 1];
-    if (pos_to_str(p, ip) == CORVUS_ERR) {
-        return CORVUS_ERR;
-    }
-
-    uint16_t port = data->element[1].integer;
-    socket_address_init(addr, ip, p->str_len, port);
-    return CORVUS_OK;
-}
-
-struct node_info *node_info_find(struct redis_data *data)
-{
-    struct address addr;
-    if (node_get_addr(data, &addr) == CORVUS_ERR) {
+    if (node_store.idx >= REDIS_CLUSTER_SLOTS) {
         return NULL;
     }
 
-    char key[DSN_LEN + 1];
-    socket_get_key(&addr, key);
-
-    struct node_info *node = dict_get(&node_store.map, key);
-    if (node == NULL) {
-        node = node_info_get(&addr);
-        if (node == NULL) return NULL;
-        dict_set(&node_store.map, key, node);
-    }
-    return node;
+    struct node_info *n = &node_store.nodes[node_store.idx++];
+    n->index = 1;
+    return n;
 }
 
-int node_info_add_addr(struct redis_data *data, struct node_info *node)
+void node_desc_add(struct node_desc *b, uint8_t *start, uint8_t *end, bool partial)
 {
-    struct address addr;
-    if (node_get_addr(data, &addr) == CORVUS_ERR) {
-        return CORVUS_ERR;
+    if (b->len <= b->index) {
+        b->len = (b->len <= 0) ? 16 : b->len << 1;
+        b->parts = cv_realloc(b->parts, sizeof(struct desc_part) * b->len);
+        memset(b->parts + b->index, 0,
+                sizeof(struct desc_part) * (b->len - b->index));
+    }
+    struct desc_part *d = &b->parts[b->index];
+    memcpy(d->data + d->len, start, end - start);
+    d->len += end - start;
+    if (!partial) {
+        b->index++;
+    }
+}
+
+int split_node_description(struct node_desc *desc, struct pos_array *pos_array)
+{
+    int i, desc_count = 0;
+    for(i = 0; i < pos_array->pos_len; i++) {
+        struct pos *pos = &pos_array->items[i];
+        uint8_t *p = pos->str, *s = p;
+        while (p - pos->str < pos->len) {
+            if (*p == ' ' || *p == '\n') {
+                node_desc_add(&desc[desc_count], s, p, false);
+                s = p + 1;
+            }
+            if (*(p++) == '\n') {
+                desc_count++;
+            }
+        }
+        if (p > s) {
+            node_desc_add(&desc[desc_count], s, p, true);
+        }
+    }
+    return desc_count;
+}
+
+int parse_slots(struct dict *node_map)
+{
+    char *p;
+    int start, stop, slot_count = 0;
+
+    struct dict_iter iter = DICT_ITER_INITIALIZER;
+    DICT_FOREACH(node_map, &iter) {
+        struct node_info *n = iter.value;
+        for (size_t i = 0; i < n->index; i++) {
+            addr_add(n->nodes[i].ip, n->nodes[i].port);
+        }
+
+        for (int i = 0; i < n->spec_length; i++) {
+            if (n->slot_spec[i].data[0] == '[') {
+                continue;
+            }
+            if ((p = strchr(n->slot_spec[i].data, '-')) != NULL) {
+                *p = '\0';
+                start = atoi(n->slot_spec[i].data);
+                stop = atoi(p + 1);
+            } else {
+                start = stop = atoi(n->slot_spec[i].data);
+            }
+            while (start <= stop) {
+                slot_count++;
+                slot_map[start++] = n;
+            }
+        }
+    }
+    return slot_count;
+}
+
+int parse_cluster_nodes(struct redis_data *data)
+{
+    ASSERT_TYPE(data, REP_STRING);
+
+    struct dict node_map;
+    dict_init(&node_map);
+
+    struct node_desc desc[REDIS_CLUSTER_SLOTS];
+    memset(desc, 0, sizeof(desc));
+    int slot_count = 0, node_count = split_node_description(desc, &data->pos);
+    if (node_count <= 0) {
+        LOG(ERROR, "fail to parse cluster nodes infomation");
+        goto end;
     }
 
-    addr_add(addr.ip, addr.port);
-
-    if (config.readslave) {
+    for (int i = 0; i < node_count; i++) {
+        struct node_desc *d = &desc[i];
+        if (d->index <= 0) {
+            goto end;
+        }
+        if (strcasecmp(d->parts[0].data, "vars") == 0) {
+            continue;
+        }
+        if (d->index < 8) {
+            goto end;
+        }
+        bool is_master = d->parts[3].data[0] == '-';
+        char *name = is_master ? d->parts[0].data : d->parts[3].data;
+        struct node_info *node = dict_get(&node_map, name);
+        if (node == NULL) {
+            node = node_info_get();
+            if (node == NULL) {
+                goto end;
+            }
+            strcpy(node->name, name);
+            dict_set(&node_map, node->name, node);
+        }
         if (node->len <= node->index) {
-            node->len <<= 1;
+            node->len = (node->len == 0) ? 4 : node->len << 1;
             node->nodes = cv_realloc(node->nodes, node->len * sizeof(struct address));
         }
-        memcpy(&node->nodes[node->index++], &addr, sizeof(addr));
-    }
-
-    return CORVUS_OK;
-}
-
-int parse_slots(struct redis_data *data)
-{
-    size_t i, h;
-    long long j;
-    int count = 0;
-    struct redis_data *d;
-    struct node_info *node;
-
-    ASSERT_TYPE(data, REP_ARRAY);
-    if (data->elements <= 0) return CORVUS_ERR;
-
-    for (i = 0; i < data->elements; i++) {
-        d = &data->element[i];
-
-        if (d->elements < 3) return CORVUS_ERR;
-
-        node = node_info_find(&d->element[2]);
-        if (node == NULL) return CORVUS_ERR;
-
-        ASSERT_TYPE(&d->element[0], REP_INTEGER);
-        ASSERT_TYPE(&d->element[1], REP_INTEGER);
-
-        if (!node->slave_added && d->elements - 3 > 0) {
-            for (h = 3; h < d->elements; h++) {
-                if (node_info_add_addr(&d->element[h], node) == CORVUS_ERR) {
-                    return CORVUS_ERR;
-                }
-            }
-            node->slave_added = true;
-        }
-
-        for (j = d->element[0].integer; j < d->element[1].integer + 1; j++) {
-            count++;
-            slot_map[j] = node;
+        socket_parse_addr(d->parts[1].data, &node->nodes[is_master ? 0 : node->index++]);
+        if (is_master) {
+            node->slot_spec = &d->parts[8];
+            node->spec_length = d->index - 8;
         }
     }
 
-    return count;
+    slot_count = parse_slots(&node_map);
+
+end:
+    dict_free(&node_map);
+    for (int i = 0; i < desc->index; i++) {
+        cv_free(desc[i].parts);
+    }
+    return slot_count;
 }
 
 int slot_parse_data(struct reader *r, struct mbuf *buf, int *count)
@@ -231,7 +243,7 @@ int slot_parse_data(struct reader *r, struct mbuf *buf, int *count)
         }
 
         if (reader_ready(r)) {
-            *count = parse_slots(&r->data);
+            *count = parse_cluster_nodes(&r->data);
             redis_data_free(&r->data);
             break;
         }
