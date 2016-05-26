@@ -92,6 +92,7 @@ Commands
 * `PING`: ignored and won't be forwarded.
 * `INFO`, `TIME`: won't be forwarded to backend redis, information collected in proxy
    will be returned.
+* `AUTH`: do authentication in proxy.
 
 #### Restricted commands
 
@@ -118,7 +119,7 @@ all backend redis instances.
 * `EVALSHA`, `SCRIPT`.
 * `DISCARD`, `EXEC`, `MULTI`, `UNWATCH`, `WATCH`.
 * `CLUSTER`.
-* `AUTH`, `ECHO`, `QUIT`, `SELECT`.
+* `ECHO`, `QUIT`, `SELECT`.
 * `BGREWRITEAOF`, `BGSAVE`, `CLIENT`, `COMMAND`, `CONFIG`, `DBSIZE`, `DEBUG`, `FLUSHALL`,
    `FLUSHDB`, `LASTSAVE`, `MONITOR`, `ROLE`, `SAVE`, `SHUTDOWN`, `SLAVEOF`, `SLOWLOG`, `SYNC`.
 

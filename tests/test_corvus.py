@@ -3069,6 +3069,10 @@ def test_info():
     assert r.info()
 
 
+def test_time():
+    assert type(r.time()) is tuple
+
+
 def test_large_value(delete_keys):
     delete_keys.keys("hello")
 

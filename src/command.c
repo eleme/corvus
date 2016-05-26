@@ -633,14 +633,14 @@ int cmd_time(struct command *cmd)
 {
     struct timeval tm;
     if (gettimeofday(&tm, NULL) == -1) {
-    	LOG(ERROR, "cmd_time: %s", strerror(errno));
+        LOG(ERROR, "cmd_time: %s", strerror(errno));
         return CORVUS_ERR;
     }
     char time_fmt[100];
     char time_sec[21];
     char time_us[21];
-    int sec_len = snprintf(time_sec, sizeof(time_sec) - 1, "%ld", tm.tv_sec);
-    int usec_len = snprintf(time_us, sizeof(time_us) - 1, "%ld", tm.tv_usec);
+    int sec_len = snprintf(time_sec, sizeof(time_sec), "%ld", tm.tv_sec);
+    int usec_len = snprintf(time_us, sizeof(time_us), "%ld", (long)tm.tv_usec);
     int size = snprintf(time_fmt, sizeof(time_fmt),
             "*2\r\n"
             "$%d\r\n"
