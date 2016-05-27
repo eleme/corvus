@@ -315,18 +315,19 @@ struct connection *conn_get_raw_server(struct context *ctx)
 struct connection *conn_get_server(struct context *ctx, uint16_t slot,
         int access)
 {
-    struct address master, slave, *addr;
-    memset(&slave, 0, sizeof(slave));
-    bool readonly;
+    struct address *addr;
+    struct node_info info;
+    bool readonly = false;
 
-    bool hitted = slot_get_node_addr(ctx, slot, &master, &slave);
-    if (hitted) {
-        if (!config.readslave || slave.port == 0 || access == CMD_ACCESS_WRITE) {
-            addr = &master;
-            readonly = false;
-        } else {
-            addr = &slave;
-            readonly = true;
+    if (slot_get_node_addr(slot, &info)) {
+        addr = &info.nodes[0];
+        if (access != CMD_ACCESS_WRITE && config.readslave && info.index > 1) {
+            int r = rand_r(&ctx->seed);
+            if (!config.readmasterslave || r % info.index != 0) {
+                int i = r % (info.index - 1);
+                addr = &info.nodes[++i];
+                readonly = true;
+            }
         }
         return conn_get_server_from_pool(ctx, addr, readonly);
     }
