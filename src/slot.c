@@ -12,7 +12,6 @@
 #include "logging.h"
 #include "alloc.h"
 
-#define MAX_UPDATE_NODES 16
 #define SLAVE_NODES 4
 
 static struct node_info *slot_map[REDIS_CLUSTER_SLOTS];
@@ -22,87 +21,45 @@ static int8_t in_progress = 0;
 static pthread_mutex_t job_mutex;
 static pthread_cond_t signal_cond;
 
-static pthread_rwlock_t slot_map_lock = PTHREAD_RWLOCK_INITIALIZER;
-static pthread_rwlock_t addr_list_lock = PTHREAD_RWLOCK_INITIALIZER;
-
 static int slot_job = SLOT_UPDATE_UNKNOWN;
 
 static struct {
-    struct address nodes[MAX_UPDATE_NODES];
+    pthread_rwlock_t lock;
+    struct address nodes[MAX_NODE_LIST];
     int len;
-} node_list;
-
-static struct {
-    char addrs[ADDR_LIST_MAX];
-    int bytes;
-} addr_list;
-
-static struct {
-    struct node_info nodes[REDIS_CLUSTER_SLOTS];
-    struct dict map;
-    int idx;
-} node_store;
+} node_list = {.lock = PTHREAD_RWLOCK_INITIALIZER};
 
 static inline void node_list_init()
 {
-    memset(&node_list, 0, sizeof(node_list));
-    for (int i = 0; i < MIN(config.node.len, MAX_UPDATE_NODES); i++) {
+    pthread_rwlock_wrlock(&node_list.lock);
+    node_list.len = 0;
+    for (int i = 0; i < MIN(config.node.len, MAX_NODE_LIST); i++) {
         memcpy(&node_list.nodes[i], &config.node.addr[i], sizeof(struct address));
         node_list.len++;
     }
+    pthread_rwlock_unlock(&node_list.lock);
 }
 
-void slot_map_clear()
+static inline void node_list_add(struct node_info *node)
 {
-    pthread_rwlock_wrlock(&slot_map_lock);
-    memset(slot_map, 0, sizeof(slot_map));
-    pthread_rwlock_unlock(&slot_map_lock);
-
-    pthread_rwlock_wrlock(&addr_list_lock);
-    memset(&addr_list, 0, sizeof(addr_list));
-    pthread_rwlock_unlock(&addr_list_lock);
-
-    struct node_info *node_info;
-
-    node_list.len = 0;
-
-    struct dict_iter iter = DICT_ITER_INITIALIZER;
-    DICT_FOREACH(&node_store.map, &iter) {
-        node_info = (struct node_info *)iter.value;
-        if (node_list.len >= MAX_UPDATE_NODES) break;
-        memcpy(&node_list.nodes[node_list.len++], &node_info->nodes[0], sizeof(struct address));
+    pthread_rwlock_wrlock(&node_list.lock);
+    for (size_t i = 0; i < node->index && node_list.len < MAX_NODE_LIST; i++) {
+        memcpy(&node_list.nodes[node_list.len++], &node->nodes[i],
+                sizeof(struct address));
     }
-    node_store.idx = 0;
-    dict_clear(&node_store.map);
-
-    if (node_list.len <= 0) node_list_init();
+    pthread_rwlock_unlock(&node_list.lock);
 }
 
-void addr_add(char *ip, uint16_t port)
+static inline void node_info_free(struct node_info *node)
 {
-    int n;
-    pthread_rwlock_wrlock(&addr_list_lock);
-    if (addr_list.bytes > 0) {
-        if (addr_list.bytes + DSN_LEN + 1 <= ADDR_LIST_MAX) {
-            addr_list.addrs[addr_list.bytes++] = ',';
-        }
+    if (node == NULL) {
+        return;
     }
-    if (ADDR_LIST_MAX - addr_list.bytes >= DSN_LEN) {
-        n = snprintf(addr_list.addrs + addr_list.bytes, DSN_LEN, "%s:%d", ip, port);
-        addr_list.bytes += n;
+    node->refcount--;
+    if (node->refcount <= 0) {
+        cv_free(node->nodes);
+        cv_free(node);
     }
-    pthread_rwlock_unlock(&addr_list_lock);
-}
-
-struct node_info *node_info_get()
-{
-    if (node_store.idx >= REDIS_CLUSTER_SLOTS) {
-        return NULL;
-    }
-
-    struct node_info *n = &node_store.nodes[node_store.idx++];
-    n->index = 1;
-    return n;
 }
 
 void node_desc_add(struct node_desc *b, uint8_t *start, uint8_t *end, bool partial)
@@ -147,13 +104,12 @@ int parse_slots(struct dict *node_map)
 {
     char *p;
     int start, stop, slot_count = 0;
+    struct node_info *node;
 
     struct dict_iter iter = DICT_ITER_INITIALIZER;
     DICT_FOREACH(node_map, &iter) {
         struct node_info *n = iter.value;
-        for (size_t i = 0; i < n->index; i++) {
-            addr_add(n->nodes[i].ip, n->nodes[i].port);
-        }
+        node_list_add(n);
 
         for (int i = 0; i < n->spec_length; i++) {
             if (n->slot_spec[i].data[0] == '[') {
@@ -166,11 +122,15 @@ int parse_slots(struct dict *node_map)
             } else {
                 start = stop = atoi(n->slot_spec[i].data);
             }
+            n->refcount += stop - start + 1;
             while (start <= stop) {
                 slot_count++;
-                slot_map[start++] = n;
+                node = ATOMIC_IGET(slot_map[start++], n);
+                node_info_free(node);
             }
         }
+        n->spec_length = 0;
+        n->slot_spec = NULL;
     }
     return slot_count;
 }
@@ -205,10 +165,8 @@ int parse_cluster_nodes(struct redis_data *data)
         char *name = is_master ? d->parts[0].data : d->parts[3].data;
         struct node_info *node = dict_get(&node_map, name);
         if (node == NULL) {
-            node = node_info_get();
-            if (node == NULL) {
-                goto end;
-            }
+            node = cv_calloc(1, sizeof(struct node_info));
+            node->index = 1;
             strcpy(node->name, name);
             dict_set(&node_map, node->name, node);
         }
@@ -341,8 +299,6 @@ void slot_map_update(struct context *ctx)
 
 void do_job(struct context *ctx, int job)
 {
-    slot_map_clear();
-
     switch (job) {
         case SLOT_UPDATE:
             slot_map_update(ctx);
@@ -380,13 +336,12 @@ void *slot_manager(void *data)
     }
     pthread_mutex_unlock(&job_mutex);
 
-    dict_free(&node_store.map);
     for (int i = 0; i < REDIS_CLUSTER_SLOTS; i++) {
-        cv_free(node_store.nodes[i].nodes);
+        struct node_info *n = ATOMIC_IGET(slot_map[i], NULL);
+        node_info_free(n);
     }
 
-    pthread_rwlock_destroy(&slot_map_lock);
-    pthread_rwlock_destroy(&addr_list_lock);
+    pthread_rwlock_destroy(&node_list.lock);
     pthread_mutex_destroy(&job_mutex);
 
     LOG(DEBUG, "slot map update thread quiting");
@@ -453,8 +408,7 @@ bool slot_get_node_addr(struct context *ctx, uint16_t slot, struct address *addr
 {
     bool res = false;
     struct node_info *info;
-    pthread_rwlock_rdlock(&slot_map_lock);
-    info = slot_map[slot];
+    info = ATOMIC_GET(slot_map[slot]);
     if (info != NULL) {
         memcpy(addr, &info->nodes[0], sizeof(struct address));
         if (config.readslave && info->index > 1) {
@@ -466,15 +420,21 @@ bool slot_get_node_addr(struct context *ctx, uint16_t slot, struct address *addr
         }
         res = true;
     }
-    pthread_rwlock_unlock(&slot_map_lock);
     return res;
 }
 
-void slot_get_addr_list(char *dest)
+void node_list_get(char *dest)
 {
-    pthread_rwlock_rdlock(&addr_list_lock);
-    memcpy(dest, addr_list.addrs, addr_list.bytes + 1);
-    pthread_rwlock_unlock(&addr_list_lock);
+    int i, pos = 0;
+    pthread_rwlock_rdlock(&node_list.lock);
+    for (i = 0; i < node_list.len; i++) {
+        if (i > 0) {
+            dest[pos++] = ',';
+        }
+        pos += snprintf(dest + pos, ADDRESS_LEN, "%s:%d",
+                node_list.nodes[i].ip, node_list.nodes[i].port);
+    }
+    pthread_rwlock_unlock(&node_list.lock);
 }
 
 void slot_create_job(int type)
@@ -492,8 +452,6 @@ int slot_start_manager(struct context *ctx)
 {
     int err;
     memset(slot_map, 0, sizeof(struct node_info*) * REDIS_CLUSTER_SLOTS);
-    memset(&node_store, 0, sizeof(node_store));
-    dict_init(&node_store.map);
     node_list_init();
 
     if ((err = pthread_mutex_init(&job_mutex, NULL)) != 0) {

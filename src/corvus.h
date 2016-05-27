@@ -95,7 +95,7 @@ struct {
     int thread;
     int loglevel;
     bool syslog;
-    char statsd_addr[DSN_LEN + 1];
+    char statsd_addr[ADDRESS_LEN + 1];
     int metric_interval;
     bool stats;
     bool readslave;

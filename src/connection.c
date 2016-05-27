@@ -89,7 +89,7 @@ static struct connection *conn_create_server(struct context *ctx,
         server->info->readonly = true;
     }
 
-    strncpy(info->dsn, key, DSN_LEN);
+    strncpy(info->dsn, key, ADDRESS_LEN);
     dict_set(&ctx->server_table, info->dsn, (void*)server);
     TAILQ_INSERT_TAIL(&ctx->servers, server, next);
     return server;
@@ -282,9 +282,9 @@ struct connection *conn_get_server_from_pool(struct context *ctx,
         struct address *addr, bool readonly)
 {
     struct connection *server = NULL;
-    char key[DSN_LEN + 1];
+    char key[ADDRESS_LEN];
+    snprintf(key, ADDRESS_LEN, "%s:%d", addr->ip, addr->port);
 
-    socket_get_key(addr, key);
     server = dict_get(&ctx->server_table, key);
     if (server != NULL) {
         if (verify_server(server, readonly) == CORVUS_ERR) return NULL;

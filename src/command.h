@@ -227,7 +227,7 @@ struct command {
 
 struct redirect_info {
     uint16_t slot;
-    char addr[DSN_LEN + 1];
+    char addr[ADDRESS_LEN + 1];
     int type;
 };
 

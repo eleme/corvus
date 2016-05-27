@@ -6,6 +6,7 @@
 #include "socket.h"
 
 #define MAX_DESC_PART_LEN 64
+#define MAX_NODE_LIST 16
 #define REDIS_CLUSTER_SLOTS 16384
 
 struct context;
@@ -32,13 +33,14 @@ struct node_info {
     struct address *nodes;
     size_t index;
     size_t len;
-    bool slave_added;
+    int refcount;
+    // for parsing slots of a master node
     struct desc_part *slot_spec;
     int spec_length;
 };
 
 uint16_t slot_get(struct pos_array *pos);
-void slot_get_addr_list(char *dest);
+void node_list_get(char *dest);
 bool slot_get_node_addr(struct context *ctx, uint16_t slot, struct address *addr,
         struct address *slave);
 void slot_create_job(int type);

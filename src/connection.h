@@ -39,7 +39,7 @@ struct conn_info {
     int refcount;
 
     struct address addr;
-    char dsn[DSN_LEN + 1];
+    char dsn[ADDRESS_LEN + 1];
 
     struct reader reader;
 

@@ -372,15 +372,6 @@ int socket_parse_addr(char *addr, struct address *address)
     return port;
 }
 
-void socket_get_key(struct address *addr, char *dst)
-{
-    int n = snprintf(dst, DSN_LEN, "%s:%d", addr->ip, addr->port);
-    if (n >= DSN_LEN) {
-        LOG(WARN, "hostname %s length exceed %d", addr->ip, IP_LEN - 1);
-        dst[DSN_LEN - 1] = '\0';
-    }
-}
-
 int socket_create_eventfd()
 {
     int fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
