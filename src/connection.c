@@ -101,6 +101,8 @@ void conn_info_init(struct conn_info *info)
     info->authenticated = false;
     info->readonly = false;
     info->readonly_sent = false;
+    info->quit = false;
+    info->quit_processed = false;
 
     memset(&info->addr, 0, sizeof(info->addr));
     memset(info->dsn, 0, sizeof(info->dsn));

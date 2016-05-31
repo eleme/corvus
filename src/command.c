@@ -155,7 +155,7 @@
     HANDLER(PING,              EXTRA,    UNKNOWN) \
     HANDLER(INFO,              EXTRA,    UNKNOWN) \
     HANDLER(PROXY,             EXTRA,    UNKNOWN) \
-    HANDLER(QUIT,              UNIMPL,   UNKNOWN) \
+    HANDLER(QUIT,              EXTRA,    UNKNOWN) \
     HANDLER(SELECT,            UNIMPL,   UNKNOWN) \
     HANDLER(TIME,              EXTRA,    UNKNOWN)
 
@@ -655,6 +655,16 @@ int cmd_time(struct command *cmd)
     return CORVUS_OK;
 }
 
+int cmd_quit(struct command *cmd)
+{
+    conn_add_data(cmd->client, (uint8_t*)rep_ok, strlen(rep_ok),
+            &cmd->rep_buf[0], &cmd->rep_buf[1]);
+    CMD_INCREF(cmd);
+    cmd_mark_done(cmd);
+    cmd->client->info->quit = true;
+    return CORVUS_OK;
+}
+
 int cmd_extra(struct command *cmd, struct redis_data *data)
 {
     switch (cmd->cmd_type) {
@@ -668,6 +678,8 @@ int cmd_extra(struct command *cmd, struct redis_data *data)
             return cmd_auth(cmd, data);
         case CMD_TIME:
             return cmd_time(cmd);
+        case CMD_QUIT:
+            return cmd_quit(cmd);
         default:
             LOG(ERROR, "%s: unknown command type %d", __func__, cmd->cmd_type);
             return CORVUS_ERR;

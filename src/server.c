@@ -41,12 +41,6 @@ void server_make_iov(struct conn_info *info)
     struct command *cmd;
     int64_t t = get_time();
 
-    if (info->readonly) {
-        cmd_iov_add(&info->iov, (void*)req_readonly, strlen(req_readonly), NULL);
-        info->readonly = false;
-        info->readonly_sent = true;
-    }
-
     while (!STAILQ_EMPTY(&info->ready_queue)) {
         if (info->iov.len - info->iov.cursor > CORVUS_IOV_MAX) {
             break;
@@ -58,6 +52,12 @@ void server_make_iov(struct conn_info *info)
         if (cmd->stale) {
             cmd_free(cmd);
             continue;
+        }
+
+        if (info->readonly) {
+            cmd_iov_add(&info->iov, (void*)req_readonly, strlen(req_readonly), NULL);
+            info->readonly = false;
+            info->readonly_sent = true;
         }
 
         if (cmd->asking) {
