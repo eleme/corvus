@@ -166,16 +166,18 @@ void client_make_iov(struct conn_info *info)
         STAILQ_REMOVE_HEAD(&info->cmd_queue, cmd_next);
         STAILQ_NEXT(cmd, cmd_next) = NULL;
 
-        if (!info->quit_processed) {
+        if (!info->quit) {
             cmd_make_iovec(cmd, &info->iov);
             cmd_stats(cmd, t);
+        } else {
+            mbuf_range_clear(cmd->ctx, cmd->rep_buf);
+        }
+
+        if (cmd->cmd_type == CMD_QUIT) {
+            info->quit = true;
         }
 
         cmd_free(cmd);
-
-        if (info->quit && !info->quit_processed) {
-            info->quit_processed = true;
-        }
     }
     LOG(DEBUG, "client make iov %d", info->iov.len);
 }
