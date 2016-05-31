@@ -166,9 +166,17 @@ void client_make_iov(struct conn_info *info)
         STAILQ_REMOVE_HEAD(&info->cmd_queue, cmd_next);
         STAILQ_NEXT(cmd, cmd_next) = NULL;
 
-        cmd_make_iovec(cmd, &info->iov);
+        if (!info->quit) {
+            cmd_make_iovec(cmd, &info->iov);
+            cmd_stats(cmd, t);
+        } else {
+            mbuf_range_clear(cmd->ctx, cmd->rep_buf);
+        }
 
-        cmd_stats(cmd, t);
+        if (cmd->cmd_type == CMD_QUIT) {
+            info->quit = true;
+        }
+
         cmd_free(cmd);
     }
     LOG(DEBUG, "client make iov %d", info->iov.len);
@@ -190,7 +198,7 @@ int client_write(struct connection *client)
 
     // wait for all cmds in cmd_queue to be done
     struct command *cmd = STAILQ_FIRST(&client->info->cmd_queue);
-    if (cmd != NULL && cmd->parse_done) {
+    if (cmd != NULL && cmd->parse_done && !info->quit) {
         return CORVUS_OK;
     }
 
@@ -204,6 +212,9 @@ int client_write(struct connection *client)
 
     if (info->iov.cursor >= info->iov.len) {
         cmd_iov_free(&info->iov);
+        if (info->quit) {
+            return CORVUS_ERR;
+        }
         if (event_reregister(&ctx->loop, client, E_READABLE) == CORVUS_ERR) {
             LOG(ERROR, "client_write: fail to reregister client %d", client->fd);
             return CORVUS_ERR;

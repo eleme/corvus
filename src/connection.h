@@ -62,6 +62,7 @@ struct conn_info {
 
     bool readonly;
     bool readonly_sent;
+    bool quit;
 
     long long send_bytes;
     long long recv_bytes;

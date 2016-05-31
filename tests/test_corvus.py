@@ -3040,11 +3040,11 @@ def test_ping():
     #assert r.ping("hello world") == "hello world"
 
 
-# def test_quit():
-#     """ QUIT
-#             Available since 1.0.0.
-#     """
-#     assert r.quit() == "OK"
+def test_quit():
+    """ QUIT
+            Available since 1.0.0.
+    """
+    assert r.quit() == "OK"
 
 
 # def test_select():
