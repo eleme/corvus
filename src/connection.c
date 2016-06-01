@@ -329,7 +329,9 @@ struct connection *conn_get_server(struct context *ctx, uint16_t slot,
                 readonly = true;
             }
         }
-        return conn_get_server_from_pool(ctx, addr, readonly);
+        if (addr->port > 0) {
+            return conn_get_server_from_pool(ctx, addr, readonly);
+        }
     }
     return conn_get_raw_server(ctx);
 }

@@ -11,6 +11,7 @@
 #include "alloc.h"
 
 extern int split_node_description(struct node_desc *desc, struct pos_array *pos_array);
+extern int parse_cluster_nodes(struct redis_data *data);
 
 TEST(test_slot_get1) {
     struct pos p[] = {
@@ -107,9 +108,77 @@ TEST(test_split_node_description) {
     PASS(NULL);
 }
 
+TEST(test_parse_cluster_nodes) {
+    char data[] = "4f6d838441c4f652f970cd7570c0cf16bbd0f3a9 127.0.0.1:8001 "
+                  "master - 0 1464764873814 9 connected "
+                  "0 2-3 5-8 10 20-40 43 45-50 52 54 56 58 60 62 64 66-67 69 5497-5501\n";
+    struct pos p[] = {{(uint8_t*)data, strlen(data)}};
+    struct pos_array pos = {p, strlen(data), 1, 0};
+    struct redis_data redis_data;
+    redis_data.type = REP_STRING;
+    memcpy(&redis_data.pos, &pos, sizeof(pos));
+    int count = parse_cluster_nodes(&redis_data);
+    ASSERT(count == 51);
+
+    struct node_info info;
+    ASSERT(slot_get_node_addr(5499, &info));
+    ASSERT(strcmp(info.nodes[0].ip, "127.0.0.1") == 0 && info.nodes[0].port == 8001);
+    ASSERT(!slot_get_node_addr(9, &info));
+
+    PASS(NULL);
+}
+
+TEST(test_parse_cluster_nodes_slave) {
+    char data[] = "4f6d838441c4f652f970cd7570c0cf16bbd0f3a9 127.0.0.1:8001 "
+                  "master - 0 1464764873814 9 connected 0\n"
+                  "41d62ab2b6fdf0f248571ff097c8d770c611cfbc 127.0.0.1:8003 "
+                  "slave 4f6d838441c4f652f970cd7570c0cf16bbd0f3a9 0 1464775965124 3 connected\n";
+
+    struct pos p[] = {{(uint8_t*)data, strlen(data)}};
+    struct pos_array pos = {p, strlen(data), 1, 0};
+    struct redis_data redis_data;
+    redis_data.type = REP_STRING;
+    memcpy(&redis_data.pos, &pos, sizeof(pos));
+    int count = parse_cluster_nodes(&redis_data);
+    ASSERT(count == 1);
+
+    struct node_info info;
+    ASSERT(slot_get_node_addr(0, &info));
+    ASSERT(strcmp(info.nodes[0].ip, "127.0.0.1") == 0 && info.nodes[0].port == 8001);
+    ASSERT(info.index == 2);
+    ASSERT(strcmp(info.nodes[1].ip, "127.0.0.1") == 0 && info.nodes[1].port == 8003);
+
+    PASS(NULL);
+}
+
+TEST(test_parse_cluster_nodes_fail_slave) {
+    char data[] = "4f6d838441c4f652f970cd7570c0cf16bbd0f3a9 127.0.0.1:8001 "
+                  "master - 0 1464764873814 9 connected 0\n"
+                  "41d62ab2b6fdf0f248571ff097c8d770c611cfbc 127.0.0.1:8003 "
+                  "slave,fail 4f6d838441c4f652f970cd7570c0cf16bbd0f3a9 0 1464775965124 3 connected\n";
+
+    struct pos p[] = {{(uint8_t*)data, strlen(data)}};
+    struct pos_array pos = {p, strlen(data), 1, 0};
+    struct redis_data redis_data;
+    redis_data.type = REP_STRING;
+    memcpy(&redis_data.pos, &pos, sizeof(pos));
+    int count = parse_cluster_nodes(&redis_data);
+    ASSERT(count == 1);
+
+    struct node_info info;
+    ASSERT(slot_get_node_addr(0, &info));
+    ASSERT(strcmp(info.nodes[0].ip, "127.0.0.1") == 0 && info.nodes[0].port == 8001);
+    ASSERT(info.index == 1);
+
+    PASS(NULL);
+}
+
 TEST_CASE(test_slot) {
     RUN_TEST(test_slot_get1);
     RUN_TEST(test_slot_get2);
     RUN_TEST(test_slot_get3);
     RUN_TEST(test_split_node_description);
+    RUN_TEST(test_parse_cluster_nodes);
+    RUN_TEST(test_parse_cluster_nodes_slave);
+    RUN_TEST(test_parse_cluster_nodes_fail_slave);
 }

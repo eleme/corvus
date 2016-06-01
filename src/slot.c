@@ -58,7 +58,10 @@ static inline void node_map_free(struct dict *map)
 {
     struct dict_iter iter = DICT_ITER_INITIALIZER;
     DICT_FOREACH(map, &iter) {
-        cv_free(iter.value);
+        struct node_info *n = iter.value;
+        if (n->refcount <= 0) {
+            cv_free(iter.value);
+        }
     }
 }
 
@@ -109,9 +112,16 @@ int parse_slots()
     struct dict_iter iter = DICT_ITER_INITIALIZER;
     DICT_FOREACH(&slot_map.node_map, &iter) {
         struct node_info *n = iter.value;
+
+        // the node has no slots
+        if (n->spec_length <= 0) {
+            cv_free(n);
+            continue;
+        }
+
         node_list_add(n);
 
-        for (int i = 0; i < n->spec_length; i++) {
+        for (int i = 8; i < n->spec_length + 8; i++) {
             if (n->slot_spec[i].data[0] == '[') {
                 continue;
             }
@@ -129,6 +139,8 @@ int parse_slots()
                 if (node == NULL) {
                     continue;
                 }
+                node->refcount--;
+                snprintf(node->name, sizeof(node->name), "%p", node);
                 struct node_info *m = dict_get(&slot_map.free_nodes, node->name);
                 if (m == NULL) {
                     dict_set(&slot_map.free_nodes, node->name, node);
@@ -161,13 +173,6 @@ int parse_cluster_nodes(struct redis_data *data)
 
     for (int i = 0; i < node_count; i++) {
         struct node_desc *d = &desc[i];
-        if (d->index <= 0) {
-            node_map_free(&slot_map.node_map);
-            goto end;
-        }
-        if (strcasecmp(d->parts[0].data, "vars") == 0) {
-            continue;
-        }
         if (d->index < 8) {
             node_map_free(&slot_map.node_map);
             goto end;
@@ -181,13 +186,14 @@ int parse_cluster_nodes(struct redis_data *data)
             strcpy(node->name, name);
             dict_set(&slot_map.node_map, node->name, node);
         }
-        if (node->index > MAX_SLAVE_NODES) {
-            node->index = MAX_SLAVE_NODES;
-        }
-        socket_parse_addr(d->parts[1].data, &node->nodes[is_master ? 0 : node->index++]);
         if (is_master) {
-            node->slot_spec = &d->parts[8];
+            socket_parse_addr(d->parts[1].data, &node->nodes[0]);
+            node->slot_spec = d->parts;
             node->spec_length = d->index - 8;
+        } else if (node->index <= MAX_SLAVE_NODES && (
+                    strcasecmp(d->parts[2].data, "slave") == 0 ||
+                    strcasecmp(d->parts[2].data, "myself,slave") == 0)) {
+            socket_parse_addr(d->parts[1].data, &node->nodes[node->index++]);
         }
     }
 
@@ -195,7 +201,7 @@ int parse_cluster_nodes(struct redis_data *data)
 
 end:
     dict_clear(&slot_map.node_map);
-    for (int i = 0; i < desc->index; i++) {
+    for (int i = 0; i < node_count; i++) {
         cv_free(desc[i].parts);
     }
     return slot_count;
