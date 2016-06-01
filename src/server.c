@@ -347,4 +347,5 @@ void server_eof(struct connection *server, const char *reason)
     // drop all unsent requests
     cmd_iov_free(&server->info->iov);
     conn_free(server);
+    slot_create_job(SLOT_UPDATE);
 }
