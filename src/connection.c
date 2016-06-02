@@ -89,7 +89,7 @@ static struct connection *conn_create_server(struct context *ctx,
         server->info->readonly = true;
     }
 
-    strncpy(info->dsn, key, DSN_LEN);
+    strncpy(info->dsn, key, ADDRESS_LEN);
     dict_set(&ctx->server_table, info->dsn, (void*)server);
     TAILQ_INSERT_TAIL(&ctx->servers, server, next);
     return server;
@@ -282,9 +282,9 @@ struct connection *conn_get_server_from_pool(struct context *ctx,
         struct address *addr, bool readonly)
 {
     struct connection *server = NULL;
-    char key[DSN_LEN + 1];
+    char key[ADDRESS_LEN];
+    snprintf(key, ADDRESS_LEN, "%s:%d", addr->ip, addr->port);
 
-    socket_get_key(addr, key);
     server = dict_get(&ctx->server_table, key);
     if (server != NULL) {
         if (verify_server(server, readonly) == CORVUS_ERR) return NULL;
@@ -315,20 +315,23 @@ struct connection *conn_get_raw_server(struct context *ctx)
 struct connection *conn_get_server(struct context *ctx, uint16_t slot,
         int access)
 {
-    struct address master, slave, *addr;
-    memset(&slave, 0, sizeof(slave));
-    bool readonly;
+    struct address *addr;
+    struct node_info info;
+    bool readonly = false;
 
-    bool hitted = slot_get_node_addr(ctx, slot, &master, &slave);
-    if (hitted) {
-        if (!config.readslave || slave.port == 0 || access == CMD_ACCESS_WRITE) {
-            addr = &master;
-            readonly = false;
-        } else {
-            addr = &slave;
-            readonly = true;
+    if (slot_get_node_addr(slot, &info)) {
+        addr = &info.nodes[0];
+        if (access != CMD_ACCESS_WRITE && config.readslave && info.index > 1) {
+            int r = rand_r(&ctx->seed);
+            if (!config.readmasterslave || r % info.index != 0) {
+                int i = r % (info.index - 1);
+                addr = &info.nodes[++i];
+                readonly = true;
+            }
         }
-        return conn_get_server_from_pool(ctx, addr, readonly);
+        if (addr->port > 0) {
+            return conn_get_server_from_pool(ctx, addr, readonly);
+        }
     }
     return conn_get_raw_server(ctx);
 }

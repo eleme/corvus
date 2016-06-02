@@ -3135,6 +3135,10 @@ def test_delete_node(delete_keys):
     cluster.delete_node(target)
     cluster.wait()
 
+    time.sleep(0.5)
+    r.execute_command('PROXY UPDATESLOTMAP')
+    time.sleep(0.5)
+
     assert r.get("hello") == "123"
 
 

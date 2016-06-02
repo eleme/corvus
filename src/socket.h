@@ -7,7 +7,7 @@
 
 #define DEFAULT_SNDBUF 32768
 #define IP_LEN 45
-#define DSN_LEN (IP_LEN + 8)
+#define ADDRESS_LEN (IP_LEN + 8)
 
 struct iovec;
 
@@ -31,7 +31,6 @@ int socket_set_timeout(int fd, int timeout);
 int socket_parse_port(char *ptr, uint16_t *res);
 int socket_parse_addr(char *addr, struct address *address);
 int socket_parse_ip(char *addr, struct address *address);
-void socket_get_key(struct address *addr, char *dst);
 int socket_create_eventfd();
 int socket_trigger_event(int evfd);
 

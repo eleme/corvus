@@ -3,9 +3,7 @@
 
 #include <sys/types.h>
 #include "socket.h"
-
-#define ADDR_MAX 1024
-#define ADDR_LIST_MAX (ADDR_MAX * DSN_LEN)
+#include "slot.h"
 
 struct memory_stats {
     long long buffers;
@@ -35,8 +33,8 @@ struct stats {
     double used_cpu_sys;
     double used_cpu_user;
 
-    long long last_command_latency[ADDR_MAX];
-    char remote_nodes[ADDR_LIST_MAX];
+    long long last_command_latency[MAX_NODE_LIST];
+    char remote_nodes[MAX_NODE_LIST * ADDRESS_LEN];
 
     struct basic_stats basic;
 };

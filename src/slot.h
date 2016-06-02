@@ -5,6 +5,9 @@
 #include "parser.h"
 #include "socket.h"
 
+#define MAX_DESC_PART_LEN 64
+#define MAX_NODE_LIST 16
+#define MAX_SLAVE_NODES 64
 #define REDIS_CLUSTER_SLOTS 16384
 
 struct context;
@@ -16,17 +19,29 @@ enum {
     SLOT_UPDATER_QUIT,
 };
 
+struct desc_part {
+    char data[MAX_DESC_PART_LEN];
+    uint8_t len;
+};
+
+struct node_desc {
+    struct desc_part *parts;
+    uint16_t index, len;
+};
+
 struct node_info {
-    struct address *nodes;
+    char name[64];
+    struct address nodes[MAX_SLAVE_NODES + 1];
     size_t index;
-    size_t len;
-    bool slave_added;
+    int refcount;
+    // for parsing slots of a master node
+    struct desc_part *slot_spec;
+    int spec_length;
 };
 
 uint16_t slot_get(struct pos_array *pos);
-void slot_get_addr_list(char *dest);
-bool slot_get_node_addr(struct context *ctx, uint16_t slot, struct address *addr,
-        struct address *slave);
+void node_list_get(char *dest);
+bool slot_get_node_addr(uint16_t slot, struct node_info *info);
 void slot_create_job(int type);
 int slot_start_manager(struct context *ctx);
 

@@ -12,7 +12,7 @@
 #define HOST_LEN 255
 
 struct bytes {
-    char key[DSN_LEN + 1];
+    char key[ADDRESS_LEN + 1];
     long long recv;
     long long send;
     long long completed;
@@ -205,13 +205,13 @@ void stats_get(struct stats *stats)
     stats_get_simple(stats, false);
 
     memset(stats->remote_nodes, 0, sizeof(stats->remote_nodes));
-    slot_get_addr_list(stats->remote_nodes);
+    node_list_get(stats->remote_nodes);
 
     struct context *contexts = get_contexts();
 
     memset(stats->last_command_latency, 0, sizeof(stats->last_command_latency));
     for (int i = 0; i < config.thread; i++) {
-        if (i >= ADDR_MAX) break;
+        if (i >= MAX_NODE_LIST) break;
         stats->last_command_latency[i] = ATOMIC_GET(contexts[i].last_command_latency);
     }
 }

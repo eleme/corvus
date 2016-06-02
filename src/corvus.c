@@ -95,7 +95,7 @@ int config_add(char *name, char *value)
         val = atoi(value);
         config.server_timeout = val < 0 ? 0 : val;
     } else if (strcmp(name, "statsd") == 0) {
-        strncpy(config.statsd_addr, value, DSN_LEN);
+        strncpy(config.statsd_addr, value, ADDRESS_LEN);
     } else if (strcmp(name, "metric_interval") == 0) {
         config.metric_interval = atoi(value);
         if (config.metric_interval <= 0) config.metric_interval = 10;
