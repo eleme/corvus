@@ -29,6 +29,7 @@ Features
 * Pipeline support.
 * Statsd integration.
 * Syslog integration.
+* Can direct read operations to slaves.
 
 
 Requirements
