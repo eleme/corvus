@@ -45,7 +45,7 @@ void event_free(struct event_loop *loop)
 
 int event_register(struct event_loop *loop, struct connection *c, int mask)
 {
-    struct epoll_event event;
+    struct epoll_event event = {0, {0}};
 
     event.data.ptr = c;
     event.events = EPOLLET;
@@ -62,7 +62,7 @@ int event_register(struct event_loop *loop, struct connection *c, int mask)
 
 int event_reregister(struct event_loop *loop, struct connection *c, int mask)
 {
-    struct epoll_event event;
+    struct epoll_event event = {0, {0}};
 
     int op = mask == E_NONE ? EPOLL_CTL_DEL : EPOLL_CTL_MOD;
 

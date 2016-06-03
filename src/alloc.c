@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <string.h>
 #include "logging.h"
 #include "alloc.h"
 
@@ -38,4 +39,11 @@ void *cv_raw_realloc(void *ptr, size_t size, const char *file, int line)
 void cv_free(void *ptr)
 {
     je_free(ptr);
+}
+
+char *cv_raw_strdup(const char *other, const char *file, int line)
+{
+    char *p = cv_raw_malloc(strlen(other) + 1, file, line);
+    strcpy(p, other);
+    return p;
 }
