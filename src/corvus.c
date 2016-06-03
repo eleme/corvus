@@ -38,6 +38,7 @@ void config_init()
     config.bufsize = DEFAULT_BUFSIZE;
     config.requirepass = NULL;
     config.readslave = config.readmasterslave = false;
+    config.slow_threshold = -1;
 
     memset(config.statsd_addr, 0, sizeof(config.statsd_addr));
     config.metric_interval = 10;
@@ -147,6 +148,8 @@ int config_add(char *name, char *value)
             config.node.len++;
             p = strtok(NULL, ",");
         }
+    } else if (strcmp(name, "slow_threshold") == 0) {
+        config.slow_threshold = atoi(value);
     }
     return 0;
 }

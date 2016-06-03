@@ -941,6 +941,10 @@ void cmd_stats(struct command *cmd, int64_t end_time)
         latency = cmd->rep_time[1] - cmd->rep_time[0];
     }
     ATOMIC_INC(ctx->stats.remote_latency, latency);
+
+    if (config.slow_threshold >= 0 && latency > config.slow_threshold * 1000) {
+        stats_log_slow_cmd(cmd);
+    }
 }
 
 void cmd_set_stale(struct command *cmd)

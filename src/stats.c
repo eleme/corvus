@@ -56,11 +56,13 @@ static int stats_init_slow_log()
         return CORVUS_ERR;
     }
 
-    char dsn[DSN_LEN];
+    char dsn[ADDRESS_LEN];
     for (size_t i = 0; i != config.node.len; i++) {
         struct address *addr = config.node.addr + i;
         snprintf(dsn, sizeof(dsn), "%s:%d", addr->ip, addr->port);
-        dict_set(&slow_counts, cv_strdup(dsn), cv_calloc(CMD_NUM, sizeof(uint32_t)));
+        const char *clone = cv_strdup(dsn);
+        uint32_t *counts = cv_calloc(CMD_NUM, sizeof(uint32_t));
+        dict_set(&slow_counts, clone, counts);
     }
 
     return CORVUS_OK;
@@ -82,17 +84,14 @@ static void stats_free_slow_log()
 void stats_log_slow_cmd(struct command *cmd)
 {
     const char *node_dsn = cmd->server->info->dsn;
-    LOG(INFO, "## slow log %s", node_dsn);
     uint32_t *counts = dict_get(&slow_counts, node_dsn);
     if (!counts) {
-        LOG(INFO, "###### need to alloc");
-        counts = cv_calloc(CMD_NUM, sizeof(uint32_t));
         const char *clone = cv_strdup(node_dsn);
+        counts = cv_calloc(CMD_NUM, sizeof(uint32_t));
         pthread_mutex_lock(&counts_mutex);
         dict_set(&slow_counts, clone, counts);
         pthread_mutex_unlock(&counts_mutex);
     }
-    LOG(INFO, "## cmd %d/%d", cmd->cmd_type, CMD_NUM);
     ATOMIC_INC(counts[cmd->cmd_type], 1);
 }
 
@@ -281,7 +280,6 @@ void stats_get(struct stats *stats)
 
 static void stats_send_slow_log()
 {
-    LOG(INFO, "## slow log starting send %d", CMD_NUM);
     const char *fmt = "nodes.%s.slow_query.%s";
     const char *sum_fmt = "slow_query.%s";
 
@@ -291,11 +289,9 @@ static void stats_send_slow_log()
     DICT_FOREACH(&slow_counts, &iter) {
         const char *node_dsn = iter.key;
         uint32_t *counts = (uint32_t*)iter.value;
-        LOG(INFO, "## slow log itering node %s", node_dsn);
         for (size_t i = 0; i != CMD_NUM; i++) {
             uint32_t count = ATOMIC_IGET(counts[i], 0);
             if (count) {
-                LOG(INFO, "## slow log sending count: %d", count);
                 counts_sum[i] += count;
                 const char *cmd = cmd_table[i];
                 int n = snprintf(NULL, 0, fmt, node_dsn, cmd);
@@ -310,7 +306,6 @@ static void stats_send_slow_log()
         uint32_t sum = counts_sum[i];
         if (sum) {
             const char *cmd = cmd_table[i];
-            LOG(INFO, "## slow log sending cmd sum: %s", cmd);
             int n = snprintf(NULL, 0, sum_fmt, cmd);
             char buf[n + 1];
             snprintf(buf, sizeof(buf), sum_fmt, cmd);

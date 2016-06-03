@@ -249,7 +249,6 @@ int server_read(struct connection *server)
             case CORVUS_OK:
                 STAILQ_REMOVE_HEAD(&info->waiting_queue, waiting_next);
                 STAILQ_NEXT(cmd, waiting_next) = NULL;
-                stats_log_slow_cmd(cmd);
                 if (cmd->stale) cmd_free(cmd);
                 continue;
         }
