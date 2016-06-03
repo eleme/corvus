@@ -84,7 +84,9 @@ static void stats_free_slow_log()
 void stats_log_slow_cmd(struct command *cmd)
 {
     const char *node_dsn = cmd->server->info->dsn;
+    pthread_mutex_lock(&counts_mutex);
     uint32_t *counts = dict_get(&slow_counts, node_dsn);
+    pthread_mutex_unlock(&counts_mutex);
     if (!counts) {
         const char *clone = cv_strdup(node_dsn);
         counts = cv_calloc(CMD_NUM, sizeof(uint32_t));
