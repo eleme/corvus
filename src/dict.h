@@ -1,6 +1,7 @@
 #ifndef __DICT_H
 #define __DICT_H
 
+#include <stdbool.h>
 #include <stdlib.h>
 #include <stdint.h>
 
@@ -10,10 +11,10 @@
 
 struct bucket {
     void *data;
-    char *key;
+    const char *key;
     uint32_t hash;
-    uint32_t deleted:1;
-    uint32_t setted:1;
+    bool deleted;
+    bool setted;
 };
 
 struct dict {
@@ -25,7 +26,7 @@ struct dict {
 
 struct dict_iter {
     void *value;
-    char *key;
+    const char *key;
     uint32_t idx;
 };
 

@@ -405,7 +405,7 @@ int cmd_proxy_info(struct command *cmd)
 
     int n = 1024;
     char data[n + 1];
-    snprintf(data, n,
+    snprintf(data, sizeof(data),
         "+"
         "in_use_buffers:%lld\n"
         "free_buffers:%lld\n"
@@ -680,7 +680,7 @@ void cmd_gen_mget_iovec(struct command *cmd, struct iov_data *iov)
         }
     } else {
         const char *fmt = "*%ld\r\n";
-        n = snprintf(iov->buf, sizeof(iov->buf) - 1, fmt, cmd->keys);
+        n = snprintf(iov->buf, sizeof(iov->buf), fmt, cmd->keys);
         cmd_iov_add(iov, iov->buf, n, NULL);
         STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
             cmd_create_iovec(c->rep_buf, iov);
@@ -738,7 +738,7 @@ void cmd_gen_multikey_iovec(struct command *cmd, struct iov_data *iov)
     if (setted) return;
 
     const char *fmt = ":%ld\r\n";
-    n = snprintf(iov->buf, sizeof(iov->buf) - 1, fmt, count);
+    n = snprintf(iov->buf, sizeof(iov->buf), fmt, count);
     cmd_iov_add(iov, iov->buf, n, NULL);
 }
 
