@@ -325,10 +325,12 @@ void *stats_daemon(void *data)
 
     while (1) {
         sleep(config.metric_interval);
+        uint64_t start = get_time();
         stats_send_simple();
         stats_send_node_info();
         stats_send_slow_log();
-        LOG(DEBUG, "sending metrics");
+        uint64_t end = get_time();
+        LOG(DEBUG, "sending metrics, used %f ms", (end - start) / 1000000.0);
     }
     return NULL;
 }
