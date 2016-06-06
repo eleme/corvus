@@ -38,62 +38,35 @@ static struct {
 #define BUILD_CMD_ITEM(cmd, type, access) #cmd,
 static const char * cmd_table[] = {CMD_DO(BUILD_CMD_ITEM)};
 static const size_t CMD_NUM = sizeof(cmd_table) / sizeof(char*);
+
 static uint32_t *counts_sum;
-
 static struct dict slow_counts; // node dsn => counts
-static pthread_mutex_t counts_mutex;
 
 
-static int stats_init_slow_log()
+static void stats_init_slow_log()
 {
-    int err;
-
     dict_init(&slow_counts);
     counts_sum = cv_malloc(CMD_NUM * sizeof(uint32_t));
-
-    if ((err = pthread_mutex_init(&counts_mutex, NULL)) != 0) {
-        LOG(ERROR, "pthread_mutex_init: %s", strerror(err));
-        return CORVUS_ERR;
-    }
-
-    char dsn[ADDRESS_LEN];
-    for (size_t i = 0; i != config.node.len; i++) {
-        struct address *addr = config.node.addr + i;
-        snprintf(dsn, sizeof(dsn), "%s:%d", addr->ip, addr->port);
-        const char *clone = cv_strdup(dsn);
-        uint32_t *counts = cv_calloc(CMD_NUM, sizeof(uint32_t));
-        dict_set(&slow_counts, clone, counts);
-    }
-
-    return CORVUS_OK;
 }
 
 static void stats_free_slow_log()
 {
     struct dict_iter iter = DICT_ITER_INITIALIZER;
     DICT_FOREACH(&slow_counts, &iter) {
-        cv_free(iter.key);
         cv_free(iter.value);
     }
 
     dict_free(&slow_counts);
     cv_free(counts_sum);
-    pthread_mutex_destroy(&counts_mutex);
+}
+
+void stats_init_counts(uint32_t **counts) {
+    *counts = cv_calloc(CMD_NUM, sizeof(uint32_t));
 }
 
 void stats_log_slow_cmd(struct command *cmd)
 {
-    const char *node_dsn = cmd->server->info->dsn;
-    pthread_mutex_lock(&counts_mutex);
-    uint32_t *counts = dict_get(&slow_counts, node_dsn);
-    pthread_mutex_unlock(&counts_mutex);
-    if (!counts) {
-        const char *clone = cv_strdup(node_dsn);
-        counts = cv_calloc(CMD_NUM, sizeof(uint32_t));
-        pthread_mutex_lock(&counts_mutex);
-        dict_set(&slow_counts, clone, counts);
-        pthread_mutex_unlock(&counts_mutex);
-    }
+    uint32_t *counts = cmd->server->info->counts;
     ATOMIC_INC(counts[cmd->cmd_type], 1);
 }
 
@@ -285,26 +258,54 @@ static void stats_send_slow_log()
     const char *fmt = "nodes.%s.slow_query.%s";
     const char *sum_fmt = "slow_query.%s";
 
+    struct connection *server;
+    struct context *contexts = get_contexts();
+
+    {
+        struct dict_iter iter = DICT_ITER_INITIALIZER;
+        DICT_FOREACH(&slow_counts, &iter) {
+            memset(iter.value, 0, CMD_NUM * sizeof(uint32_t));
+        }
+    }
     memset(counts_sum, 0, CMD_NUM * sizeof(uint32_t));
 
-    struct dict_iter iter = DICT_ITER_INITIALIZER;
-    DICT_FOREACH(&slow_counts, &iter) {
-        const char *node_dsn = iter.key;
-        uint32_t *counts = (uint32_t*)iter.value;
-        for (size_t i = 0; i != CMD_NUM; i++) {
-            uint32_t count = ATOMIC_IGET(counts[i], 0);
-            if (count) {
-                counts_sum[i] += count;
-                const char *cmd = cmd_table[i];
-                int n = snprintf(NULL, 0, fmt, node_dsn, cmd);
-                char buf[n + 1];
-                snprintf(buf, sizeof(buf), fmt, node_dsn, cmd);
-                stats_send(buf, count);
+    for (size_t i = 0; i < config.thread; i++) {
+        TAILQ_FOREACH(server, &contexts[i].servers, next) {
+            const char *dsn = server->info->dsn;
+            uint32_t *node_counts = NULL;
+            for (size_t j = 0; j < CMD_NUM; j++) {
+                uint32_t count = ATOMIC_IGET(server->info->counts[j], 0);
+                if (count == 0) continue;
+
+                if (!node_counts) {
+                    node_counts = (uint32_t*)dict_get(&slow_counts, dsn);
+                    if (!node_counts) {
+                        node_counts = cv_calloc(CMD_NUM, sizeof(uint32_t));
+                        dict_set(&slow_counts, dsn, node_counts);
+                    }
+                }
+                node_counts[j] += count;
+                counts_sum[j] += count;
             }
         }
     }
 
-    for (size_t i = 0; i != CMD_NUM; i++) {
+    struct dict_iter iter = DICT_ITER_INITIALIZER;
+    DICT_FOREACH(&slow_counts, &iter) {
+        const char *dsn = iter.key;
+        uint32_t *counts = (uint32_t*)iter.value;
+        for (size_t i = 0; i < CMD_NUM; i++) {
+            if(counts[i] == 0) continue;
+
+            const char *cmd = cmd_table[i];
+            int n = snprintf(NULL, 0, fmt, dsn, cmd);
+            char buf[n + 1];
+            snprintf(buf, sizeof(buf), fmt, dsn, cmd);
+            stats_send(buf, counts[i]);
+        }
+    }
+
+    for (size_t i = 0; i < CMD_NUM; i++) {
         uint32_t sum = counts_sum[i];
         if (sum) {
             const char *cmd = cmd_table[i];
@@ -351,9 +352,7 @@ int stats_init()
         if (hostname[i] == '.') hostname[i] = '-';
     }
 
-    if (stats_init_slow_log() == CORVUS_ERR) {
-        return CORVUS_ERR;
-    }
+    stats_init_slow_log();
 
     LOG(INFO, "starting stats thread");
     return thread_spawn(&stats_ctx, stats_daemon);

@@ -47,5 +47,6 @@ int stats_resolve_addr(char *addr);
 void stats_get(struct stats *stats);
 void stats_get_memory(struct memory_stats *stats);
 void stats_log_slow_cmd(struct command *cmd);
+void stats_init_counts(uint32_t **counts);
 
 #endif /* end of include guard: __STATS_H */

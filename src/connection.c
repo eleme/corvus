@@ -11,6 +11,7 @@
 #include "server.h"
 #include "dict.h"
 #include "alloc.h"
+#include "stats.h"
 
 #define EMPTY_CMD_QUEUE(queue, field)     \
 do {                                      \
@@ -75,6 +76,7 @@ static struct connection *conn_create_server(struct context *ctx,
     struct connection *server = server_create(ctx, fd);
     struct conn_info *info = server->info;
     memcpy(&info->addr, addr, sizeof(info->addr));
+    stats_init_counts(&info->counts);
 
     if (conn_connect(server) == CORVUS_ERR) {
         LOG(ERROR, "conn_create_server: fail to connect %s:%d",
@@ -102,6 +104,7 @@ void conn_info_init(struct conn_info *info)
     info->readonly = false;
     info->readonly_sent = false;
     info->quit = false;
+    info->counts = NULL;
 
     memset(&info->addr, 0, sizeof(info->addr));
     memset(info->dsn, 0, sizeof(info->dsn));
