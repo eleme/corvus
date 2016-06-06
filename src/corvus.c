@@ -37,6 +37,7 @@ void config_init()
     config.server_timeout = 0;
     config.bufsize = DEFAULT_BUFSIZE;
     config.requirepass = NULL;
+    config.readslave = config.readmasterslave = false;
 
     memset(config.statsd_addr, 0, sizeof(config.statsd_addr));
     config.metric_interval = 10;
@@ -70,11 +71,22 @@ int config_add(char *name, char *value)
     } else if (strcmp(name, "syslog") == 0) {
         config_boolean(&config.syslog, value);
     } else if (strcmp(name, "read-slave") == 0) {
+        LOG(WARN, "Config `read-slave` is obsolete, use `read-strategy` instead");
         config_boolean(&config.readslave, value);
     } else if (strcmp(name, "read-master-slave") == 0) {
+        LOG(WARN, "Config `read-master-slave` is obsolete, use `read-strategy` instead");
         config_boolean(&config.readmasterslave, value);
         if (config.readmasterslave) {
             config.readslave = true;
+        }
+    } else if (strcmp(name, "read-strategy") == 0) {
+        if (strcmp(value, "read-slave-only") == 0) {
+            config.readmasterslave = false;
+            config.readslave = true;
+        } else if (strcmp(value, "both") == 0) {
+            config.readmasterslave = config.readslave = true;
+        } else {
+            config.readmasterslave = config.readslave = false;
         }
     } else if (strcmp(name, "thread") == 0) {
         config.thread = atoi(value);

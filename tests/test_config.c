@@ -42,8 +42,22 @@ TEST(test_config_requirepass) {
     PASS(NULL);
 }
 
+TEST(test_config_read_strategy) {
+    char n[] = "read-strategy";
+
+    ASSERT(config_add(n, "read-slave-only") == 0);
+    ASSERT(config.readslave && !config.readmasterslave);
+    ASSERT(config_add(n, "both") == 0);
+    ASSERT(config.readslave && config.readmasterslave);
+    ASSERT(config_add(n, "master") == 0);
+    ASSERT(!config.readslave && !config.readmasterslave);
+
+    PASS(NULL);
+}
+
 TEST_CASE(test_config) {
     RUN_TEST(test_config_bind);
     RUN_TEST(test_config_syslog);
     RUN_TEST(test_config_requirepass);
+    RUN_TEST(test_config_read_strategy);
 }
