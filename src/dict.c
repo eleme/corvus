@@ -6,21 +6,20 @@
 #define DICT_BASE_CAPACITY 1024
 #define LOAD_FACTOR 0.909
 
-inline static void set_bucket(struct bucket *bucket, uint32_t hash, char *key, void *data)
+#define PSL(n, hash, pos) (((pos) + (n) - (hash) % (n)) % (n))
+#define SWAP(a, b, T) do { T t = a; a = b; b = t; } while (0)
+
+static inline void set_bucket(struct bucket *bucket, uint32_t hash,
+        const char *key, void *data)
 {
-    bucket->deleted = 0;
-    bucket->setted = 1;
+    bucket->deleted = false;
+    bucket->setted = true;
     bucket->hash = hash;
     bucket->key = key;
     bucket->data = data;
 }
 
-inline static uint32_t probe_distance(struct dict *dict, uint32_t hash, uint32_t idx)
-{
-    return (idx + dict->capacity - hash % dict->capacity) % dict->capacity;
-}
-
-static void _dict_init(struct dict *dict)
+static inline void create_buckets(struct dict *dict)
 {
     dict->buckets = cv_calloc(dict->capacity, sizeof(struct bucket));
     dict->resize_threshold = dict->capacity * LOAD_FACTOR;
@@ -30,7 +29,7 @@ static void _dict_init(struct dict *dict)
 void dict_init(struct dict *dict)
 {
     dict->capacity = DICT_BASE_CAPACITY;
-    _dict_init(dict);
+    create_buckets(dict);
 }
 
 void dict_resize(struct dict *dict)
@@ -39,7 +38,7 @@ void dict_resize(struct dict *dict)
     uint32_t i, capacity = dict->capacity;
 
     dict->capacity += DICT_BASE_CAPACITY;
-    _dict_init(dict);
+    create_buckets(dict);
 
     for (i = 0; i < capacity; i++) {
         bucket = &buckets[i];
@@ -52,6 +51,10 @@ void dict_resize(struct dict *dict)
 
 void dict_set(struct dict *dict, const char *key, void *data)
 {
+    if (key == NULL) {
+        return;
+    }
+
     if (dict->length + 1 >= dict->resize_threshold) {
         dict_resize(dict);
     }
@@ -62,36 +65,23 @@ void dict_set(struct dict *dict, const char *key, void *data)
     uint32_t pos = hash % dict->capacity;
     uint32_t probe_dist, dist = 0;
 
-    const char *temp_key;
-    uint32_t temp_hash;
-    void *temp_data;
-
-    struct bucket *cur_bucket;
-
     while (1) {
-        if (!dict->buckets[pos].setted) {
-            set_bucket(&dict->buckets[pos], hash, (char*)key, data);
+        struct bucket *bucket = &dict->buckets[pos];
+
+        if (!bucket->setted) {
+            set_bucket(bucket, hash, key, data);
             return;
         }
 
-        probe_dist = probe_distance(dict, dict->buckets[pos].hash, pos);
+        probe_dist = PSL(dict->capacity, bucket->hash, pos);
         if (probe_dist < dist) {
-            if (dict->buckets[pos].deleted) {
-                set_bucket(&dict->buckets[pos], hash, (char*)key, data);
+            if (bucket->deleted) {
+                set_bucket(bucket, hash, key, data);
                 return;
             }
-            cur_bucket = &dict->buckets[pos];
-            temp_hash = cur_bucket->hash;
-            cur_bucket->hash = hash;
-            hash = temp_hash;
-
-            temp_key = cur_bucket->key;
-            cur_bucket->key = (char*)key;
-            key = temp_key;
-
-            temp_data = cur_bucket->data;
-            cur_bucket->data = data;
-            data = temp_data;
+            SWAP(hash, bucket->hash, uint32_t);
+            SWAP(key, bucket->key, const char*);
+            SWAP(data, bucket->data, void*);
 
             dist = probe_dist;
         }
@@ -102,19 +92,21 @@ void dict_set(struct dict *dict, const char *key, void *data)
 
 int dict_index(struct dict *dict, const char *key)
 {
-    if (dict->capacity <= 0) return -1;
+    if (key == NULL || dict->capacity <= 0) {
+        return -1;
+    }
     const uint32_t hash = lookup3_hash(key);
     uint32_t pos = hash % dict->capacity;
     uint32_t dist = 0;
 
     while (1) {
-        if (!dict->buckets[pos].setted) return -1;
-        if (dist > probe_distance(dict, dict->buckets[pos].hash, pos)) {
+        struct bucket *b = &dict->buckets[pos];
+
+        if (!b->setted || dist > PSL(dict->capacity, b->hash, pos)) {
             return -1;
         }
-        if (dict->buckets[pos].hash == hash) {
-            if (dict->buckets[pos].deleted) return -1;
-            return pos;
+        if (strcmp(key, b->key) == 0) {
+            return b->deleted ? -1 : pos;
         }
         pos = (pos + 1) % dict->capacity;
         dist++;
@@ -132,7 +124,7 @@ void dict_delete(struct dict *dict, const char *key)
 {
     int idx = dict_index(dict, key);
     if (idx == -1) return;
-    dict->buckets[idx].deleted = 1;
+    dict->buckets[idx].deleted = true;
     dict->length--;
 }
 
