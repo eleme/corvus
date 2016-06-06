@@ -36,6 +36,7 @@ Requirements
 ------------
 
 * Linux >= 3.9
+* Redis <= 3.0.7 (For version up to/including 0.2.3)
 
 Build
 -----
