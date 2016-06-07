@@ -344,7 +344,7 @@ void context_free(struct context *ctx)
         cmd_iov_free(&conn->info->iov);
         conn_free(conn);
         conn_buf_free(conn);
-        cv_free(conn->info->counts);
+        cv_free(conn->info->slow_cmd_counts);
         cv_free(conn->info);
         cv_free(conn);
     }

@@ -34,22 +34,10 @@ static struct {
     double user;
 } used_cpu;
 
-// log slow command
-#define BUILD_CMD_ITEM(cmd, type, access) #cmd,
-static const char * cmd_table[] = {CMD_DO(BUILD_CMD_ITEM)};
-static const size_t CMD_NUM = sizeof(cmd_table) / sizeof(char*);
-
-static uint32_t *counts_sum;
-static struct dict slow_counts; // node dsn => counts
+static struct dict slow_counts; // node dsn => slow cmd counts
 
 
-static void stats_init_slow_log()
-{
-    dict_init(&slow_counts);
-    counts_sum = cv_malloc(CMD_NUM * sizeof(uint32_t));
-}
-
-static void stats_free_slow_log()
+static void stats_free_slow_counts()
 {
     struct dict_iter iter = DICT_ITER_INITIALIZER;
     DICT_FOREACH(&slow_counts, &iter) {
@@ -57,17 +45,6 @@ static void stats_free_slow_log()
     }
 
     dict_free(&slow_counts);
-    cv_free(counts_sum);
-}
-
-void stats_init_counts(uint32_t **counts) {
-    *counts = cv_calloc(CMD_NUM, sizeof(uint32_t));
-}
-
-void stats_log_slow_cmd(struct command *cmd)
-{
-    uint32_t *counts = cmd->server->info->counts;
-    ATOMIC_INC(counts[cmd->cmd_type], 1);
 }
 
 static inline void stats_get_cpu_usage(struct stats *stats)
@@ -257,6 +234,8 @@ static void stats_send_slow_log()
 {
     const char *fmt = "nodes.%s.slow_query.%s";
     const char *sum_fmt = "slow_query.%s";
+    extern struct cmd_item cmds[];
+    extern const size_t CMD_NUM;
 
     struct connection *server;
     struct context *contexts = get_contexts();
@@ -267,14 +246,16 @@ static void stats_send_slow_log()
             memset(iter.value, 0, CMD_NUM * sizeof(uint32_t));
         }
     }
-    memset(counts_sum, 0, CMD_NUM * sizeof(uint32_t));
+
+    uint32_t counts_sum[CMD_NUM];
+    memset(counts_sum, 0, sizeof(counts_sum));
 
     for (size_t i = 0; i < config.thread; i++) {
         TAILQ_FOREACH(server, &contexts[i].servers, next) {
             const char *dsn = server->info->dsn;
             uint32_t *node_counts = NULL;
             for (size_t j = 0; j < CMD_NUM; j++) {
-                uint32_t count = ATOMIC_IGET(server->info->counts[j], 0);
+                uint32_t count = ATOMIC_IGET(server->info->slow_cmd_counts[j], 0);
                 if (count == 0) continue;
 
                 if (!node_counts) {
@@ -297,7 +278,7 @@ static void stats_send_slow_log()
         for (size_t i = 0; i < CMD_NUM; i++) {
             if(counts[i] == 0) continue;
 
-            const char *cmd = cmd_table[i];
+            const char *cmd = cmds[i].cmd;
             int n = snprintf(NULL, 0, fmt, dsn, cmd);
             char buf[n + 1];
             snprintf(buf, sizeof(buf), fmt, dsn, cmd);
@@ -308,7 +289,7 @@ static void stats_send_slow_log()
     for (size_t i = 0; i < CMD_NUM; i++) {
         uint32_t sum = counts_sum[i];
         if (sum) {
-            const char *cmd = cmd_table[i];
+            const char *cmd = cmds[i].cmd;
             int n = snprintf(NULL, 0, sum_fmt, cmd);
             char buf[n + 1];
             snprintf(buf, sizeof(buf), sum_fmt, cmd);
@@ -325,12 +306,10 @@ void *stats_daemon(void *data)
 
     while (1) {
         sleep(config.metric_interval);
-        uint64_t start = get_time();
         stats_send_simple();
         stats_send_node_info();
         stats_send_slow_log();
-        uint64_t end = get_time();
-        LOG(DEBUG, "sending metrics, used %f ms", (end - start) / 1000000.0);
+        LOG(DEBUG, "sending metrics");
     }
     return NULL;
 }
@@ -354,7 +333,7 @@ int stats_init()
         if (hostname[i] == '.') hostname[i] = '-';
     }
 
-    stats_init_slow_log();
+    dict_init(&slow_counts);
 
     LOG(INFO, "starting stats thread");
     return thread_spawn(&stats_ctx, stats_daemon);
@@ -365,7 +344,7 @@ void stats_kill()
     int err;
 
     dict_free(&bytes_map);
-    stats_free_slow_log();
+    stats_free_slow_counts();
 
     if (pthread_cancel(stats_ctx.thread) == 0) {
         if ((err = pthread_join(stats_ctx.thread, NULL)) != 0) {
