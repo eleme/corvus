@@ -1008,8 +1008,9 @@ void cmd_iov_clear(struct context *ctx, struct iov_data *iov)
 
 void cmd_iov_free(struct iov_data *iov)
 {
-    if (iov->data != NULL) cv_free(iov->data);
-    if (iov->buf_ptr != NULL) cv_free(iov->buf_ptr);
+    cv_free(iov->data);
+    cv_free(iov->buf_ptr);
+
     iov->data = NULL;
     iov->buf_ptr = NULL;
     iov->max_size = 0;

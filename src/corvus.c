@@ -123,19 +123,17 @@ int config_add(char *name, char *value)
         }
     } else if (strcmp(name, "requirepass") == 0) {
         // Last config overwrites previous ones.
-        if (config.requirepass != NULL) {
-            cv_free(config.requirepass);
-            config.requirepass = NULL;
-        }
+        cv_free(config.requirepass);
+        config.requirepass = NULL;
+
         if (strlen(value) > 0) {
             config.requirepass = cv_calloc(strlen(value) + 1, sizeof(char));
             memcpy(config.requirepass, value, strlen(value));
         }
     } else if (strcmp(name, "node") == 0) {
-        if (config.node.addr != NULL) {
-            cv_free(config.node.addr);
-            memset(&config.node, 0, sizeof(config.node));
-        }
+        cv_free(config.node.addr);
+        memset(&config.node, 0, sizeof(config.node));
+
         char *p = strtok(value, ",");
         while (p) {
             config.node.addr = cv_realloc(config.node.addr,
