@@ -130,7 +130,6 @@ void dict_delete(struct dict *dict, const char *key)
 
 void dict_free(struct dict *dict)
 {
-    if (dict->buckets == NULL) return;
     cv_free(dict->buckets);
     memset(dict, 0, sizeof(struct dict));
 }

@@ -474,11 +474,10 @@ int parse(struct reader *r, int mode)
 
 void pos_array_free(struct pos_array *arr)
 {
-    if (arr == NULL) return;
-    if (arr->items != NULL) {
-        cv_free(arr->items);
-        arr->items = NULL;
+    if (arr == NULL) {
+        return;
     }
+    cv_free(arr->items);
     memset(arr, 0, sizeof(struct pos_array));
 }
 
