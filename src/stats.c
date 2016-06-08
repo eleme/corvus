@@ -191,7 +191,7 @@ void stats_send_node_info()
 {
     struct bytes *value;
 
-    /* redis-node.127-0-0-1:8000.bytes.{send,recv} */
+    /* redis-node.127-0-0-1-8000.bytes.{send,recv} */
     int len = HOST_LEN + 64;
     char name[len];
 
@@ -232,7 +232,10 @@ void stats_get(struct stats *stats)
 
 static void stats_send_slow_log()
 {
-    const char *fmt = "nodes.%s.slow_query.%s";
+    if (config.slow_threshold < 0)
+        return;
+
+    const char *fmt = "redis-node.%s.slow_query.%s";
     const char *sum_fmt = "slow_query.%s";
     extern struct cmd_item cmds[];
     extern const size_t CMD_NUM;
@@ -275,13 +278,21 @@ static void stats_send_slow_log()
     DICT_FOREACH(&slow_counts, &iter) {
         const char *dsn = iter.key;
         uint32_t *counts = (uint32_t*)iter.value;
+
+        char addr[ADDRESS_LEN] = {0};
+        strncpy(addr, dsn, ADDRESS_LEN);
+        for (size_t i = 0; i < ADDRESS_LEN; i++) {
+            if (addr[i] == '.' || addr[i] == ':')
+                addr[i] = '-';
+        }
+
         for (size_t i = 0; i < CMD_NUM; i++) {
             if(counts[i] == 0) continue;
 
             const char *cmd = cmds[i].cmd;
-            int n = snprintf(NULL, 0, fmt, dsn, cmd);
+            int n = snprintf(NULL, 0, fmt, addr, cmd);
             char buf[n + 1];
-            snprintf(buf, sizeof(buf), fmt, dsn, cmd);
+            snprintf(buf, sizeof(buf), fmt, addr, cmd);
             stats_send(buf, counts[i]);
         }
     }
