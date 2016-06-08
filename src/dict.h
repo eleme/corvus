@@ -1,5 +1,5 @@
-#ifndef __DICT_H
-#define __DICT_H
+#ifndef DICT_H
+#define DICT_H
 
 #include <stdbool.h>
 #include <stdlib.h>
@@ -39,4 +39,4 @@ int dict_index(struct dict *dict, const char *key);
 struct dict_iter *dict_next(struct dict *dict, struct dict_iter *iter);
 void dict_clear(struct dict *dict);
 
-#endif /* end of include guard: __DICT_H */
+#endif /* end of include guard: DICT_H */

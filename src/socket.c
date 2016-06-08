@@ -36,7 +36,7 @@ static int set_reuseport(int fd)
     return CORVUS_OK;
 }
 
-static int _listen(int fd, struct sockaddr *sa, socklen_t len, int backlog)
+static int cv_listen(int fd, struct sockaddr *sa, socklen_t len, int backlog)
 {
     if (bind(fd, sa, len) == -1) {
         LOG(ERROR, "bind: %s", strerror(errno));
@@ -50,7 +50,7 @@ static int _listen(int fd, struct sockaddr *sa, socklen_t len, int backlog)
     return CORVUS_OK;
 }
 
-static int _accept(int fd, struct sockaddr *sa, socklen_t *len)
+static int cv_accept(int fd, struct sockaddr *sa, socklen_t *len)
 {
     int s = -1;
     while (1) {
@@ -68,7 +68,7 @@ static int _accept(int fd, struct sockaddr *sa, socklen_t *len)
     return s;
 }
 
-static inline int _socket(int domain, int type, int protocol)
+static inline int cv_socket(int domain, int type, int protocol)
 {
     int fd;
     if ((fd = socket(domain, type | SOCK_CLOEXEC, protocol)) == -1) {
@@ -78,7 +78,7 @@ static inline int _socket(int domain, int type, int protocol)
     return fd;
 }
 
-static int _connect(int fd, const struct sockaddr *addr, socklen_t addrlen)
+static int cv_connect(int fd, const struct sockaddr *addr, socklen_t addrlen)
 {
     while (1) {
         int status = connect(fd, addr, addrlen);
@@ -96,18 +96,18 @@ static int _connect(int fd, const struct sockaddr *addr, socklen_t addrlen)
     return CORVUS_OK;
 }
 
-static int _getaddrinfo(const char *addr, int port, struct addrinfo **servinfo, int socktype)
+static int cv_getaddrinfo(const char *addr, int port, struct addrinfo **servinfo, int socktype)
 {
     int err = 0;
-    char _port[6];
+    char port_str[6];
     struct addrinfo hints;
 
-    snprintf(_port, 6, "%d", port);
+    snprintf(port_str, 6, "%d", port);
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = socktype;
 
-    if ((err = getaddrinfo(addr, _port, &hints, servinfo)) != 0) {
+    if ((err = getaddrinfo(addr, port_str, &hints, servinfo)) != 0) {
         LOG(ERROR, "getaddrinfo: %s", gai_strerror(err));
         return CORVUS_ERR;
     }
@@ -159,13 +159,13 @@ int socket_create_server(char *bindaddr, int port)
     int s = -1;
     struct addrinfo *p, *servinfo;
 
-    if (_getaddrinfo(bindaddr, port, &servinfo, SOCK_STREAM) == CORVUS_ERR) {
+    if (cv_getaddrinfo(bindaddr, port, &servinfo, SOCK_STREAM) == CORVUS_ERR) {
         LOG(ERROR, "socket_create_server: fail to get address info");
         return CORVUS_ERR;
     }
 
     for (p = servinfo; p != NULL; p = p->ai_next) {
-        if ((s = _socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+        if ((s = cv_socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
             continue;
         }
         break;
@@ -194,7 +194,7 @@ int socket_create_server(char *bindaddr, int port)
         return CORVUS_ERR;
     }
 
-    if (_listen(s, p->ai_addr, p->ai_addrlen, 1024) == -1) {
+    if (cv_listen(s, p->ai_addr, p->ai_addrlen, 1024) == -1) {
         close(s);
         freeaddrinfo(servinfo);
         return CORVUS_ERR;
@@ -206,12 +206,12 @@ int socket_create_server(char *bindaddr, int port)
 
 int socket_create_stream()
 {
-    return _socket(AF_INET, SOCK_STREAM, 0);
+    return cv_socket(AF_INET, SOCK_STREAM, 0);
 }
 
 int socket_create_udp_client()
 {
-    return _socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    return cv_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 }
 
 int socket_accept(int fd, char *ip, size_t ip_len, int *port)
@@ -220,7 +220,7 @@ int socket_accept(int fd, char *ip, size_t ip_len, int *port)
     struct sockaddr_storage sa;
     socklen_t salen = sizeof(sa);
 
-    s = _accept(fd, (struct sockaddr*)&sa, &salen);
+    s = cv_accept(fd, (struct sockaddr*)&sa, &salen);
     if (s == CORVUS_AGAIN || s == CORVUS_ERR) return s;
 
     struct sockaddr_in *addr = (struct sockaddr_in*)&sa;
@@ -234,13 +234,13 @@ int socket_connect(int fd, char *addr, int port)
     int status = CORVUS_ERR;
     struct addrinfo *p, *addrs;
 
-    if (_getaddrinfo(addr, port, &addrs, SOCK_STREAM) == CORVUS_ERR) {
+    if (cv_getaddrinfo(addr, port, &addrs, SOCK_STREAM) == CORVUS_ERR) {
         LOG(ERROR, "socket_connect: fail to get address info");
         return CORVUS_ERR;
     }
 
     for (p = addrs; p != NULL; p = p->ai_next) {
-        status = _connect(fd, p->ai_addr, p->ai_addrlen);
+        status = cv_connect(fd, p->ai_addr, p->ai_addrlen);
         if (status == CORVUS_ERR) continue;
         break;
     }
@@ -291,7 +291,7 @@ int socket_write(int fd, struct iovec *iov, int invcnt)
 int socket_get_sockaddr(char *addr, int port, struct sockaddr_in *dest, int socktype)
 {
     struct addrinfo *addrs;
-    if (_getaddrinfo(addr, port, &addrs, socktype) == CORVUS_ERR) {
+    if (cv_getaddrinfo(addr, port, &addrs, socktype) == CORVUS_ERR) {
         LOG(ERROR, "socket_get_sockaddr: fail to get address info");
         return CORVUS_ERR;
     }

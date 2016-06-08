@@ -1,5 +1,5 @@
-#ifndef __EVENT_H
-#define __EVENT_H
+#ifndef EVENT_H
+#define EVENT_H
 
 #include <sys/epoll.h>
 #include "connection.h"
@@ -22,4 +22,4 @@ int event_reregister(struct event_loop *loop, struct connection *c, int mask);
 int event_deregister(struct event_loop *loop, struct connection *c);
 int event_wait(struct event_loop *loop, int timeout);
 
-#endif /* end of include guard: __EVENT_H */
+#endif /* end of include guard: EVENT_H */

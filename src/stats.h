@@ -1,5 +1,5 @@
-#ifndef __STATS_H
-#define __STATS_H
+#ifndef STATS_H
+#define STATS_H
 
 #include <sys/types.h>
 #include "socket.h"
@@ -45,4 +45,4 @@ int stats_resolve_addr(char *addr);
 void stats_get(struct stats *stats);
 void stats_get_memory(struct memory_stats *stats);
 
-#endif /* end of include guard: __STATS_H */
+#endif /* end of include guard: STATS_H */

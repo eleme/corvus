@@ -1,5 +1,5 @@
-#ifndef __CONNECTION_H
-#define __CONNECTION_H
+#ifndef CONNECTION_H
+#define CONNECTION_H
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -95,4 +95,4 @@ int conn_write(struct connection *conn, int clear);
 int conn_read(struct connection *conn, struct mbuf *buf);
 struct command *conn_get_cmd(struct connection *client);
 
-#endif /* end of include guard: __CONNECTION_H */
+#endif /* end of include guard: CONNECTION_H */

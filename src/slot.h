@@ -1,5 +1,5 @@
-#ifndef __SLOT_H
-#define __SLOT_H
+#ifndef SLOT_H
+#define SLOT_H
 
 #include <stdint.h>
 #include "parser.h"
@@ -45,4 +45,4 @@ bool slot_get_node_addr(uint16_t slot, struct node_info *info);
 void slot_create_job(int type);
 int slot_start_manager(struct context *ctx);
 
-#endif /* end of include guard: __SLOT_H */
+#endif /* end of include guard: SLOT_H */

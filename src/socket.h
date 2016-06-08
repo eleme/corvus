@@ -1,5 +1,5 @@
-#ifndef __SOCKET_H
-#define __SOCKET_H
+#ifndef SOCKET_H
+#define SOCKET_H
 
 #include <arpa/inet.h>
 #include <limits.h>
@@ -34,4 +34,4 @@ int socket_parse_ip(char *addr, struct address *address);
 int socket_create_eventfd();
 int socket_trigger_event(int evfd);
 
-#endif /* end of include guard: __SOCKET_H */
+#endif /* end of include guard: SOCKET_H */
