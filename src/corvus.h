@@ -1,5 +1,5 @@
-#ifndef __CORVUS_H
-#define __CORVUS_H
+#ifndef CORVUS_H
+#define CORVUS_H
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -111,4 +111,4 @@ int64_t get_time();
 struct context *get_contexts();
 int thread_spawn(struct context *ctx, void *(*start_routine) (void *));
 
-#endif /* end of include guard: __CORVUS_H */
+#endif /* end of include guard: CORVUS_H */

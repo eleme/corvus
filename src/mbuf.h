@@ -1,5 +1,5 @@
-#ifndef __MBUF_H
-#define __MBUF_H
+#ifndef MBUF_H
+#define MBUF_H
 
 #include <sys/queue.h>
 #include <stdint.h>

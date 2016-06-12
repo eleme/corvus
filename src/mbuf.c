@@ -7,7 +7,7 @@
 #define RECYCLE_LENGTH 8192 // 128mb
 #define BUF_TIME_LIMIT 512
 
-static struct mbuf *_mbuf_get(struct context *ctx)
+static struct mbuf *mbuf_create(struct context *ctx)
 {
     struct mbuf *mbuf;
     uint8_t *buf;
@@ -49,7 +49,7 @@ struct mbuf *mbuf_get(struct context *ctx)
     struct mbuf *mbuf;
     uint8_t *buf;
 
-    mbuf = _mbuf_get(ctx);
+    mbuf = mbuf_create(ctx);
     if (mbuf == NULL) {
         return NULL;
     }

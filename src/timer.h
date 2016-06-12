@@ -1,5 +1,5 @@
-#ifndef __TIMER_H
-#define __TIMER_H
+#ifndef TIMER_H
+#define TIMER_H
 
 struct context;
 struct connection;
@@ -7,4 +7,4 @@ struct connection;
 int timer_init(struct connection *timer, struct context *ctx);
 int timer_start(struct connection *timer);
 
-#endif /* end of include guard: __TIMER_H */
+#endif /* end of include guard: TIMER_H */

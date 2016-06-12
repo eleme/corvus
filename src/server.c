@@ -110,7 +110,7 @@ int server_write(struct connection *server)
     return CORVUS_OK;
 }
 
-int _server_retry(struct connection *server, struct command *cmd)
+int server_enqueue(struct connection *server, struct command *cmd)
 {
     if (server == NULL) {
         mbuf_range_clear(cmd->ctx, cmd->rep_buf);
@@ -131,7 +131,7 @@ int server_retry(struct command *cmd)
 {
     struct connection *server = conn_get_server(cmd->ctx, cmd->slot, cmd->cmd_access);
 
-    switch (_server_retry(server, cmd)) {
+    switch (server_enqueue(server, cmd)) {
         case SERVER_NULL:
             LOG(WARN, "server_retry: slot %d fail to get server", cmd->slot);
             return CORVUS_OK;
@@ -159,7 +159,7 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
     // redirection always points to master
     struct connection *server = conn_get_server_from_pool(cmd->ctx, &addr, false);
 
-    switch (_server_retry(server, cmd)) {
+    switch (server_enqueue(server, cmd)) {
         case SERVER_NULL:
             LOG(WARN, "server_redirect: fail to get server %s", info->addr);
             return CORVUS_OK;

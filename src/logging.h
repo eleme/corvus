@@ -1,5 +1,5 @@
-#ifndef __LOGGING_H
-#define __LOGGING_H
+#ifndef LOGGING_H
+#define LOGGING_H
 
 #include <stdbool.h>
 #include <syslog.h>
@@ -21,4 +21,4 @@ struct context;
 void log_init(struct context *ctx);
 void logger(const char *file, int line, int level, const char *fmt, ...);
 
-#endif /* end of include guard: __LOGGING_H */
+#endif /* end of include guard: LOGGING_H */

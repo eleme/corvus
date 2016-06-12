@@ -18,7 +18,7 @@ do {                                                           \
     v += c - '0';                                              \
 } while (0);
 
-#define _END(reader, elements, end_char)                               \
+#define END(reader, elements, end_char)                               \
 do {                                                                   \
     if ((end_char) != '\n') {                                          \
         LOG(ERROR, "%s: unexpected charactor %c", __func__, end_char); \
@@ -202,7 +202,7 @@ int process_array(struct reader *r)
                     for (size = 1; size * ARRAY_BASE_SIZE  < task->data.elements; size *= 2);
                     task->data.element = cv_calloc(size * ARRAY_BASE_SIZE, sizeof(struct redis_data));
                 }
-                _END(r, task->data.elements, *p);
+                END(r, task->data.elements, *p);
         }
         r->buf->pos++;
     }
@@ -287,7 +287,7 @@ int process_string(struct reader *r)
                     data->buf[1].pos = r->buf->pos + 1;
                 }
 
-                _END(r, task->elements, *p);
+                END(r, task->elements, *p);
         }
         r->buf->pos++;
     }
@@ -335,7 +335,7 @@ int process_integer(struct reader *r)
                 break;
             case PARSE_INTEGER_END:
                 task->cur_data = NULL;
-                _END(r, task->elements, *p);
+                END(r, task->elements, *p);
         }
         r->buf->pos++;
     }
@@ -397,7 +397,7 @@ int process_simple_string(struct reader *r, int type)
             case PARSE_SIMPLE_STRING_END:
                 task->cur_data = NULL;
                 task->prev_buf = NULL;
-                _END(r, task->elements, *p);
+                END(r, task->elements, *p);
         }
         r->buf->pos++;
     }

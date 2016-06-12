@@ -1,5 +1,5 @@
-#ifndef __COMMAND_H
-#define __COMMAND_H
+#ifndef COMMAND_H
+#define COMMAND_H
 
 #include "socket.h"
 #include "parser.h"
@@ -265,4 +265,4 @@ void cmd_iov_clear(struct context *ctx, struct iov_data *iov);
 void cmd_iov_free(struct iov_data *iov);
 void cmd_free(struct command *cmd);
 
-#endif /* end of include guard: __COMMAND_H */
+#endif /* end of include guard: COMMAND_H */

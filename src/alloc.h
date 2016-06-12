@@ -1,5 +1,5 @@
-#ifndef __ALLOC_H
-#define __ALLOC_H
+#ifndef ALLOC_H
+#define ALLOC_H
 
 #include <stddef.h>
 #include <jemalloc/jemalloc.h>
@@ -21,4 +21,4 @@ void *cv_raw_calloc(size_t number, size_t size, const char *file, int line);
 void *cv_raw_realloc(void *ptr, size_t size, const char *file, int line);
 void cv_free(void *ptr);
 
-#endif /* end of include guard: __ALLOC_H */
+#endif /* end of include guard: ALLOC_H */
