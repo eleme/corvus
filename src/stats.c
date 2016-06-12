@@ -8,6 +8,7 @@
 #include "socket.h"
 #include "logging.h"
 #include "slot.h"
+#include "alloc.h"
 
 #define HOST_LEN 255
 
@@ -32,6 +33,19 @@ static struct {
     double sys;
     double user;
 } used_cpu;
+
+static struct dict slow_counts; // node dsn => slow cmd counts
+
+
+static void stats_free_slow_counts()
+{
+    struct dict_iter iter = DICT_ITER_INITIALIZER;
+    DICT_FOREACH(&slow_counts, &iter) {
+        cv_free(iter.value);
+    }
+
+    dict_free(&slow_counts);
+}
 
 static inline void stats_get_cpu_usage(struct stats *stats)
 {
@@ -177,7 +191,7 @@ void stats_send_node_info()
 {
     struct bytes *value;
 
-    /* redis-node.127-0-0-1:8000.bytes.{send,recv} */
+    /* redis-node.127-0-0-1-8000.bytes.{send,recv} */
     int len = HOST_LEN + 64;
     char name[len];
 
@@ -216,6 +230,85 @@ void stats_get(struct stats *stats)
     }
 }
 
+static void stats_send_slow_log()
+{
+    if (config.slow_threshold < 0)
+        return;
+
+    const char *fmt = "redis-node.%s.slow_query.%s";
+    const char *sum_fmt = "slow_query.%s";
+    extern struct cmd_item cmds[];
+    extern const size_t CMD_NUM;
+
+    struct connection *server;
+    struct context *contexts = get_contexts();
+
+    {
+        struct dict_iter iter = DICT_ITER_INITIALIZER;
+        DICT_FOREACH(&slow_counts, &iter) {
+            memset(iter.value, 0, CMD_NUM * sizeof(uint32_t));
+        }
+    }
+
+    uint32_t counts_sum[CMD_NUM];
+    memset(counts_sum, 0, sizeof(counts_sum));
+
+    for (size_t i = 0; i < config.thread; i++) {
+        TAILQ_FOREACH(server, &contexts[i].servers, next) {
+            const char *dsn = server->info->dsn;
+            uint32_t *node_counts = NULL;
+            for (size_t j = 0; j < CMD_NUM; j++) {
+                uint32_t count = ATOMIC_IGET(server->info->slow_cmd_counts[j], 0);
+                if (count == 0) continue;
+
+                if (!node_counts) {
+                    node_counts = (uint32_t*)dict_get(&slow_counts, dsn);
+                    if (!node_counts) {
+                        node_counts = cv_calloc(CMD_NUM, sizeof(uint32_t));
+                        dict_set(&slow_counts, dsn, node_counts);
+                    }
+                }
+                node_counts[j] += count;
+                counts_sum[j] += count;
+            }
+        }
+    }
+
+    struct dict_iter iter = DICT_ITER_INITIALIZER;
+    DICT_FOREACH(&slow_counts, &iter) {
+        const char *dsn = iter.key;
+        uint32_t *counts = (uint32_t*)iter.value;
+
+        char addr[ADDRESS_LEN] = {0};
+        strncpy(addr, dsn, ADDRESS_LEN);
+        for (size_t i = 0; i < ADDRESS_LEN; i++) {
+            if (addr[i] == '.' || addr[i] == ':')
+                addr[i] = '-';
+        }
+
+        for (size_t i = 0; i < CMD_NUM; i++) {
+            if(counts[i] == 0) continue;
+
+            const char *cmd = cmds[i].cmd;
+            int n = snprintf(NULL, 0, fmt, addr, cmd);
+            char buf[n + 1];
+            snprintf(buf, sizeof(buf), fmt, addr, cmd);
+            stats_send(buf, counts[i]);
+        }
+    }
+
+    for (size_t i = 0; i < CMD_NUM; i++) {
+        uint32_t sum = counts_sum[i];
+        if (sum) {
+            const char *cmd = cmds[i].cmd;
+            int n = snprintf(NULL, 0, sum_fmt, cmd);
+            char buf[n + 1];
+            snprintf(buf, sizeof(buf), sum_fmt, cmd);
+            stats_send(buf, sum);
+        }
+    }
+}
+
 void *stats_daemon(void *data)
 {
     /* Make the thread killable at any time can work reliably. */
@@ -226,6 +319,7 @@ void *stats_daemon(void *data)
         sleep(config.metric_interval);
         stats_send_simple();
         stats_send_node_info();
+        stats_send_slow_log();
         LOG(DEBUG, "sending metrics");
     }
     return NULL;
@@ -250,6 +344,8 @@ int stats_init()
         if (hostname[i] == '.') hostname[i] = '-';
     }
 
+    dict_init(&slow_counts);
+
     LOG(INFO, "starting stats thread");
     return thread_spawn(&stats_ctx, stats_daemon);
 }
@@ -259,6 +355,7 @@ void stats_kill()
     int err;
 
     dict_free(&bytes_map);
+    stats_free_slow_counts();
 
     if (pthread_cancel(stats_ctx.thread) == 0) {
         if ((err = pthread_join(stats_ctx.thread, NULL)) != 0) {

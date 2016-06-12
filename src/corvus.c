@@ -38,6 +38,7 @@ void config_init()
     config.bufsize = DEFAULT_BUFSIZE;
     config.requirepass = NULL;
     config.readslave = config.readmasterslave = false;
+    config.slow_threshold = -1;
 
     memset(config.statsd_addr, 0, sizeof(config.statsd_addr));
     config.metric_interval = 10;
@@ -147,6 +148,8 @@ int config_add(char *name, char *value)
             config.node.len++;
             p = strtok(NULL, ",");
         }
+    } else if (strcmp(name, "slow_threshold") == 0) {
+        config.slow_threshold = atoi(value);
     }
     return 0;
 }
@@ -341,6 +344,7 @@ void context_free(struct context *ctx)
         cmd_iov_free(&conn->info->iov);
         conn_free(conn);
         conn_buf_free(conn);
+        cv_free(conn->info->slow_cmd_counts);
         cv_free(conn->info);
         cv_free(conn);
     }
