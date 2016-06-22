@@ -928,7 +928,14 @@ void cmd_stats(struct command *cmd, int64_t end_time)
     ATOMIC_SET(ctx->last_command_latency, latency);
 
     if (config.slow_threshold >= 0 && latency > config.slow_threshold * 1000) {
-        ATOMIC_INC(cmd->server->info->slow_cmd_counts[cmd->cmd_type], 1);
+      if (!STAILQ_EMPTY(&cmd->sub_cmds)) {
+	struct command *sub_cmd;
+	STAILQ_FOREACH(sub_cmd, &cmd->sub_cmds, sub_cmd_next) {
+	  ATOMIC_INC(sub_cmd->server->info->slow_cmd_counts[cmd->cmd_type], 1);	  
+	}
+      } else {
+	ATOMIC_INC(cmd->server->info->slow_cmd_counts[cmd->cmd_type], 1);
+      }
     }
 
     if (!STAILQ_EMPTY(&cmd->sub_cmds)) {
