@@ -11,6 +11,7 @@
 #include "socket.h"
 #include "logging.h"
 #include "alloc.h"
+#include "stats.h"
 
 static const char SLOTS_CMD[] = "*2\r\n$7\r\nCLUSTER\r\n$5\r\nNODES\r\n";
 
@@ -464,6 +465,7 @@ void node_list_get(char *dest)
 
 void slot_create_job(int type)
 {
+    incr_slot_update_counter();
     pthread_mutex_lock(&job_mutex);
     if (!in_progress || type == SLOT_UPDATER_QUIT) {
         in_progress = 1;
