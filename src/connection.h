@@ -69,9 +69,6 @@ struct conn_info {
     long long completed_commands;
 
     int8_t status;
-
-    // slow log, only for server connection in worker thread
-    uint32_t *slow_cmd_counts;
 };
 
 TAILQ_HEAD(conn_tqh, connection);
