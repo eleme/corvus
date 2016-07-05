@@ -33,6 +33,8 @@ static struct {
     double user;
 } used_cpu;
 
+static int slot_update_job_count;
+
 static inline void stats_get_cpu_usage(struct stats *stats)
 {
     struct rusage ru;
@@ -46,6 +48,7 @@ static inline void stats_get_cpu_usage(struct stats *stats)
 static inline void stats_cumulate(struct stats *stats)
 {
     cumulation.basic.completed_commands += stats->basic.completed_commands;
+    cumulation.basic.slot_update_jobs += stats->basic.slot_update_jobs;
     cumulation.basic.remote_latency += stats->basic.remote_latency;
     cumulation.basic.total_latency += stats->basic.total_latency;
     cumulation.basic.recv_bytes += stats->basic.recv_bytes;
@@ -86,6 +89,11 @@ void stats_get_memory(struct memory_stats *stats)
     }
 }
 
+void incr_slot_update_counter()
+{
+    ATOMIC_INC(slot_update_job_count, 1);
+}
+
 void stats_get_simple(struct stats *stats, bool reset)
 {
     if (!reset) {
@@ -103,6 +111,12 @@ void stats_get_simple(struct stats *stats, bool reset)
 
         used_cpu.sys = temp_sys;
         used_cpu.user = temp_user;
+    }
+
+    if (reset){
+        stats->basic.slot_update_jobs = ATOMIC_IGET(slot_update_job_count, 0);
+    }else{
+        stats->basic.slot_update_jobs = ATOMIC_GET(slot_update_job_count) + cumulation.basic.slot_update_jobs;
     }
 
     struct context *contexts = get_contexts();
@@ -168,6 +182,7 @@ void stats_send_simple()
     stats_get_simple(&stats, true);
     stats_send("connected_clients", stats.basic.connected_clients);
     stats_send("completed_commands", stats.basic.completed_commands);
+    stats_send("slot_update_jobs", stats.basic.slot_update_jobs);
     stats_send("used_cpu_sys", stats.used_cpu_sys);
     stats_send("used_cpu_user", stats.used_cpu_user);
     stats_send("latency", stats.basic.total_latency / 1000000.0);

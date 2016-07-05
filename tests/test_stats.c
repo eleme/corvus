@@ -20,8 +20,10 @@ TEST(test_stats_get_simple_reset) {
     struct stats stats;
     memset(&stats, 0, sizeof(stats));
     stats_get_simple(&stats, true);
+    incr_slot_update_counter();
 
     ASSERT(stats.basic.completed_commands == 10);
+    ASSERT(stats.basic.slot_update_jobs == 1);
     ASSERT(stats.basic.remote_latency == 1000);
     ASSERT(stats.basic.total_latency == 10000);
     ASSERT(stats.basic.recv_bytes == 16);
@@ -38,13 +40,15 @@ TEST(test_stats_get_simple_reset) {
 
 TEST(test_stats_get_simple_cumulative) {
     struct context *ctxs = get_contexts();
-
     struct stats stats;
+
     memset(&stats, 0, sizeof(stats));
     set_stats(&ctxs[0]);
     stats_get_simple(&stats, false);
+    incr_slot_update_counter();
 
     ASSERT(stats.basic.completed_commands == 20);
+    ASSERT(stats.basic.slot_update_jobs == 2);
     ASSERT(stats.basic.remote_latency == 2000);
     ASSERT(stats.basic.total_latency == 20000);
     ASSERT(stats.basic.recv_bytes == 32);

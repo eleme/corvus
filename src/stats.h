@@ -22,6 +22,7 @@ struct memory_stats {
 struct basic_stats {
     long long connected_clients;
     long long completed_commands;
+    long long slot_update_jobs;
     long long recv_bytes;
     long long send_bytes;
 
@@ -44,5 +45,7 @@ void stats_kill();
 int stats_resolve_addr(char *addr);
 void stats_get(struct stats *stats);
 void stats_get_memory(struct memory_stats *stats);
+
+void incr_slot_update_counter();
 
 #endif /* end of include guard: STATS_H */

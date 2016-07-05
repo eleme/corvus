@@ -167,6 +167,7 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             "used_cpu_user:%.2f\r\n"
             "connected_clients:%lld\r\n"
             "completed_commands:%lld\r\n"
+            "slot_update_jobs:%lld\r\n"
             "recv_bytes:%lld\r\n"
             "send_bytes:%lld\r\n"
             "remote_latency:%.6f\r\n"
@@ -178,6 +179,7 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             stats->used_cpu_sys, stats->used_cpu_user,
             stats->basic.connected_clients,
             stats->basic.completed_commands,
+            stats->basic.slot_update_jobs,
             stats->basic.recv_bytes, stats->basic.send_bytes,
             stats->basic.remote_latency / 1000000.0,
             stats->basic.total_latency / 1000000.0, latency,
