@@ -104,7 +104,6 @@ struct {
     int64_t client_timeout;
     int64_t server_timeout;
     int bufsize;
-    int64_t slow_threshold;
 } config;
 
 int64_t get_time();

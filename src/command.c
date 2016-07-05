@@ -36,6 +36,13 @@ enum {
     CMD_EXTRA,
 };
 
+struct cmd_item {
+    char *cmd;
+    int value;
+    int type;
+    int access;
+};
+
 const char *rep_err = "-ERR Proxy error\r\n";
 const char *rep_parse_err = "-ERR Proxy fail to parse command\r\n";
 const char *rep_forward_err = "-ERR Proxy fail to forward command\r\n";
@@ -54,8 +61,7 @@ static const char *rep_noauth = "-NOAUTH Authentication required.\r\n";
 static const char *rep_auth_err = "-ERR invalid password\r\n";
 static const char *rep_auth_not_set = "-ERR Client sent AUTH, but no password is set\r\n";
 
-struct cmd_item cmds[] = {CMD_DO(CMD_BUILD_MAP)};
-const size_t CMD_NUM = sizeof(cmds) / sizeof(struct cmd_item);
+static struct cmd_item cmds[] = {CMD_DO(CMD_BUILD_MAP)};
 static struct dict command_map;
 
 static inline uint8_t *cmd_get_data(struct mbuf *b, struct buf_ptr ptr[], int *len)
@@ -926,10 +932,6 @@ void cmd_stats(struct command *cmd, int64_t end_time)
 
     ATOMIC_INC(ctx->stats.total_latency, latency);
     ATOMIC_SET(ctx->last_command_latency, latency);
-
-    if (config.slow_threshold >= 0 && latency > config.slow_threshold * 1000) {
-        ATOMIC_INC(cmd->server->info->slow_cmd_counts[cmd->cmd_type], 1);
-    }
 
     if (!STAILQ_EMPTY(&cmd->sub_cmds)) {
         first = STAILQ_FIRST(&cmd->sub_cmds);
