@@ -274,7 +274,7 @@ int do_update_slot_map(struct connection *server)
 void slot_map_update(struct context *ctx)
 {
     int i, count = 0;
-    struct address *node;
+    struct address node;
 
     struct connection *server = conn_create(ctx);
     server->info = conn_info_create(ctx);
@@ -288,8 +288,11 @@ void slot_map_update(struct context *ctx)
     int len = node_list.len;
     node_list.len = 0;
 
-    for (i = 0; i < len; i++) {
-        node = &nodes[i];
+    for (i = len; i > 0; i--) {
+        int r = rand_r(&ctx->seed) % i;
+        node = nodes[r];
+        nodes[r] = nodes[i - 1];
+
         server->fd = socket_create_stream();
         if (server->fd == -1) continue;
 
@@ -298,7 +301,7 @@ void slot_map_update(struct context *ctx)
             continue;
         }
 
-        memcpy(&server->info->addr, node, sizeof(struct address));
+        memcpy(&server->info->addr, &node, sizeof(struct address));
 
         count = do_update_slot_map(server);
         if (count < REDIS_CLUSTER_SLOTS) {
