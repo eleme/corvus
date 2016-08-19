@@ -38,6 +38,7 @@ void config_init()
     config.bufsize = DEFAULT_BUFSIZE;
     config.requirepass = NULL;
     config.readslave = config.readmasterslave = false;
+    config.slowlog_max_len = 128;
 
     memset(config.statsd_addr, 0, sizeof(config.statsd_addr));
     config.metric_interval = 10;
@@ -316,6 +317,8 @@ void context_init(struct context *ctx)
     STAILQ_INIT(&ctx->free_conn_infoq);
     TAILQ_INIT(&ctx->servers);
     TAILQ_INIT(&ctx->conns);
+
+    ctx->slowlog.len = 0;  // for non worker threads
 }
 
 void build_contexts()
@@ -345,6 +348,10 @@ void context_free(struct context *ctx)
         cv_free(conn);
     }
     dict_free(&ctx->server_table);
+
+    /* slowlog */
+    if (ctx->slowlog.len > 0)
+        slowlog_free(&ctx->slowlog);
 
     /* mbuf queue */
     mbuf_destroy(ctx);
@@ -399,6 +406,13 @@ void context_free(struct context *ctx)
 void *main_loop(void *data)
 {
     struct context *ctx = data;
+
+    if (config.slowlog_max_len > 0) {
+        if (slowlog_init(&ctx->slowlog) == CORVUS_ERR) {
+            LOG(ERROR, "Fatal: fail to init slowlog.");
+            exit(EXIT_FAILURE);
+        }
+    }
 
     if (event_init(&ctx->loop, 1024) == -1) {
         LOG(ERROR, "Fatal: fail to create event loop.");

@@ -6,6 +6,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <assert.h>
 #include "corvus.h"
 #include "socket.h"
 #include "logging.h"
@@ -16,6 +17,7 @@
 #include "client.h"
 #include "stats.h"
 #include "alloc.h"
+#include "slowlog.h"
 
 #define CMD_RECYCLE_SIZE 1024
 
@@ -51,10 +53,11 @@ const char *rep_addr_err = "-ERR Proxy fail to parse server address\r\n";
 const char *rep_server_err = "-ERR Proxy fail to get server\r\n";
 const char *rep_timeout_err = "-ERR Proxy timed out\r\n";
 
-static const char *rep_get = "*2\r\n$3\r\nGET\r\n";
-static const char *rep_set = "*3\r\n$3\r\nSET\r\n";
-static const char *rep_del = "*2\r\n$3\r\nDEL\r\n";
-static const char *rep_exists = "*2\r\n$6\r\nEXISTS\r\n";
+const char *rep_get = "*2\r\n$3\r\nGET\r\n";
+const char *rep_set = "*3\r\n$3\r\nSET\r\n";
+const char *rep_del = "*2\r\n$3\r\nDEL\r\n";
+const char *rep_exists = "*2\r\n$6\r\nEXISTS\r\n";
+
 static const char *rep_ok = "+OK\r\n";
 static const char *rep_ping = "+PONG\r\n";
 static const char *rep_noauth = "-NOAUTH Authentication required.\r\n";
@@ -63,6 +66,20 @@ static const char *rep_auth_not_set = "-ERR Client sent AUTH, but no password is
 
 static struct cmd_item cmds[] = {CMD_DO(CMD_BUILD_MAP)};
 static struct dict command_map;
+
+
+const char *cmd_extract_prefix(const char *prefix)
+{
+    const char *get = "$3\r\nGET\r\n";
+    const char *set = "$3\r\nSET\r\n";
+    const char *del = "$3\r\nDEL\r\n";
+    const char *exists = "$6\r\nEXISTS\r\n";
+    return prefix == rep_get ? cv_strndup(get, strlen(get)) :
+        prefix == rep_set ? cv_strndup(set, strlen(set)) :
+        prefix == rep_del ? cv_strndup(del, strlen(del)) :
+        prefix == rep_exists ? cv_strndup(exists, strlen(exists)) :
+        NULL;
+}
 
 static inline uint8_t *cmd_get_data(struct mbuf *b, struct buf_ptr ptr[], int *len)
 {
@@ -524,6 +541,127 @@ int cmd_quit(struct command *cmd)
     return CORVUS_OK;
 }
 
+static int parse_len(struct redis_data *data, int *result)
+{
+    ASSERT_TYPE(data, REP_STRING);
+    char len_limit[data->pos.str_len + 1];
+    if (pos_to_str(&data->pos, len_limit) == CORVUS_ERR) {
+        LOG(ERROR, "parse_len: emptry arg string");
+        return CORVUS_ERR;
+    }
+
+    int v = 0;
+    for (size_t i = 0; i != data->pos.str_len; i++) {
+        char c = len_limit[i];
+        if (c < '0' || c > '9') {
+            LOG(ERROR, "parse_len: char not between 0-9");
+            return CORVUS_ERR;
+        }
+        v += (10 * v + (c - '0'));
+    }
+    *result = v;
+
+    return CORVUS_OK;
+}
+
+int cmd_slowlog_get(struct command *cmd, struct redis_data *data)
+{
+    // For example 'slowlog get 128', element[2] is 128 here
+    int len = config.slowlog_max_len;
+    if (data->elements > 3) {
+        LOG(DEBUG, "cmd_slowlog_get: too many arguments");
+        return CORVUS_ERR;
+    } else if (data->elements == 3) {
+        int len_limit;
+        struct redis_data *len_limit_data = &data->element[2];
+        if (parse_len(len_limit_data, &len_limit) == CORVUS_ERR) {
+            return CORVUS_ERR;
+        }
+        if (len_limit == 0) {
+            LOG(ERROR, "cmd_slowlog_get: invalid len");
+            return CORVUS_ERR;
+        }
+        if (len_limit < len) {
+            len = len_limit;
+        }
+    }
+
+    struct context *contexts = get_contexts();
+    struct slowlog_entry *entries[len];
+    int count = 0;
+    for (size_t i = 0; i != config.thread; i++) {
+        struct slowlog_queue *queue = &contexts[i].slowlog;
+        for (size_t j = 0; j != queue->len && count < len; j++) {
+            // slowlog_get will lock mutex
+            struct slowlog_entry *entry = slowlog_get(queue, j);
+            if (entry == NULL)
+                break;  // NULL starts from here
+            entries[count++] = entry;
+        }
+    }
+
+    // generate redis packet
+    const char *hdr_fmt =
+        "*4\r\n"
+        ":%lld\r\n"  // id
+        ":%lld\r\n"  // log time
+        ":%lld\r\n"  // latency
+        "*%d\r\n";  // cmd arg len
+    char buf[150];
+
+    int size = snprintf(buf, sizeof buf, "*%d\r\n", count);
+    assert(size < 150);
+    conn_add_data(cmd->client, (uint8_t*)buf, size,
+            &cmd->rep_buf[0], &cmd->rep_buf[1]);
+
+    for (size_t i = 0; i != count; i++) {
+        struct slowlog_entry *entry = entries[i];
+        assert(entry->argc > 0);
+        size = snprintf(buf, sizeof buf, hdr_fmt,
+                entry->id, entry->log_time, entry->latency, entry->argc);
+        conn_add_data(cmd->client, (uint8_t*)buf, size, NULL, NULL);
+
+        for (size_t j = 0; j != entry->argc; j++) {
+            struct pos *arg = entry->argv + j;
+            conn_add_data(cmd->client, arg->str, arg->len,
+                    NULL, &cmd->rep_buf[1]);
+        }
+        slowlog_dec_ref(entry);
+    }
+    CMD_INCREF(cmd);
+    cmd_mark_done(cmd);
+
+    return CORVUS_OK;
+}
+
+int cmd_slowlog_len(struct command *cmd) { return CORVUS_ERR; }
+int cmd_slowlog_reset(struct command *cmd) { return CORVUS_ERR; }
+
+int cmd_slowlog(struct command *cmd, struct redis_data *data)
+{
+    ASSERT_TYPE(data, REP_ARRAY);
+    ASSERT_ELEMENTS(data->elements >= 2, data);
+
+    struct redis_data *op = &data->element[1];
+    ASSERT_TYPE(op, REP_STRING);
+
+    char type[op->pos.str_len + 1];
+    if (pos_to_str(&op->pos, type) == CORVUS_ERR) {
+        LOG(ERROR, "cmd_slowlog: parse error");
+        return CORVUS_ERR;
+    }
+
+    if (strcasecmp(type, "GET") == 0) {
+        return cmd_slowlog_get(cmd, data);
+    } else if (strcasecmp(type, "LEN") == 0) {
+        return cmd_slowlog_len(cmd);
+    } else if (strcasecmp(type, "RESET") == 0) {
+        return cmd_slowlog_reset(cmd);
+    }
+    cmd_mark_fail(cmd, rep_parse_err);
+    return CORVUS_OK;
+}
+
 int cmd_extra(struct command *cmd, struct redis_data *data)
 {
     switch (cmd->cmd_type) {
@@ -539,6 +677,8 @@ int cmd_extra(struct command *cmd, struct redis_data *data)
             return cmd_time(cmd);
         case CMD_QUIT:
             return cmd_quit(cmd);
+        case CMD_SLOWLOG:
+            return cmd_slowlog(cmd, data);
         default:
             LOG(ERROR, "%s: unknown command type %d", __func__, cmd->cmd_type);
             return CORVUS_ERR;
@@ -606,6 +746,7 @@ int cmd_parse_req(struct command *cmd, struct mbuf *buf)
         cmd->keys = r->data.elements - 1;
         cmd->parse_done = true;
         cmd->cmd_count = 1;
+        cmd->data.type = REP_UNKNOWN;
 
         memcpy(&cmd->req_buf[0], &r->start, sizeof(r->start));
         memset(&r->start, 0, sizeof(r->start));
@@ -623,7 +764,15 @@ int cmd_parse_req(struct command *cmd, struct mbuf *buf)
             cmd_mark_fail(cmd, rep_forward_err);
             return CORVUS_OK;
         }
-        redis_data_free(&r->data);
+
+        if (cmd->request_type == CMD_EXTRA
+                || cmd->request_type == CMD_UNIMPL) {
+            redis_data_free(&r->data);
+            return CORVUS_OK;
+        }
+        cmd->data = r->data;
+        memset(&r->data, 0, sizeof(struct redis_data));
+        r->data.type = REP_UNKNOWN;  // avoid double free in conn_free
     }
     return CORVUS_OK;
 }
@@ -942,6 +1091,13 @@ void cmd_stats(struct command *cmd, int64_t end_time)
     } else {
         latency = cmd->rep_time[1] - cmd->rep_time[0];
     }
+
+    if (cmd->request_type != CMD_EXTRA
+            && cmd->request_type != CMD_UNIMPL) {
+        struct slowlog_entry *entry = slowlog_create_entry(cmd, latency);
+        slowlog_set(&cmd->ctx->slowlog, entry);
+    }
+
     ATOMIC_INC(ctx->stats.remote_latency, latency);
 }
 
@@ -1024,6 +1180,11 @@ void cmd_free(struct command *cmd)
 {
     struct command *c;
     struct context *ctx = cmd->ctx;
+
+    if (cmd->data.type != REP_UNKNOWN) {
+        redis_data_free(&cmd->data);
+        cmd->data.type = REP_UNKNOWN;
+    }
 
     if (cmd->parent == NULL && cmd->client != NULL) {
         client_range_clear(cmd->client, cmd);

@@ -1,5 +1,4 @@
 #include "test.h"
-#include "slowlog.h"
 #include "alloc.h"
 
 void init_mbuf_for_test(struct mbuf *b, size_t len) {

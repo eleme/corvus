@@ -65,6 +65,7 @@ extern TEST_CASE(test_timer);
 extern TEST_CASE(test_config);
 extern TEST_CASE(test_stats);
 extern TEST_CASE(test_mbuf);
+extern TEST_CASE(test_slowlog);
 
 int main(int argc, const char *argv[])
 {
@@ -97,6 +98,7 @@ int main(int argc, const char *argv[])
     RUN_CASE(test_config);
     RUN_CASE(test_stats);
     RUN_CASE(test_mbuf);
+    RUN_CASE(test_slowlog);
 
     usleep(10000);
     slot_create_job(SLOT_UPDATER_QUIT);
