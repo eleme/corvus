@@ -38,7 +38,8 @@ void config_init()
     config.bufsize = DEFAULT_BUFSIZE;
     config.requirepass = NULL;
     config.readslave = config.readmasterslave = false;
-    config.slowlog_max_len = 128;
+    config.slowlog_max_len = -1;
+    config.slowlog_log_slower_than = -1;
 
     memset(config.statsd_addr, 0, sizeof(config.statsd_addr));
     config.metric_interval = 10;
@@ -148,6 +149,10 @@ int config_add(char *name, char *value)
             config.node.len++;
             p = strtok(NULL, ",");
         }
+    } else if (strcmp(name, "slowlog-log-slower-than") == 0) {
+        config.slowlog_log_slower_than = atoi(value);
+    } else if (strcmp(name, "slowlog-max-len") == 0) {
+        config.slowlog_max_len = atoi(value);
     }
     return 0;
 }
@@ -407,7 +412,8 @@ void *main_loop(void *data)
 {
     struct context *ctx = data;
 
-    if (config.slowlog_max_len > 0) {
+    if (slowlog_enabled()) {
+        LOG(DEBUG, "slowlog enabled");
         if (slowlog_init(&ctx->slowlog) == CORVUS_ERR) {
             LOG(ERROR, "Fatal: fail to init slowlog.");
             exit(EXIT_FAILURE);

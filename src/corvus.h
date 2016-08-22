@@ -108,6 +108,7 @@ struct {
     int64_t client_timeout;
     int64_t server_timeout;
     int bufsize;
+    int slowlog_log_slower_than;
     int slowlog_max_len;
 } config;
 

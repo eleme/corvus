@@ -51,7 +51,7 @@ struct slowlog_entry *slowlog_create_entry(struct command *cmd, int64_t latency)
     entry->refcount = 1;
 
     const char *fmt = "(%zd bytes)";
-    char tmp_buf[18];  // strlen("4294967295") + strlen("(bytes)") + 1
+    char tmp_buf[19];  // strlen("4294967295") + strlen("( bytes)") + 1
 
     assert(cmd->data.elements > 0);
     size_t argc = min(cmd->data.elements, SLOWLOG_ENTRY_MAX_ARGC);
@@ -123,4 +123,23 @@ struct slowlog_entry *slowlog_get(struct slowlog_queue *queue, size_t index)
     ATOMIC_INC(entry->refcount, 1);
     pthread_mutex_unlock(queue->entry_locks + index);
     return entry;
+}
+
+bool slowlog_enabled()
+{
+    return config.slowlog_max_len > 0
+        && config.slowlog_log_slower_than > 0;
+}
+
+bool slowlog_type_need_log(struct command *cmd)
+{
+    return cmd->request_type != CMD_EXTRA
+        && cmd->request_type != CMD_UNIMPL;
+}
+
+bool slowlog_need_log(struct command *cmd, long long latency)
+{
+    return slowlog_enabled()
+        && slowlog_type_need_log(cmd)
+        && latency > config.slowlog_log_slower_than * 1000;
 }

@@ -42,5 +42,8 @@ struct slowlog_entry *slowlog_create_entry(struct command *cmd, int64_t latency)
 void slowlog_set(struct slowlog_queue *queue, struct slowlog_entry *entry);
 void slowlog_dec_ref(struct slowlog_entry *entry);
 struct slowlog_entry *slowlog_get(struct slowlog_queue *queue, size_t index);
+bool slowlog_enabled();
+bool slowlog_type_need_log(struct command *cmd);
+bool slowlog_need_log(struct command *cmd, long long latency);
 
 #endif

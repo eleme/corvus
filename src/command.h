@@ -154,6 +154,13 @@ enum {
     CMD_DO(CMD_DEFINE)
 };
 
+enum {
+    CMD_UNIMPL,
+    CMD_BASIC,
+    CMD_COMPLEX,
+    CMD_EXTRA,
+};
+
 struct context;
 
 enum {
