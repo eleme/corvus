@@ -544,18 +544,22 @@ static int cmd_parse_len(struct redis_data *data, int *result)
         return CORVUS_ERR;
     }
 
-    int v = 0;
-    for (size_t i = 0; i != data->pos.str_len; i++) {
-        char c = len_limit[i];
-        if (c < '0' || c > '9') {
-            LOG(ERROR, "parse_len: char not between 0-9");
-            return CORVUS_ERR;
-        }
-        v = 10 * v + (c - '0');
+    *result = atoi(len_limit);
+    if (*result <= 0) {
+        return CORVUS_ERR;
     }
-    *result = v;
 
     return CORVUS_OK;
+}
+
+static int cmd_slowlog_entry_cmp(const void * lhs, const void * rhs)
+{
+    const struct slowlog_entry *e1 = *((struct slowlog_entry**)lhs);
+    const struct slowlog_entry *e2 = *((struct slowlog_entry**)rhs);
+    return e1->log_time < e2->log_time ? -1 :
+           e1->log_time > e2->log_time ? 1 :
+           e1->id < e2->id ? -1 :
+           e1->id > e2->id ? 1 : 0;
 }
 
 int cmd_slowlog_get(struct command *cmd, struct redis_data *data)
@@ -583,23 +587,19 @@ int cmd_slowlog_get(struct command *cmd, struct redis_data *data)
     struct context *contexts = get_contexts();
     struct slowlog_entry *entries[len];
     int count = 0;
-    size_t queue_len = contexts[0].slowlog.len;
-    bool exhausted[config.thread];
-    memset(exhausted, 0, sizeof exhausted);
+    size_t queue_len = contexts[0].slowlog.capacity;
     for (size_t i = 0; i != queue_len && count < len; i++) {
         for (size_t j = 0; j != config.thread && count < len; j++) {
-            if (exhausted[j])
-                continue;
             struct slowlog_queue *queue = &contexts[j].slowlog;
             // slowlog_get will lock mutex
             struct slowlog_entry *entry = slowlog_get(queue, i);
-            if (entry == NULL) {
-                exhausted[j] = true;
-                continue;
+            if (entry) {
+                entries[count++] = entry;
             }
-            entries[count++] = entry;
         }
     }
+
+    qsort(entries, count, sizeof(struct slowlog_entry*), cmd_slowlog_entry_cmp);
 
     // generate redis packet
     const char *hdr_fmt =
@@ -611,7 +611,6 @@ int cmd_slowlog_get(struct command *cmd, struct redis_data *data)
     char buf[150];
 
     int size = snprintf(buf, sizeof buf, "*%d\r\n", count);
-    assert(size < 150);
     conn_add_data(cmd->client, (uint8_t*)buf, size,
             &cmd->rep_buf[0], &cmd->rep_buf[1]);
 
@@ -620,6 +619,7 @@ int cmd_slowlog_get(struct command *cmd, struct redis_data *data)
         assert(entry->argc > 0);
         size = snprintf(buf, sizeof buf, hdr_fmt,
                 entry->id, entry->log_time, entry->latency, entry->argc);
+        assert(size < 150);
         conn_add_data(cmd->client, (uint8_t*)buf, size, NULL, NULL);
 
         for (size_t j = 0; j != entry->argc; j++) {
@@ -635,8 +635,49 @@ int cmd_slowlog_get(struct command *cmd, struct redis_data *data)
     return CORVUS_OK;
 }
 
-int cmd_slowlog_len(struct command *cmd) { return CORVUS_ERR; }
-int cmd_slowlog_reset(struct command *cmd) { return CORVUS_ERR; }
+int cmd_slowlog_len(struct command *cmd)
+{
+    int len = 0;
+    struct context *contexts = get_contexts();
+
+    for (size_t i = 0; i != config.thread; i++) {
+        struct slowlog_queue *queue = &contexts[i].slowlog;
+        for (size_t j = 0; j != queue->capacity && len < config.slowlog_max_len; j++) {
+            struct slowlog_entry *entry = slowlog_get(queue, j);
+            if (entry) {
+                len++;
+                slowlog_dec_ref(entry);
+            }
+        }
+    }
+
+    char buf[30];
+    int size = snprintf(buf, sizeof buf, ":%d\r\n", len);
+    conn_add_data(cmd->client, (uint8_t*)buf, size,
+            &cmd->rep_buf[0], &cmd->rep_buf[1]);
+    CMD_INCREF(cmd);
+    cmd_mark_done(cmd);
+
+    return CORVUS_OK;
+}
+
+int cmd_slowlog_reset(struct command *cmd)
+{
+    struct context *contexts = get_contexts();
+    for (size_t i = 0; i != config.thread; i++) {
+        struct slowlog_queue *queue = &contexts[i].slowlog;
+        for (size_t j = 0; j != queue->capacity; j++) {
+            slowlog_set(queue, NULL);
+        }
+    }
+
+    conn_add_data(cmd->client, (uint8_t*)rep_ok, strlen(rep_ok),
+            &cmd->rep_buf[0], &cmd->rep_buf[1]);
+    CMD_INCREF(cmd);
+    cmd_mark_done(cmd);
+
+    return CORVUS_OK;
+}
 
 int cmd_slowlog(struct command *cmd, struct redis_data *data)
 {
@@ -775,7 +816,7 @@ int cmd_parse_req(struct command *cmd, struct mbuf *buf)
             return CORVUS_OK;
         }
 
-        if (!slowlog_enabled() || !slowlog_type_need_log(cmd)) {
+        if (!(slowlog_enabled() && slowlog_type_need_log(cmd))) {
             redis_data_free(&r->data);
             return CORVUS_OK;
         }

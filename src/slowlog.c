@@ -1,6 +1,5 @@
 #include <assert.h>
 #include <string.h>
-
 #include "alloc.h"
 #include "corvus.h"
 #include "slowlog.h"
@@ -14,7 +13,7 @@ static inline size_t min(size_t a, size_t b) { return a < b ? a : b; }
 int slowlog_init(struct slowlog_queue *slowlog)
 {
     size_t queue_len = 1 + (config.slowlog_max_len - 1) / config.thread;  // round up
-    slowlog->len = queue_len;
+    slowlog->capacity = queue_len;
     slowlog->entries = cv_calloc(queue_len, sizeof(struct slowlog_entry));
     slowlog->entry_locks = cv_malloc(queue_len * sizeof(pthread_mutex_t));
     slowlog->curr = 0;
@@ -31,7 +30,7 @@ int slowlog_init(struct slowlog_queue *slowlog)
 // Should be called only after all worker threads have stopped
 void slowlog_free(struct slowlog_queue *slowlog)
 {
-    for (size_t i = 0; i != slowlog->len; i++) {
+    for (size_t i = 0; i != slowlog->capacity; i++) {
         // no other worker threads will read entry queue any more
         if (slowlog->entries[i] != NULL) {
             slowlog_dec_ref(slowlog->entries[i]);
@@ -117,12 +116,12 @@ void slowlog_dec_ref(struct slowlog_entry *entry)
 
 void slowlog_set(struct slowlog_queue *queue, struct slowlog_entry *entry)
 {
-    size_t curr = queue->curr;
-    // TODO: remove lock or atomic here
+    size_t curr = ATOMIC_GET(queue->curr);
     pthread_mutex_lock(queue->entry_locks + curr);
-    struct slowlog_entry *old_entry = ATOMIC_IGET(queue->entries[curr], entry);
+    struct slowlog_entry *old_entry = queue->entries[curr];
+    queue->entries[curr] = entry;
     pthread_mutex_unlock(queue->entry_locks + curr);
-    queue->curr = (curr + 1) % queue->len;
+    ATOMIC_SET(queue->curr, (curr + 1) % queue->capacity);
     if (old_entry != NULL) {
         slowlog_dec_ref(old_entry);
     }
@@ -130,9 +129,8 @@ void slowlog_set(struct slowlog_queue *queue, struct slowlog_entry *entry)
 
 struct slowlog_entry *slowlog_get(struct slowlog_queue *queue, size_t index)
 {
-    // TODO: remove lock or atomic here
     pthread_mutex_lock(queue->entry_locks + index);
-    struct slowlog_entry *entry = ATOMIC_GET(queue->entries[index]);
+    struct slowlog_entry *entry = queue->entries[index];
     if (entry == NULL) {
         pthread_mutex_unlock(queue->entry_locks + index);
         return NULL;

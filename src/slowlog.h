@@ -2,7 +2,6 @@
 #define SLOWLOG_H
 
 #include <pthread.h>
-
 #include "mbuf.h"
 #include "parser.h"
 
@@ -27,7 +26,7 @@ struct slowlog_entry {
 struct slowlog_queue {
     struct slowlog_entry **entries;
     pthread_mutex_t *entry_locks;
-    size_t len;
+    size_t capacity;
     size_t curr;
 };
 

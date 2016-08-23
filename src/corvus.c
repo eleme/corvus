@@ -323,7 +323,7 @@ void context_init(struct context *ctx)
     TAILQ_INIT(&ctx->servers);
     TAILQ_INIT(&ctx->conns);
 
-    ctx->slowlog.len = 0;  // for non worker threads
+    ctx->slowlog.capacity = 0;  // for non worker threads
 }
 
 void build_contexts()
@@ -355,7 +355,7 @@ void context_free(struct context *ctx)
     dict_free(&ctx->server_table);
 
     /* slowlog */
-    if (ctx->slowlog.len > 0)
+    if (ctx->slowlog.capacity > 0)
         slowlog_free(&ctx->slowlog);
 
     /* mbuf queue */

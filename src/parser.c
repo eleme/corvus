@@ -536,17 +536,13 @@ int reader_ready(struct reader *r)
 
 int pos_to_str(struct pos_array *pos, char *str)
 {
-    int i, cur_len = 0;
     int length = pos->str_len;
     if (length <= 0) {
         LOG(ERROR, "pos_to_str: string length %d <= 0", length);
         return CORVUS_ERR;
     }
 
-    for (i = 0; i < pos->pos_len; i++) {
-        memcpy(str + cur_len, pos->items[i].str, pos->items[i].len);
-        cur_len += pos->items[i].len;
-    }
+    pos_to_str_with_limit(pos, (uint8_t*)str, length);
     str[length] = '\0';
     return CORVUS_OK;
 }
