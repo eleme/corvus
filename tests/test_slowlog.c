@@ -62,13 +62,13 @@ TEST(test_slowlog_create_entry_with_prefix) {
     };
     struct redis_data element[2] = {
         {
-            .pos = key_pos, .buf = {
+            .type = REP_STRING, .pos = key_pos, .buf = {
                 { .buf = &buf1, .pos = buf1.start },
                 { .buf = &buf1, .pos = buf1.last }
             }
         },
         {
-            .pos = value_pos, .buf = {
+            .type = REP_STRING, .pos = value_pos, .buf = {
                 { .buf = &buf2, .pos = buf2.start },
                 { .buf = &buf2, .pos = buf2.last }
             }
@@ -76,6 +76,7 @@ TEST(test_slowlog_create_entry_with_prefix) {
     };
     cmd.data.elements = 2;
     cmd.data.element = element;
+    cmd.data.type = REP_ARRAY;
     cmd.prefix = (char*)rep_set;
 
     struct slowlog_entry *entry = slowlog_create_entry(&cmd, 9394);
@@ -90,6 +91,55 @@ TEST(test_slowlog_create_entry_with_prefix) {
     ASSERT(strncmp(entry->argv[2].str, args[2], args_len[2]) == 0);
     slowlog_dec_ref(entry);
 
+    PASS(NULL);
+}
+
+TEST(test_slowlog_create_entry_with_long_arg) {
+    struct mbuf buf;
+    struct command cmd;
+    struct reader r = {0};
+    const char cmd_data[] = "*37\r\n$4\r\nMGET\r\n"
+        "$144\r\n"
+        "1234567890qwertyuiopasdfghjklzxcvbnm"
+        "1234567890qwertyuiopasdfghjklzxcvbnm"
+        "1234567890qwertyuiopasdfghjklzxcvbnm"
+        "1234567890qwertyuiopasdfghjklzxcvbnm\r\n"
+        "$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n" // "a" * 5
+        "$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n"
+        "$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n"
+        "$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n"
+        "$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n"
+        "$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n"
+        "$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n$1\r\na\r\n";
+    char a[] = "$1\r\na\r\n";
+    char long_value[] =
+        "$120\r\n"
+        "1234567890qwertyuiopasdfghjklzxcvbnm"
+        "1234567890qwertyuiopasdfghjklzxcvbnm"
+        "1234567890qwertyuiopasdfghjklzxcvbnm"
+        "1(144 bytes)\r\n";
+        "\r\n";
+    char tail[] = "$23\r\n(37 arguments in total)\r\n";
+
+    buf.pos = (uint8_t*)cmd_data;
+    buf.last = (uint8_t*)cmd_data + strlen(cmd_data);
+    reader_init(&r);
+    reader_feed(&r, &buf);
+    ASSERT(parse(&r, MODE_REQ) != -1);
+    cmd.data = r.data;
+    cmd.prefix = NULL;
+
+    struct slowlog_entry *entry = slowlog_create_entry(&cmd, 233666);
+    ASSERT(SLOWLOG_ENTRY_MAX_STRING == strlen(long_value));
+    ASSERT(entry->argv[1].len == strlen(long_value));
+    ASSERT(strncmp(long_value, entry->argv[1].str, strlen(long_value)) == 0);
+    ASSERT(entry->argv[30].len == strlen(a));
+    ASSERT(strncmp(a, entry->argv[30].str, strlen(a)) == 0);
+    ASSERT(entry->argv[31].len == strlen(tail));
+    ASSERT(strncmp(tail, entry->argv[31].str, strlen(tail)) == 0);
+    slowlog_dec_ref(entry);
+
+    redis_data_free(&cmd.data);
     PASS(NULL);
 }
 
@@ -130,5 +180,6 @@ TEST(test_entry_get_set) {
 TEST_CASE(test_slowlog) {
     RUN_TEST(test_slowlog_create_entry);
     RUN_TEST(test_slowlog_create_entry_with_prefix);
+    RUN_TEST(test_slowlog_create_entry_with_long_arg);
     RUN_TEST(test_entry_get_set);
 }

@@ -9,6 +9,7 @@
 
 #define SLOWLOG_ENTRY_MAX_ARGC 32
 #define SLOWLOG_ENTRY_MAX_STRING 128
+#define SLOWLOG_MAX_ARG_LEN 120  // SLOWLOG_ENTRY_MAX_STRING - strlen("%120\r\n\r\n")
 
 // Same with slowlog format of redis.
 // Note that slowlog_entry will be created from one thread

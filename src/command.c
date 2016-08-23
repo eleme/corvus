@@ -551,7 +551,7 @@ static int cmd_parse_len(struct redis_data *data, int *result)
             LOG(ERROR, "parse_len: char not between 0-9");
             return CORVUS_ERR;
         }
-        v += (10 * v + (c - '0'));
+        v = 10 * v + (c - '0');
     }
     *result = v;
 
@@ -583,15 +583,20 @@ int cmd_slowlog_get(struct command *cmd, struct redis_data *data)
     struct context *contexts = get_contexts();
     struct slowlog_entry *entries[len];
     int count = 0;
-    size_t limit_per_thread = 1 + (len - 1) / config.thread;
-    for (size_t i = 0; i != config.thread; i++) {
-        struct slowlog_queue *queue = &contexts[i].slowlog;
-        assert(limit_per_thread <= queue->len);
-        for (size_t j = 0; j < limit_per_thread && count < len; j++) {
+    size_t queue_len = contexts[0].slowlog.len;
+    bool exhausted[config.thread];
+    memset(exhausted, 0, sizeof exhausted);
+    for (size_t i = 0; i != queue_len && count < len; i++) {
+        for (size_t j = 0; j != config.thread && count < len; j++) {
+            if (exhausted[j])
+                continue;
+            struct slowlog_queue *queue = &contexts[j].slowlog;
             // slowlog_get will lock mutex
-            struct slowlog_entry *entry = slowlog_get(queue, j);
-            if (entry == NULL)
-                break;  // NULL starts from here
+            struct slowlog_entry *entry = slowlog_get(queue, i);
+            if (entry == NULL) {
+                exhausted[j] = true;
+                continue;
+            }
             entries[count++] = entry;
         }
     }

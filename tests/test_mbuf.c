@@ -60,6 +60,12 @@ TEST(test_mbuf_range_func) {
     ASSERT(tmp[21] == 0);
     cv_free(tmp);
 
+    // with max limit
+    uint8_t buf[20] = {0};
+    ASSERT(mbuf_range_copy(buf, ptr, 10) == 10);
+    ASSERT(memcmp(buf, "abcdefg012", 10) == 0);
+    ASSERT(buf[10] == '\0');
+
     cv_free(b1.start);
     cv_free(b2.start);
     cv_free(b3.start);

@@ -550,3 +550,16 @@ int pos_to_str(struct pos_array *pos, char *str)
     str[length] = '\0';
     return CORVUS_OK;
 }
+
+size_t pos_to_str_with_limit(struct pos_array *pos, uint8_t *str, size_t limit)
+{
+    size_t len = 0;
+    for (size_t i = 0; i != pos->pos_len && len < limit; i++) {
+        size_t curr_len = pos->items[i].len;
+        if (limit - len < curr_len)
+            curr_len = limit - len;
+        memcpy(str + len, pos->items[i].str, curr_len);
+        len += curr_len;
+    }
+    return len;
+}

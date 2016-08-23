@@ -50,8 +50,8 @@ struct slowlog_entry *slowlog_create_entry(struct command *cmd, int64_t latency)
     entry->latency = latency;
     entry->refcount = 1;
 
-    const char *fmt = "(%zd bytes)";
-    char tmp_buf[19];  // strlen("4294967295") + strlen("( bytes)") + 1
+    const char *bytes_fmt = "(%zd bytes)";
+    char bytes_buf[19];  // strlen("4294967295") + strlen("( bytes)") + 1
 
     assert(cmd->data.elements > 0);
     size_t argc = min(cmd->data.elements, SLOWLOG_ENTRY_MAX_ARGC);
@@ -67,16 +67,33 @@ struct slowlog_entry *slowlog_create_entry(struct command *cmd, int64_t latency)
         entry->argc = min(argc + 1, SLOWLOG_ENTRY_MAX_ARGC);
         argc = min(argc, SLOWLOG_ENTRY_MAX_ARGC - 1);
     }
+    // use the last argument to record total argument counts
+    if (cmd->data.elements > argc) {
+        argc--;
+        const size_t tail_max_len = 64;
+        char tail_buf[tail_max_len];
+        uint8_t *buf = cv_malloc(tail_max_len);
+        int len = snprintf(tail_buf, tail_max_len, "(%zd arguments in total)", cmd->data.elements);
+        len = snprintf((char*)buf, tail_max_len, "$%d\r\n%s\r\n", len, tail_buf);
+        entry->argv[SLOWLOG_ENTRY_MAX_ARGC - 1].str = buf;
+        entry->argv[SLOWLOG_ENTRY_MAX_ARGC - 1].len = len;
+    }
     size_t max_len = SLOWLOG_ENTRY_MAX_STRING;
     for (size_t j = 0; j != argc; i++, j++) {
         struct redis_data *arg = cmd->data.element + j;
+        assert(arg->type == REP_STRING);
         size_t real_len = mbuf_range_len(arg->buf);
         size_t len = min(real_len, max_len);
         uint8_t *buf = cv_malloc(len);  // will be freed by the last owner
-        mbuf_range_copy(buf, arg->buf, len);
         if (real_len > max_len) {
-            int postfix_len = snprintf(tmp_buf, sizeof tmp_buf, fmt, real_len);
-            memcpy(buf + max_len - postfix_len, tmp_buf, postfix_len);
+            size_t str_len = SLOWLOG_MAX_ARG_LEN;
+            int hdr_len = snprintf((char*)buf, len, "$%zd\r\n", str_len);
+            pos_to_str_with_limit(&arg->pos, buf + hdr_len, str_len);
+            int postfix_len = snprintf(bytes_buf, sizeof bytes_buf, bytes_fmt, arg->pos.str_len);
+            memcpy(buf + max_len - 2 - postfix_len, bytes_buf, postfix_len);
+            memcpy(buf + max_len - 2, "\r\n", 2);
+        } else {
+            mbuf_range_copy(buf, arg->buf, len);
         }
         entry->argv[i].str = buf;
         entry->argv[i].len = len;
@@ -128,7 +145,7 @@ struct slowlog_entry *slowlog_get(struct slowlog_queue *queue, size_t index)
 bool slowlog_enabled()
 {
     return config.slowlog_max_len > 0
-        && config.slowlog_log_slower_than > 0;
+        && config.slowlog_log_slower_than >= 0;
 }
 
 bool slowlog_type_need_log(struct command *cmd)
