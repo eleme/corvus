@@ -21,19 +21,21 @@ void logger(const char *file, int line, int level, const char *fmt, ...)
     if (level < config.loglevel) return;
 
     pid_t thread_id = (pid_t)syscall(SYS_gettid);
+    pid_t process_id = getpid();
 
     va_start(ap, fmt);
     vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
 
     if (config.syslog) {
-        syslog(SYSLOG_LEVEL_MAP[level], "[%d] %s", (int)thread_id, msg);
+        syslog(SYSLOG_LEVEL_MAP[level], "[%s %d %d %d] %s", config.cluster,
+            (int)config.bind, (int)process_id, (int)thread_id, msg);
     } else {
         gettimeofday(&now, NULL);
         int n = strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S,",
                         localtime(&now.tv_sec));
         snprintf(timestamp + n, sizeof(timestamp) - n, "%03d", (int)now.tv_usec/1000);
-        fprintf(stderr, "%s %s [%d]: %s (%s:%d)\n", timestamp, LEVEL_MAP[level],
-                (int)thread_id, msg, file, line);
+        fprintf(stderr, "%s %s [%s %d %d %d]: %s (%s:%d)\n", timestamp, LEVEL_MAP[level],
+            config.cluster, (int)config.bind, (int)process_id, (int)thread_id, msg, file, line);
     }
 }
