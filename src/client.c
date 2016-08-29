@@ -342,6 +342,10 @@ struct connection *client_create(struct context *ctx, int fd)
 void client_eof(struct connection *client)
 {
     LOG(DEBUG, "client eof");
+    if (client->eof == true) {
+        LOG(ERROR, "client eof again");
+    }
+
     client->eof = true;
 
     struct command *cmd;
