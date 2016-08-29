@@ -45,6 +45,13 @@ void check_connections(struct context *ctx)
         while (c != NULL) {
             n = TAILQ_PREV(c, conn_tqh, next);
             if (c->fd == -1) break;
+            // When a client connection is holding some unfinished cmds
+            // and encounters a client_eof (caused by receiving an illegal redis packet for example),
+            // the client connection is turned into an intermediate state.
+            // In this state the connection object has not called conn_free so the c->fd is not -1 here.
+            // But it should not call client_eof again.
+            if (c->eof) continue;
+
             if (c->info->last_active > 0
                     && now - c->info->last_active > config.client_timeout)
             {
