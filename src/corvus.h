@@ -12,6 +12,7 @@
 #include "stats.h"
 #include "dict.h"
 #include "event.h"
+#include "slowlog.h"
 
 #define VERSION "0.2.4"
 
@@ -86,6 +87,9 @@ struct context {
     struct basic_stats stats;
     struct memory_stats mstats;
     long long last_command_latency;
+
+    /* slowlog */
+    struct slowlog_queue slowlog;
 };
 
 struct {
@@ -104,6 +108,8 @@ struct {
     int64_t client_timeout;
     int64_t server_timeout;
     int bufsize;
+    int slowlog_log_slower_than;
+    int slowlog_max_len;
 } config;
 
 int64_t get_time();

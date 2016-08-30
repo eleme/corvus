@@ -38,6 +38,8 @@ void config_init()
     config.bufsize = DEFAULT_BUFSIZE;
     config.requirepass = NULL;
     config.readslave = config.readmasterslave = false;
+    config.slowlog_max_len = -1;
+    config.slowlog_log_slower_than = -1;
 
     memset(config.statsd_addr, 0, sizeof(config.statsd_addr));
     config.metric_interval = 10;
@@ -147,6 +149,10 @@ int config_add(char *name, char *value)
             config.node.len++;
             p = strtok(NULL, ",");
         }
+    } else if (strcmp(name, "slowlog-log-slower-than") == 0) {
+        config.slowlog_log_slower_than = atoi(value);
+    } else if (strcmp(name, "slowlog-max-len") == 0) {
+        config.slowlog_max_len = atoi(value);
     }
     return 0;
 }
@@ -316,6 +322,8 @@ void context_init(struct context *ctx)
     STAILQ_INIT(&ctx->free_conn_infoq);
     TAILQ_INIT(&ctx->servers);
     TAILQ_INIT(&ctx->conns);
+
+    ctx->slowlog.capacity = 0;  // for non worker threads
 }
 
 void build_contexts()
@@ -345,6 +353,10 @@ void context_free(struct context *ctx)
         cv_free(conn);
     }
     dict_free(&ctx->server_table);
+
+    /* slowlog */
+    if (ctx->slowlog.capacity > 0)
+        slowlog_free(&ctx->slowlog);
 
     /* mbuf queue */
     mbuf_destroy(ctx);
@@ -399,6 +411,14 @@ void context_free(struct context *ctx)
 void *main_loop(void *data)
 {
     struct context *ctx = data;
+
+    if (slowlog_enabled()) {
+        LOG(DEBUG, "slowlog enabled");
+        if (slowlog_init(&ctx->slowlog) == CORVUS_ERR) {
+            LOG(ERROR, "Fatal: fail to init slowlog.");
+            exit(EXIT_FAILURE);
+        }
+    }
 
     if (event_init(&ctx->loop, 1024) == -1) {
         LOG(ERROR, "Fatal: fail to create event loop.");

@@ -143,6 +143,7 @@
     HANDLER(PING,              EXTRA,    UNKNOWN) \
     HANDLER(INFO,              EXTRA,    UNKNOWN) \
     HANDLER(PROXY,             EXTRA,    UNKNOWN) \
+    HANDLER(SLOWLOG,           EXTRA,    UNKNOWN) \
     HANDLER(QUIT,              EXTRA,    UNKNOWN) \
     HANDLER(SELECT,            UNIMPL,   UNKNOWN) \
     HANDLER(TIME,              EXTRA,    UNKNOWN)
@@ -151,6 +152,13 @@
 
 enum {
     CMD_DO(CMD_DEFINE)
+};
+
+enum {
+    CMD_UNIMPL,
+    CMD_BASIC,
+    CMD_COMPLEX,
+    CMD_EXTRA,
 };
 
 struct context;
@@ -223,6 +231,8 @@ struct command {
     bool parse_done;
     bool stale;
     bool cmd_fail;
+
+    struct redis_data data;  /* for slowlog */
 };
 
 struct redirect_info {
@@ -239,6 +249,8 @@ const char *rep_err,
       *rep_addr_err,
       *rep_server_err,
       *rep_timeout_err;
+
+const char *rep_get, *rep_set, *rep_del, *rep_exists;
 
 void cmd_map_init();
 void cmd_map_destroy();
@@ -257,5 +269,6 @@ void cmd_iov_reset(struct iov_data *iov);
 void cmd_iov_clear(struct context *ctx, struct iov_data *iov);
 void cmd_iov_free(struct iov_data *iov);
 void cmd_free(struct command *cmd);
+const char *cmd_extract_prefix(const char *prefix);
 
 #endif /* end of include guard: COMMAND_H */

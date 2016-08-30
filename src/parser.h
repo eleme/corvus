@@ -142,5 +142,6 @@ struct pos *pos_get(struct pos_array *arr, int idx);
 int pos_to_str(struct pos_array *pos, char *str);
 void redis_data_free(struct redis_data *data);
 void redis_data_move(struct redis_data *lhs, struct redis_data *rhs);
+size_t pos_to_str_with_limit(struct pos_array *pos, uint8_t *str, size_t limit);
 
 #endif /* end of include guard: PARSER_H */

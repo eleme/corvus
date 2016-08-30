@@ -124,6 +124,52 @@ void mbuf_range_clear(struct context *ctx, struct buf_ptr ptr[])
     memset(&ptr[1], 0, sizeof(struct buf_ptr));
 }
 
+uint32_t mbuf_range_len(struct buf_ptr ptr[2])
+{
+    uint32_t len = 0;
+    struct mbuf *b = ptr[0].buf;
+    while (true) {
+        uint8_t *start = b->start;
+        uint8_t *end = b->end;
+        if (b == ptr[0].buf) {
+            start = ptr[0].pos;
+        }
+        if (b == ptr[1].buf) {
+            end = ptr[1].pos;
+        }
+        len += (end - start);
+        if (b == ptr[1].buf)
+            break;
+        b = TAILQ_NEXT(b, next);
+    }
+    return len;
+}
+
+size_t mbuf_range_copy(uint8_t *dest, struct buf_ptr ptr[2], size_t max_len)
+{
+    struct mbuf *b = ptr[0].buf;
+    size_t len = 0;
+    while (len < max_len) {
+        uint8_t *start = b->start;
+        uint8_t *end = b->end;
+        if (b == ptr[0].buf) {
+            start = ptr[0].pos;
+        }
+        if (b == ptr[1].buf) {
+            end = ptr[1].pos;
+        }
+        if (end - start > max_len - len) {
+            end = start + max_len - len;
+        }
+        memcpy(dest + len, start, end - start);
+        len += (end - start);
+        if (b == ptr[1].buf)
+            break;
+        b = TAILQ_NEXT(b, next);
+    }
+    return len;
+}
+
 void mbuf_decref(struct context *ctx, struct mbuf **bufs, int n)
 {
     for (int i = 0; i < n; i++) {

@@ -50,6 +50,8 @@ uint32_t mbuf_read_size(struct mbuf *);
 uint32_t mbuf_write_size(struct mbuf *);
 void mbuf_destroy(struct context *ctx);
 void mbuf_range_clear(struct context *ctx, struct buf_ptr ptr[]);
+uint32_t mbuf_range_len(struct buf_ptr ptr[]);
+size_t mbuf_range_copy(uint8_t *dest, struct buf_ptr ptr[], size_t max_len);
 void mbuf_decref(struct context *ctx, struct mbuf **bufs, int n);
 void buf_time_append(struct context *ctx, struct buf_time_tqh *queue,
         struct mbuf *buf, int64_t read_time);
