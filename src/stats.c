@@ -8,6 +8,7 @@
 #include "socket.h"
 #include "logging.h"
 #include "slot.h"
+#include "slowlog.h"
 
 #define HOST_LEN 255
 
@@ -192,7 +193,7 @@ void stats_send_node_info()
 {
     struct bytes *value;
 
-    /* redis-node.127-0-0-1:8000.bytes.{send,recv} */
+    /* redis-node.127-0-0-1-8000.bytes.{send,recv} */
     int len = HOST_LEN + 64;
     char name[len];
 
@@ -231,6 +232,57 @@ void stats_get(struct stats *stats)
     }
 }
 
+static void stats_send_slow_log()
+{
+    if (!slowlog_statsd_enabled())
+        return;
+
+    const char *fmt = "redis-node.%s.slow_query.%s";
+    const char *sum_fmt = "slow_query.%s";
+    extern struct cmd_item cmds[];
+    extern const size_t CMD_NUM;
+
+    slowlog_prepare_stats(get_contexts());
+
+    // from slowlog.c
+    extern struct dict slow_counts;
+    extern uint32_t *counts_sum;
+
+    struct dict_iter iter = DICT_ITER_INITIALIZER;
+    DICT_FOREACH(&slow_counts, &iter) {
+        const char *dsn = iter.key;
+        uint32_t *counts = (uint32_t*)iter.value;
+
+        char addr[ADDRESS_LEN] = {0};
+        strncpy(addr, dsn, ADDRESS_LEN);
+        for (size_t i = 0; i < ADDRESS_LEN; i++) {
+            if (addr[i] == '.' || addr[i] == ':')
+                addr[i] = '-';
+        }
+
+        for (size_t i = 0; i < CMD_NUM; i++) {
+            if(counts[i] == 0) continue;
+
+            const char *cmd = cmds[i].cmd;
+            int n = snprintf(NULL, 0, fmt, addr, cmd);
+            char buf[n + 1];
+            snprintf(buf, sizeof(buf), fmt, addr, cmd);
+            stats_send(buf, counts[i]);
+        }
+    }
+
+    for (size_t i = 0; i < CMD_NUM; i++) {
+        uint32_t sum = counts_sum[i];
+        if (sum) {
+            const char *cmd = cmds[i].cmd;
+            int n = snprintf(NULL, 0, sum_fmt, cmd);
+            char buf[n + 1];
+            snprintf(buf, sizeof(buf), sum_fmt, cmd);
+            stats_send(buf, sum);
+        }
+    }
+}
+
 void *stats_daemon(void *data)
 {
     /* Make the thread killable at any time can work reliably. */
@@ -241,6 +293,7 @@ void *stats_daemon(void *data)
         sleep(config.metric_interval);
         stats_send_simple();
         stats_send_node_info();
+        stats_send_slow_log();
         LOG(DEBUG, "sending metrics");
     }
     return NULL;
@@ -265,6 +318,8 @@ int stats_init()
         if (hostname[i] == '.') hostname[i] = '-';
     }
 
+    slowlog_init_stats();
+
     LOG(INFO, "starting stats thread");
     return thread_spawn(&stats_ctx, stats_daemon);
 }
@@ -274,6 +329,7 @@ void stats_kill()
     int err;
 
     dict_free(&bytes_map);
+    slowlog_free_stats();
 
     if (pthread_cancel(stats_ctx.thread) == 0) {
         if ((err = pthread_join(stats_ctx.thread, NULL)) != 0) {

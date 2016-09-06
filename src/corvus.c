@@ -40,6 +40,7 @@ void config_init()
     config.readslave = config.readmasterslave = false;
     config.slowlog_max_len = -1;
     config.slowlog_log_slower_than = -1;
+    config.slowlog_statsd_enabled = 0;
 
     memset(config.statsd_addr, 0, sizeof(config.statsd_addr));
     config.metric_interval = 10;
@@ -153,6 +154,8 @@ int config_add(char *name, char *value)
         config.slowlog_log_slower_than = atoi(value);
     } else if (strcmp(name, "slowlog-max-len") == 0) {
         config.slowlog_max_len = atoi(value);
+    } else if (strcmp(name, "slowlog-statsd-enabled") == 0) {
+        config.slowlog_statsd_enabled = atoi(value);
     }
     return 0;
 }
@@ -349,6 +352,7 @@ void context_free(struct context *ctx)
         cmd_iov_free(&conn->info->iov);
         conn_free(conn);
         conn_buf_free(conn);
+        cv_free(conn->info->slow_cmd_counts);
         cv_free(conn->info);
         cv_free(conn);
     }
@@ -412,7 +416,7 @@ void *main_loop(void *data)
 {
     struct context *ctx = data;
 
-    if (slowlog_enabled()) {
+    if (slowlog_cmd_enabled()) {
         LOG(DEBUG, "slowlog enabled");
         if (slowlog_init(&ctx->slowlog) == CORVUS_ERR) {
             LOG(ERROR, "Fatal: fail to init slowlog.");

@@ -1,6 +1,7 @@
 #include "test.h"
 #include "slowlog.h"
 #include "alloc.h"
+#include "server.h"
 
 
 TEST(test_slowlog_create_entry) {
@@ -177,9 +178,53 @@ TEST(test_entry_get_set) {
     PASS(NULL);
 }
 
+TEST(test_slowlog_statsd) {
+    slowlog_init_stats();
+
+    struct connection *server = server_create(ctx, -1);
+
+    // init by conn_create_server
+    TAILQ_INSERT_TAIL(&ctx->servers, server, next);
+    extern const size_t CMD_NUM;
+    uint32_t slow_cmd_counts[CMD_NUM];
+    memset(slow_cmd_counts, 0, sizeof slow_cmd_counts);
+    server->info->slow_cmd_counts = slow_cmd_counts;
+    strcpy(server->info->dsn, "localhost");
+
+    struct command *cmd = cmd_create(ctx);
+    struct command *multi_key_cmd = cmd_create(ctx);
+    cmd->server = server;
+    cmd->cmd_type = CMD_GET;
+    multi_key_cmd->cmd_type = CMD_MSET;
+
+    slowlog_add_count(cmd);
+    slowlog_add_count(multi_key_cmd);
+    slowlog_add_count(multi_key_cmd);
+    ASSERT(slow_cmd_counts[CMD_GET] == 1);
+
+    slowlog_prepare_stats(ctx);
+    extern struct dict slow_counts;
+    extern uint32_t *counts_sum;
+
+    uint32_t *count = dict_get(&slow_counts, "localhost");
+    ASSERT(count[CMD_GET] == 1);
+    ASSERT(counts_sum[CMD_GET] == 1);
+    ASSERT(slow_cmd_counts[CMD_GET] == 0);
+    ASSERT(counts_sum[CMD_MSET] == 2);
+
+    cmd_free(cmd);
+    cmd_free(multi_key_cmd);
+    TAILQ_REMOVE(&ctx->servers, server, next);
+    conn_free(server);
+    conn_recycle(ctx, server);
+    slowlog_free_stats();
+    PASS(NULL);
+}
+
 TEST_CASE(test_slowlog) {
     RUN_TEST(test_slowlog_create_entry);
     RUN_TEST(test_slowlog_create_entry_with_prefix);
     RUN_TEST(test_slowlog_create_entry_with_long_arg);
+    RUN_TEST(test_slowlog_statsd);
     RUN_TEST(test_entry_get_set);
 }

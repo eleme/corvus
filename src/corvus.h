@@ -110,6 +110,7 @@ struct {
     int bufsize;
     int slowlog_log_slower_than;
     int slowlog_max_len;
+    int slowlog_statsd_enabled;
 } config;
 
 int64_t get_time();
