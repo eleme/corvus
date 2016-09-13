@@ -241,6 +241,13 @@ struct redirect_info {
     int type;
 };
 
+struct cmd_item {
+    char *cmd;
+    int value;
+    int type;
+    int access;
+};
+
 /* error responses */
 const char *rep_err,
       *rep_parse_err,

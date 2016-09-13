@@ -31,13 +31,6 @@ do {                                                      \
     }                                                     \
 } while (0)
 
-struct cmd_item {
-    char *cmd;
-    int value;
-    int type;
-    int access;
-};
-
 const char *rep_err = "-ERR Proxy error\r\n";
 const char *rep_parse_err = "-ERR Proxy fail to parse command\r\n";
 const char *rep_forward_err = "-ERR Proxy fail to forward command\r\n";
@@ -58,7 +51,8 @@ static const char *rep_noauth = "-NOAUTH Authentication required.\r\n";
 static const char *rep_auth_err = "-ERR invalid password\r\n";
 static const char *rep_auth_not_set = "-ERR Client sent AUTH, but no password is set\r\n";
 
-static struct cmd_item cmds[] = {CMD_DO(CMD_BUILD_MAP)};
+struct cmd_item cmds[] = {CMD_DO(CMD_BUILD_MAP)};
+const size_t CMD_NUM = sizeof(cmds) / sizeof(struct cmd_item);
 static struct dict command_map;
 
 
@@ -684,7 +678,7 @@ int cmd_slowlog(struct command *cmd, struct redis_data *data)
     ASSERT_TYPE(data, REP_ARRAY);
     ASSERT_ELEMENTS(data->elements >= 2, data);
 
-    if (!slowlog_enabled()) {
+    if (!slowlog_cmd_enabled()) {
         conn_add_data(cmd->client, (uint8_t*)rep_slowlog_not_enabled,
             strlen(rep_slowlog_not_enabled),
             &cmd->rep_buf[0], &cmd->rep_buf[1]);
@@ -816,7 +810,7 @@ int cmd_parse_req(struct command *cmd, struct mbuf *buf)
             return CORVUS_OK;
         }
 
-        if (!(slowlog_enabled() && slowlog_type_need_log(cmd))) {
+        if (!(slowlog_cmd_enabled() && slowlog_type_need_log(cmd))) {
             redis_data_free(&r->data);
             return CORVUS_OK;
         }
@@ -1143,8 +1137,13 @@ void cmd_stats(struct command *cmd, int64_t end_time)
     }
 
     if (slowlog_need_log(cmd, latency)) {
-        struct slowlog_entry *entry = slowlog_create_entry(cmd, latency);
-        slowlog_set(&cmd->ctx->slowlog, entry);
+        if (slowlog_statsd_enabled()) {
+            slowlog_add_count(cmd);
+        }
+        if (slowlog_cmd_enabled()) {
+            struct slowlog_entry *entry = slowlog_create_entry(cmd, latency);
+            slowlog_set(&cmd->ctx->slowlog, entry);
+        }
     }
 
     ATOMIC_INC(ctx->stats.remote_latency, latency);
