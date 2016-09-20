@@ -164,7 +164,8 @@ bool slowlog_statsd_enabled()
 bool slowlog_type_need_log(struct command *cmd)
 {
     return cmd->request_type != CMD_EXTRA
-        && cmd->request_type != CMD_UNIMPL;
+        && cmd->request_type != CMD_UNIMPL
+        && cmd->reply_type != REP_ERROR;
 }
 
 bool slowlog_need_log(struct command *cmd, long long latency)
