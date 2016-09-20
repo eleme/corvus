@@ -46,14 +46,24 @@ static inline void stats_get_cpu_usage(struct stats *stats)
     stats->used_cpu_user = ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1000000.0;
 }
 
+static inline void stats_copy_basic_fields(struct basic_stats *dst, struct basic_stats *src)
+{
+    dst->completed_commands = ATOMIC_GET(src->completed_commands);
+    dst->slot_update_jobs = ATOMIC_GET(src->slot_update_jobs);
+    dst->remote_latency = ATOMIC_GET(src->remote_latency);
+    dst->total_latency = ATOMIC_GET(src->total_latency);
+    dst->recv_bytes = ATOMIC_GET(src->recv_bytes);
+    dst->send_bytes = ATOMIC_GET(src->send_bytes);
+}
+
 static inline void stats_cumulate(struct stats *stats)
 {
-    cumulation.basic.completed_commands += stats->basic.completed_commands;
-    cumulation.basic.slot_update_jobs += stats->basic.slot_update_jobs;
-    cumulation.basic.remote_latency += stats->basic.remote_latency;
-    cumulation.basic.total_latency += stats->basic.total_latency;
-    cumulation.basic.recv_bytes += stats->basic.recv_bytes;
-    cumulation.basic.send_bytes += stats->basic.send_bytes;
+    ATOMIC_INC(cumulation.basic.completed_commands, stats->basic.completed_commands);
+    ATOMIC_INC(cumulation.basic.slot_update_jobs, stats->basic.slot_update_jobs);
+    ATOMIC_INC(cumulation.basic.remote_latency, stats->basic.remote_latency);
+    ATOMIC_INC(cumulation.basic.total_latency, stats->basic.total_latency);
+    ATOMIC_INC(cumulation.basic.recv_bytes, stats->basic.recv_bytes);
+    ATOMIC_INC(cumulation.basic.send_bytes, stats->basic.send_bytes);
 }
 
 static void stats_send(char *metric, double value)
@@ -98,8 +108,8 @@ void incr_slot_update_counter()
 void stats_get_simple(struct stats *stats, bool reset)
 {
     if (!reset) {
-        // TODO use lock to protect `cumulation`?
-        memcpy(stats, &cumulation, sizeof(cumulation));
+        stats->basic.connected_clients = 0;
+        stats_copy_basic_fields(&stats->basic, &cumulation.basic);
     }
 
     stats_get_cpu_usage(stats);
@@ -117,7 +127,7 @@ void stats_get_simple(struct stats *stats, bool reset)
     if (reset){
         stats->basic.slot_update_jobs = ATOMIC_IGET(slot_update_job_count, 0);
     }else{
-        stats->basic.slot_update_jobs = ATOMIC_GET(slot_update_job_count) + cumulation.basic.slot_update_jobs;
+        stats->basic.slot_update_jobs += ATOMIC_GET(slot_update_job_count);
     }
 
     struct context *contexts = get_contexts();
