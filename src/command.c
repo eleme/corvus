@@ -411,9 +411,9 @@ int cmd_proxy_info(struct command *cmd)
     stats_get_memory(&stats);
 
     int n = 1024;
+    char content[n + 1];
     char data[n + 1];
-    snprintf(data, sizeof(data),
-        "+"
+    int content_len = snprintf(content, sizeof(content),
         "in_use_buffers:%lld\n"
         "free_buffers:%lld\n"
         "in_use_cmds:%lld\n"
@@ -423,13 +423,13 @@ int cmd_proxy_info(struct command *cmd)
         "in_use_conn_info:%lld\n"
         "free_conn_info:%lld\n"
         "in_use_buf_times:%lld\n"
-        "free_buf_times:%lld"
-        "\r\n",
+        "free_buf_times:%lld",
         stats.buffers, stats.free_buffers, stats.cmds, stats.free_cmds,
         stats.conns, stats.free_conns, stats.conn_info, stats.free_conn_info,
         stats.buf_times, stats.free_buf_times);
+    int data_len = snprintf(data, sizeof(data), "$%d\r\n%s\r\n", content_len, content);
 
-    conn_add_data(cmd->client, (uint8_t*)data, strlen(data),
+    conn_add_data(cmd->client, (uint8_t*)data, data_len,
             &cmd->rep_buf[0], &cmd->rep_buf[1]);
     CMD_INCREF(cmd);
 
