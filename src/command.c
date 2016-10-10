@@ -1141,7 +1141,7 @@ void cmd_stats(struct command *cmd, int64_t end_time)
             slowlog_add_count(cmd);
         }
         if (slowlog_cmd_enabled()) {
-            struct slowlog_entry *entry = slowlog_create_entry(cmd, latency);
+            struct slowlog_entry *entry = slowlog_create_entry(cmd, latency / 1000);
             slowlog_set(&cmd->ctx->slowlog, entry);
         }
     }
