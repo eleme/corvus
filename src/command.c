@@ -7,6 +7,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <assert.h>
+#include <pthread.h>
 #include "corvus.h"
 #include "socket.h"
 #include "logging.h"
@@ -40,6 +41,10 @@ const char *rep_server_err = "-ERR Proxy fail to get server\r\n";
 const char *rep_timeout_err = "-ERR Proxy timed out\r\n";
 const char *rep_slowlog_not_enabled = "-ERR Slowlog not enabled\r\n";
 
+const char *rep_config_err = "-ERR Config error\r\n";
+const char *rep_config_parse_err = "-ERR Config fail to parse command\r\n";
+const char *rep_config_addr_err = "-ERR Config fail to parse address\r\n";
+
 const char *rep_get = "*2\r\n$3\r\nGET\r\n";
 const char *rep_set = "*3\r\n$3\r\nSET\r\n";
 const char *rep_del = "*2\r\n$3\r\nDEL\r\n";
@@ -54,7 +59,7 @@ static const char *rep_auth_not_set = "-ERR Client sent AUTH, but no password is
 struct cmd_item cmds[] = {CMD_DO(CMD_BUILD_MAP)};
 const size_t CMD_NUM = sizeof(cmds) / sizeof(struct cmd_item);
 static struct dict command_map;
-
+static pthread_mutex_t lock_config = PTHREAD_MUTEX_INITIALIZER;
 
 const char *cmd_extract_prefix(const char *prefix)
 {
@@ -465,6 +470,53 @@ int cmd_proxy(struct command *cmd, struct redis_data *data)
     return CORVUS_OK;
 }
 
+int cmd_config(struct command *cmd, struct redis_data *data)
+{
+    ASSERT_TYPE(data, REP_ARRAY);
+    ASSERT_ELEMENTS(data->elements >= 2, data);
+
+    struct redis_data *op = &data->element[1];
+    struct redis_data *opt = &data->element[2];
+    ASSERT_TYPE(op, REP_STRING);
+    ASSERT_TYPE(opt, REP_STRING);
+
+    char type[op->pos.str_len + 1];
+    char option[opt->pos.str_len + 1];
+    if (pos_to_str(&op->pos, type) == CORVUS_ERR
+            || pos_to_str(&opt->pos, option) == CORVUS_ERR) {
+        LOG(ERROR, "cmd_config: parse error");
+        return CORVUS_ERR;
+    }
+    if (strcasecmp(type, "SET") == 0) {
+        // `config set` generelly need global lock
+        pthread_mutex_lock(&lock_config);
+        if (strcasecmp(option, "NODE") == 0) {
+            // config set node host:port,host1:port1
+            char value[data->element[3].pos.str_len + 1];
+            if (data->elements != 4) {
+                cmd_mark_fail(cmd, rep_config_parse_err);
+            } else if (data->element[3].pos.str_len
+                    < 9|| pos_to_str(&data->element[3].pos, value) != CORVUS_OK) {
+                cmd_mark_fail(cmd, rep_config_parse_err);
+            } else if (config_add("node", value) != CORVUS_OK) {
+                cmd_mark_fail(cmd, rep_config_addr_err);
+            } else {
+                slot_create_job(SLOT_UPDATE);
+                conn_add_data(cmd->client, (uint8_t*) rep_ok, strlen(rep_ok),
+                        &cmd->rep_buf[0], &cmd->rep_buf[1]);
+                CMD_INCREF(cmd);
+                cmd_mark_done(cmd);
+            }
+        } else {
+            cmd_mark_fail(cmd, rep_addr_err);
+        }
+        pthread_mutex_unlock(&lock_config);
+    } else {
+        cmd_mark_fail(cmd, rep_config_err);
+    }
+    return CORVUS_OK;
+}
+
 int cmd_auth(struct command *cmd, struct redis_data *data)
 {
     ASSERT_TYPE(data, REP_ARRAY);
@@ -720,6 +772,8 @@ int cmd_extra(struct command *cmd, struct redis_data *data)
             return cmd_auth(cmd, data);
         case CMD_TIME:
             return cmd_time(cmd);
+        case CMD_CONFIG:
+            return cmd_config(cmd, data);
         case CMD_QUIT:
             return cmd_quit(cmd);
         case CMD_SLOWLOG:
@@ -973,6 +1027,7 @@ void cmd_map_init()
 void cmd_map_destroy()
 {
     dict_free(&command_map);
+    pthread_mutex_destroy(&lock_config);
 }
 
 struct command *cmd_create(struct context *ctx)

@@ -6,6 +6,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <execinfo.h>
+#include <assert.h>
 #include "corvus.h"
 #include "mbuf.h"
 #include "slot.h"
@@ -21,6 +22,7 @@
 #define MIN_BUFSIZE 64
 
 static struct context *contexts;
+static pthread_mutex_t lock_conf_node = PTHREAD_MUTEX_INITIALIZER;
 
 void config_init()
 {
@@ -28,7 +30,9 @@ void config_init()
     strncpy(config.cluster, "default", CLUSTER_NAME_SIZE);
 
     config.bind = 12345;
-    memset(&config.node, 0, sizeof(struct node_conf));
+    config.node = cv_calloc(1, sizeof(struct node_conf));
+    memset(config.node, 0, sizeof(struct node_conf));
+    config.node->refcount = 1;
     config.thread = 4;
     config.loglevel = INFO;
     config.syslog = 0;
@@ -65,7 +69,7 @@ int config_add(char *name, char *value)
 {
     int val;
     if (strcmp(name, "cluster") == 0) {
-        if (strlen(value) <= 0) return 0;
+        if (strlen(value) <= 0) return CORVUS_OK;
         strncpy(config.cluster, value, CLUSTER_NAME_SIZE);
     } else if (strcmp(name, "bind") == 0) {
         if (socket_parse_port(value, &config.bind) == CORVUS_ERR) {
@@ -134,22 +138,28 @@ int config_add(char *name, char *value)
             memcpy(config.requirepass, value, strlen(value));
         }
     } else if (strcmp(name, "node") == 0) {
-        cv_free(config.node.addr);
-        memset(&config.node, 0, sizeof(config.node));
-
+    	struct address *addr = NULL;
+    	int addr_cnt = 0;
         char *p = strtok(value, ",");
         while (p) {
-            config.node.addr = cv_realloc(config.node.addr,
-                    sizeof(struct address) * (config.node.len + 1));
-
-            if (socket_parse_ip(p, &config.node.addr[config.node.len]) == -1) {
-                cv_free(config.node.addr);
-                return -1;
+        	addr = cv_realloc(addr, sizeof(struct address) * (addr_cnt + 1));
+            if (socket_parse_ip(p, &addr[addr_cnt]) == -1) {
+                cv_free(addr);
+                return CORVUS_ERR;
             }
-
-            config.node.len++;
+            addr_cnt++;
             p = strtok(NULL, ",");
         }
+		{
+			struct node_conf *newnode = cv_calloc(1, sizeof(struct node_conf));
+			memset(newnode, 0, sizeof(struct node_conf));
+			newnode->addr = addr;
+			newnode->len = addr_cnt;
+			newnode->refcount = 1;
+			struct node_conf *oldnode = config.node;
+			config.node = newnode;
+			conf_node_dec_ref(oldnode);
+		}
     } else if (strcmp(name, "slowlog-log-slower-than") == 0) {
         config.slowlog_log_slower_than = atoi(value);
     } else if (strcmp(name, "slowlog-max-len") == 0) {
@@ -157,7 +167,29 @@ int config_add(char *name, char *value)
     } else if (strcmp(name, "slowlog-statsd-enabled") == 0) {
         config.slowlog_statsd_enabled = atoi(value);
     }
-    return 0;
+    return CORVUS_OK;
+}
+
+struct node_conf *conf_node_inc_ref()
+{
+    pthread_mutex_lock(&lock_conf_node);
+    struct node_conf *node = config.node;
+    int refcount = ATOMIC_INC(node->refcount, 1);
+    assert(refcount >= 0);
+    pthread_mutex_unlock(&lock_conf_node);
+    return node;
+}
+
+void conf_node_dec_ref(struct node_conf *node)
+{
+    pthread_mutex_lock(&lock_conf_node);
+    int refcount = ATOMIC_DEC(node->refcount, 1);
+    assert(refcount >= 0);
+    if (refcount == 0) {
+        cv_free(node->addr);
+        cv_free(node);
+    }
+    pthread_mutex_unlock(&lock_conf_node);
 }
 
 int read_line(char **line, size_t *bytes, FILE *fp)
@@ -472,7 +504,7 @@ int main(int argc, const char *argv[])
         fprintf(stderr, "Error: invalid config.\n");
         return EXIT_FAILURE;
     }
-    if (config.node.len <= 0) {
+    if (config.node->len <= 0) {
         fprintf(stderr, "Error: invalid config, `node` should be set.\n");
         return EXIT_FAILURE;
     }
@@ -545,7 +577,8 @@ int main(int argc, const char *argv[])
     destroy_contexts();
     cmd_map_destroy();
     cv_free(config.requirepass);
-    cv_free(config.node.addr);
+    conf_node_dec_ref(config.node);
+    pthread_mutex_destroy(&lock_conf_node);
     if (config.syslog) closelog();
     return EXIT_SUCCESS;
 }

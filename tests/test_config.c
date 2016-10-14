@@ -1,8 +1,6 @@
 #include "test.h"
 #include "alloc.h"
 
-extern int config_add(char *name, char *value);
-
 TEST(test_config_bind) {
     char n[] = "bind";
 
