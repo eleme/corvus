@@ -1118,7 +1118,6 @@ void cmd_mark_fail(struct command *cmd, const char *reason)
 void cmd_stats(struct command *cmd, int64_t end_time)
 {
     struct context *ctx = cmd->ctx;
-    struct command *last, *first;
     long long latency;
 
     ATOMIC_INC(ctx->stats.completed_commands, 1);
@@ -1128,20 +1127,14 @@ void cmd_stats(struct command *cmd, int64_t end_time)
     ATOMIC_INC(ctx->stats.total_latency, latency);
     ATOMIC_SET(ctx->last_command_latency, latency);
 
-    if (!STAILQ_EMPTY(&cmd->sub_cmds)) {
-        first = STAILQ_FIRST(&cmd->sub_cmds);
-        last = STAILQ_LAST(&cmd->sub_cmds, command, sub_cmd_next);
-        latency = last->rep_time[1] - first->rep_time[0];
-    } else {
-        latency = cmd->rep_time[1] - cmd->rep_time[0];
-    }
+    latency = cmd->rep_time[1] - cmd->rep_time[0];
 
     if (slowlog_need_log(cmd, latency)) {
         if (slowlog_statsd_enabled()) {
             slowlog_add_count(cmd);
         }
         if (slowlog_cmd_enabled()) {
-            struct slowlog_entry *entry = slowlog_create_entry(cmd, latency);
+            struct slowlog_entry *entry = slowlog_create_entry(cmd, latency / 1000);
             slowlog_set(&cmd->ctx->slowlog, entry);
         }
     }
