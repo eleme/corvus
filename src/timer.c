@@ -50,7 +50,11 @@ void check_connections(struct context *ctx)
             // the client connection is turned into an intermediate state.
             // In this state the connection object has not called conn_free so the c->fd is not -1 here.
             // But it should not call client_eof again.
-            if (c->eof) continue;
+            if (c->eof) {
+                LOG(WARN, "zombie client");
+                c = n;
+                continue;
+            }
 
             if (c->info->last_active > 0
                     && now - c->info->last_active > config.client_timeout)
