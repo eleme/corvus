@@ -50,12 +50,13 @@ void slowlog_free(struct slowlog_queue *slowlog)
     cv_free(slowlog->entry_locks);
 }
 
-struct slowlog_entry *slowlog_create_entry(struct command *cmd, int64_t latency)
+struct slowlog_entry *slowlog_create_entry(struct command *cmd, int64_t remote_latency, int64_t total_latency)
 {
     struct slowlog_entry *entry = cv_calloc(1, sizeof(struct slowlog_entry));
     entry->id = ATOMIC_INC(slowlog_id, 1);
     entry->log_time = time(NULL);  // redis also uses time(NULL);
-    entry->latency = latency;
+    entry->remote_latency = remote_latency;
+    entry->total_latency = total_latency;
     entry->refcount = 1;
 
     const char *bytes_fmt = "(%zd bytes)";

@@ -155,7 +155,6 @@ int client_read(struct connection *client, bool read_socket)
 void client_make_iov(struct conn_info *info)
 {
     struct command *cmd;
-    int64_t t = get_time();
 
     while (!STAILQ_EMPTY(&info->cmd_queue)) {
         cmd = STAILQ_FIRST(&info->cmd_queue);
@@ -168,7 +167,7 @@ void client_make_iov(struct conn_info *info)
 
         if (!info->quit) {
             cmd_make_iovec(cmd, &info->iov);
-            cmd_stats(cmd, t);
+            cmd_stats(cmd, get_time());
         } else {
             mbuf_range_clear(cmd->ctx, cmd->rep_buf);
         }

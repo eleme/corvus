@@ -97,7 +97,8 @@ Commands
 * `EXISTS`: split to multiple single key `EXISTS`.
 * `PING`: ignored and won't be forwarded.
 * `INFO`, `TIME`, `SLOWLOG`: won't be forwarded to backend redis, information collected in proxy
-   will be returned.
+   will be returned. Note that in the slowlog entry there's an additional
+   `remote latency` field before the `total latency` field.
 * `AUTH`: do authentication in proxy.
 * `CONFIG`: support `get`, `set`, and `rewrite` sub-command to retrieve and manipulate corvus config.
 

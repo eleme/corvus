@@ -17,7 +17,8 @@
 struct slowlog_entry {
     long long id;
     long long log_time;
-    long long latency;
+    long long remote_latency;
+    long long total_latency;
     int refcount;
     int argc;
     struct pos argv[SLOWLOG_ENTRY_MAX_ARGC];
@@ -37,7 +38,7 @@ int slowlog_init(struct slowlog_queue *slowlog);
 void slowlog_free(struct slowlog_queue *slowlog);
 
 // only called by the thread who creates the log
-struct slowlog_entry *slowlog_create_entry(struct command *cmd, int64_t latency);
+struct slowlog_entry *slowlog_create_entry(struct command *cmd, int64_t remote_latency, int64_t total_latency);
 // called by all worker threads
 void slowlog_set(struct slowlog_queue *queue, struct slowlog_entry *entry);
 void slowlog_dec_ref(struct slowlog_entry *entry);
