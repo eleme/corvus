@@ -42,6 +42,7 @@ const char *rep_timeout_err = "-ERR Proxy timed out\r\n";
 const char *rep_slowlog_not_enabled = "-ERR Slowlog not enabled\r\n";
 
 const char *rep_config_err = "-ERR Config error\r\n";
+const char *rep_config_unsupported_err = "-ERR Config cmd not supported\r\n";
 const char *rep_config_parse_err = "-ERR Config fail to parse command\r\n";
 const char *rep_config_addr_err = "-ERR Config fail to parse address\r\n";
 
@@ -487,6 +488,8 @@ int cmd_config(struct command *cmd, struct redis_data *data)
         return CORVUS_ERR;
     }
     if (strcasecmp(type, "SET") == 0) {
+        //config set <item> <val>
+        ASSERT_ELEMENTS(data->elements >= 4, data);
         if (strcasecmp(option, "NODE") == 0) {
             // config set node host:port,host1:port1
             if (data->elements != 4) {
@@ -508,9 +511,11 @@ int cmd_config(struct command *cmd, struct redis_data *data)
                 }
             }
         } else {
-            cmd_mark_fail(cmd, rep_addr_err);
+            cmd_mark_fail(cmd, rep_config_unsupported_err);
         }
     } else if (strcasecmp(type, "GET") == 0) {
+        //config get <item>
+        ASSERT_ELEMENTS(data->elements >= 3, data);
         if (strcasecmp(option, "NODE") == 0) {
             struct node_conf *node = conf_node_inc_ref();
             int n = 1024, pos = 0;
