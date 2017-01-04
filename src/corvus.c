@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <execinfo.h>
 #include <assert.h>
+#include <getopt.h>
 #include "corvus.h"
 #include "mbuf.h"
 #include "slot.h"
@@ -221,7 +222,7 @@ int read_conf(const char *filename)
 {
     FILE *fp = fopen(filename, "r");
     if (fp == NULL) {
-        fprintf(stderr, "config file: %s", strerror(errno));
+        fprintf(stderr, "config file: %s\n", strerror(errno));
         return -1;
     }
     int i, len = 0;
@@ -490,21 +491,143 @@ void *main_loop(void *data)
 }
 
 #ifndef CORVUS_TEST
+
+static const struct option opts[] = {
+    {"nodes", required_argument, NULL, 'n' },
+    {"threads", required_argument, NULL, 't'},
+    {"cluster", required_argument, NULL, 'c'},
+    {"bind", required_argument, NULL, 'b'},
+    {"syslog", required_argument, NULL, 'l'},
+    {"read-strategy", required_argument, NULL, 's'},
+    {"bufsize", required_argument, NULL, 'B'},
+    {"client-timeout", required_argument, NULL, 'C'},
+    {"server-timeout", required_argument, NULL, 'S'},
+    {"statsd", required_argument, NULL, 'A'},
+    {"metric-interval", required_argument, NULL, 'm'},
+    {"loglevel", required_argument, NULL, 'L'},
+    {"requirepass", required_argument, NULL, 'P'},
+    {"slowlog-time", required_argument, NULL, 'g'},
+    {"slowlog-max", required_argument, NULL, 'G'},
+    {"slowlog-statsd", required_argument, NULL, 'E'},
+    { 0, 0, 0, 0 },
+};
+
+static const char *opts_desc[] = {
+    "nodes of targeting cluster. eg: 192.168.123.2:6391,192.168.123.2:6392",
+    "thread num",
+    "cluster name",
+    "port to listen",
+    "whether writing log to syslog. 0 or 1",
+    "whether sending all cmd to both masters and slaves. read-slave-only|both or \"\" by default to masters",
+    "buffer size allocated each time avoiding fregments",
+    "for clients",
+    "for upstreams",
+    "statsd upstream, eg 10.10.99.11:8125",
+    "interval to capture metrics, in seconds",
+    "level including debug, info, warn, error",
+    "password needed to auth",
+    "slowlog time in seconds",
+    "slowlog max len",
+    "slowlog whether writing to statsd",
+};
+
+static void usage(const char *cmd)
+{
+    int i = 0;
+    fprintf(stderr, "Usage: %s [options] corvus.conf\n", cmd);
+    fprintf(stderr, "Note: Options specified in command line will override ones in config file.\n");
+    fprintf(stderr, "Options:\n");
+    while(opts[i].name > 0) {
+        fprintf(stderr, "    -%c, --%-16s%s\n", opts[i].val, opts[i].name, opts_desc[i]);
+        i ++;
+    }
+    fprintf(stderr, "\n");
+}
+
+static int parameter_init(int argc, const char *argv[]) {
+    int ch;
+    opterr = optind = 0;
+    do {
+        ch = getopt_long(argc, (char * const *)argv, ":n:t:c:b:l:s:B:C:S:A:m:L:P:g:G:E:", opts, NULL);
+        if (ch < 0) {
+            break;
+        }
+        switch (ch) {
+            case 't':
+                config_add("thread", optarg);
+                break;
+            case 'n':
+                config_add("node", optarg);
+                break;
+            case 'c':
+                config_add("cluster", optarg);
+                break;
+            case 'b':
+                config_add("bind", optarg);
+                break;
+            case 'l':
+                config_add("syslog", optarg);
+                break;
+            case 's':
+                config_add("read-strategy", optarg);
+                break;
+            case 'B':
+                config_add("bufsize", optarg);
+                break;
+            case 'C':
+                config_add("client_timeout", optarg);
+                break;
+            case 'S':
+                config_add("server_timeout", optarg);
+                break;
+            case 'A':
+                config_add("statsd", optarg);
+                break;
+            case 'm':
+                config_add("metric_interval", optarg);
+                break;
+            case 'L':
+                config_add("loglevel", optarg);
+                break;
+            case 'P':
+                config_add("requirepass", optarg);
+                break;
+            case 'g':
+                config_add("slowlog-log-slower-than", optarg);
+                break;
+            case 'G':
+                config_add("slowlog-max-len", optarg);
+                break;
+            case 'E':
+                config_add("slowlog-statsd-enabled", optarg);
+                break;
+            default:
+                fprintf(stderr, "unknow option: %c\n", ch);
+                return CORVUS_ERR;
+        }
+    } while(1);
+    return CORVUS_OK;
+}
+
 int main(int argc, const char *argv[])
 {
     int i, err;
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s corvus.conf\n", argv[0]);
+    if (argc < 2) {
+        usage(argv[0]);
         return EXIT_FAILURE;
     }
 
     config_init();
-    if (read_conf(argv[1]) == -1) {
+    if (read_conf(argv[argc - 1]) == -1) {
         fprintf(stderr, "Error: invalid config.\n");
         return EXIT_FAILURE;
     }
+    if (parameter_init(argc, argv) != CORVUS_OK) {
+        usage(argv[0]);
+        return EXIT_FAILURE;
+    }
     if (config.node->len <= 0) {
-        fprintf(stderr, "Error: invalid config, `node` should be set.\n");
+        fprintf(stderr, "Error: invalid upstream list, `node` should be set to a valid nodes list.\n");
         return EXIT_FAILURE;
     }
 

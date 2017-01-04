@@ -418,16 +418,16 @@ int cmd_proxy_info(struct command *cmd)
     char content[n + 1];
     char data[n + 1];
     int content_len = snprintf(content, sizeof(content),
-        "in_use_buffers:%lld\n"
-        "free_buffers:%lld\n"
-        "in_use_cmds:%lld\n"
-        "free_cmds:%lld\n"
-        "in_use_conns:%lld\n"
-        "free_conns:%lld\n"
-        "in_use_conn_info:%lld\n"
-        "free_conn_info:%lld\n"
-        "in_use_buf_times:%lld\n"
-        "free_buf_times:%lld",
+        "in_use_buffers:%lld\r\n"
+        "free_buffers:%lld\r\n"
+        "in_use_cmds:%lld\r\n"
+        "free_cmds:%lld\r\n"
+        "in_use_conns:%lld\r\n"
+        "free_conns:%lld\r\n"
+        "in_use_conn_info:%lld\r\n"
+        "free_conn_info:%lld\r\n"
+        "in_use_buf_times:%lld\r\n"
+        "free_buf_times:%lld\r\n",
         stats.buffers, stats.free_buffers, stats.cmds, stats.free_cmds,
         stats.conns, stats.free_conns, stats.conn_info, stats.free_conn_info,
         stats.buf_times, stats.free_buf_times);
@@ -1196,7 +1196,6 @@ void cmd_mark_fail(struct command *cmd, const char *reason)
 void cmd_stats(struct command *cmd, int64_t end_time)
 {
     struct context *ctx = cmd->ctx;
-    struct command *last, *first;
     long long latency;
 
     ATOMIC_INC(ctx->stats.completed_commands, 1);
@@ -1206,20 +1205,14 @@ void cmd_stats(struct command *cmd, int64_t end_time)
     ATOMIC_INC(ctx->stats.total_latency, latency);
     ATOMIC_SET(ctx->last_command_latency, latency);
 
-    if (!STAILQ_EMPTY(&cmd->sub_cmds)) {
-        first = STAILQ_FIRST(&cmd->sub_cmds);
-        last = STAILQ_LAST(&cmd->sub_cmds, command, sub_cmd_next);
-        latency = last->rep_time[1] - first->rep_time[0];
-    } else {
-        latency = cmd->rep_time[1] - cmd->rep_time[0];
-    }
+    latency = cmd->rep_time[1] - cmd->rep_time[0];
 
     if (slowlog_need_log(cmd, latency)) {
         if (slowlog_statsd_enabled()) {
             slowlog_add_count(cmd);
         }
         if (slowlog_cmd_enabled()) {
-            struct slowlog_entry *entry = slowlog_create_entry(cmd, latency);
+            struct slowlog_entry *entry = slowlog_create_entry(cmd, latency / 1000);
             slowlog_set(&cmd->ctx->slowlog, entry);
         }
     }

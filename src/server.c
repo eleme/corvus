@@ -64,6 +64,11 @@ void server_make_iov(struct conn_info *info)
             cmd_iov_add(&info->iov, (void*)req_ask, strlen(req_ask), NULL);
         }
         cmd->rep_time[0] = t;
+        if (cmd->parent) {
+            int64_t parent_rep_start_time = cmd->parent->rep_time[0];
+            if (parent_rep_start_time == 0 || parent_rep_start_time > t)
+                cmd->parent->rep_time[0] = t;
+        }
 
         if (cmd->prefix != NULL) {
             cmd_iov_add(&info->iov, (void*)cmd->prefix, strlen(cmd->prefix), NULL);
@@ -234,6 +239,11 @@ int server_read(struct connection *server)
         status = server_read_reply(server, cmd);
 
         cmd->rep_time[1] = now;
+        if (cmd->parent) {
+            int64_t parent_rep_end_time = cmd->parent->rep_time[1];
+            if (parent_rep_end_time == 0 || parent_rep_end_time < now)
+                cmd->parent->rep_time[1] = now;
+        }
 
         switch (status) {
             case CORVUS_ASKING:

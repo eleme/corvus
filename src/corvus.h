@@ -14,7 +14,7 @@
 #include "event.h"
 #include "slowlog.h"
 
-#define VERSION "0.2.4"
+#define VERSION "0.2.5"
 
 #define CORVUS_OK 0
 #define CORVUS_ERR -1

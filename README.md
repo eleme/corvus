@@ -31,6 +31,10 @@ Features
 * Syslog integration.
 * Can direct read operations to slaves.
 
+Performance
+------------
+
+See details in our [test results](docs/lpt.md).
 
 Requirements
 ------------
