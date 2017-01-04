@@ -59,7 +59,6 @@ static const char *rep_auth_not_set = "-ERR Client sent AUTH, but no password is
 struct cmd_item cmds[] = {CMD_DO(CMD_BUILD_MAP)};
 const size_t CMD_NUM = sizeof(cmds) / sizeof(struct cmd_item);
 static struct dict command_map;
-static pthread_mutex_t lock_config = PTHREAD_MUTEX_INITIALIZER;
 
 const char *cmd_extract_prefix(const char *prefix)
 {
@@ -488,29 +487,54 @@ int cmd_config(struct command *cmd, struct redis_data *data)
         return CORVUS_ERR;
     }
     if (strcasecmp(type, "SET") == 0) {
-        // `config set` generelly need global lock
-        pthread_mutex_lock(&lock_config);
         if (strcasecmp(option, "NODE") == 0) {
             // config set node host:port,host1:port1
-            char value[data->element[3].pos.str_len + 1];
             if (data->elements != 4) {
                 cmd_mark_fail(cmd, rep_config_parse_err);
-            } else if (data->element[3].pos.str_len
-                    < 9|| pos_to_str(&data->element[3].pos, value) != CORVUS_OK) {
-                cmd_mark_fail(cmd, rep_config_parse_err);
-            } else if (config_add("node", value) != CORVUS_OK) {
-                cmd_mark_fail(cmd, rep_config_addr_err);
             } else {
-                slot_create_job(SLOT_UPDATE);
-                conn_add_data(cmd->client, (uint8_t*) rep_ok, strlen(rep_ok),
-                        &cmd->rep_buf[0], &cmd->rep_buf[1]);
-                CMD_INCREF(cmd);
-                cmd_mark_done(cmd);
+                char value[data->element[3].pos.str_len + 1];
+                // the host-port pair is in form "1.1.1.1:1"(9 bytes) at least
+                if (data->element[3].pos.str_len < 9
+                        || pos_to_str(&data->element[3].pos, value) != CORVUS_OK) {
+                    cmd_mark_fail(cmd, rep_config_parse_err);
+                } else if (config_add("node", value) != CORVUS_OK) {
+                    cmd_mark_fail(cmd, rep_config_addr_err);
+                } else {
+                    slot_create_job(SLOT_UPDATE);
+                    conn_add_data(cmd->client, (uint8_t*) rep_ok, strlen(rep_ok),
+                            &cmd->rep_buf[0], &cmd->rep_buf[1]);
+                    CMD_INCREF(cmd);
+                    cmd_mark_done(cmd);
+                }
             }
         } else {
             cmd_mark_fail(cmd, rep_addr_err);
         }
-        pthread_mutex_unlock(&lock_config);
+    } else if (strcasecmp(type, "GET") == 0) {
+        if (strcasecmp(option, "NODE") == 0) {
+            struct node_conf *node = conf_node_inc_ref();
+            int n = 1024, pos = 0;
+            char content[n + ADDRESS_LEN];
+            char data[n + ADDRESS_LEN + 100]; //100 bytes for control data
+            for (int i = 0; i < node->len; i++) {
+                if (i > 0) {
+                    content[pos++] = ',';
+                }
+                pos += snprintf(content + pos, ADDRESS_LEN, "%s:%d",
+                        node->addr[i].ip, node->addr[i].port);
+                if (pos >= n) {
+                    break;
+                }
+            }
+            conf_node_dec_ref(node);
+            int data_len = snprintf(data, sizeof(data), "$%d\r\n%s\r\n", pos, content);
+            conn_add_data(cmd->client, (uint8_t*) data, data_len,
+                    &cmd->rep_buf[0], &cmd->rep_buf[1]);
+            CMD_INCREF(cmd);
+            cmd_mark_done(cmd);
+        } else {
+            cmd_mark_fail(cmd, rep_config_parse_err);
+        }
     } else {
         cmd_mark_fail(cmd, rep_config_err);
     }
@@ -1027,7 +1051,6 @@ void cmd_map_init()
 void cmd_map_destroy()
 {
     dict_free(&command_map);
-    pthread_mutex_destroy(&lock_config);
 }
 
 struct command *cmd_create(struct context *ctx)

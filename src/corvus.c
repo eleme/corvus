@@ -31,7 +31,6 @@ void config_init()
 
     config.bind = 12345;
     config.node = cv_calloc(1, sizeof(struct node_conf));
-    memset(config.node, 0, sizeof(struct node_conf));
     config.node->refcount = 1;
     config.thread = 4;
     config.loglevel = INFO;
@@ -142,7 +141,7 @@ int config_add(char *name, char *value)
     	int addr_cnt = 0;
         char *p = strtok(value, ",");
         while (p) {
-        	addr = cv_realloc(addr, sizeof(struct address) * (addr_cnt + 1));
+            addr = cv_realloc(addr, sizeof(struct address) * (addr_cnt + 1));
             if (socket_parse_ip(p, &addr[addr_cnt]) == -1) {
                 cv_free(addr);
                 return CORVUS_ERR;
@@ -150,16 +149,18 @@ int config_add(char *name, char *value)
             addr_cnt++;
             p = strtok(NULL, ",");
         }
-		{
-			struct node_conf *newnode = cv_calloc(1, sizeof(struct node_conf));
-			memset(newnode, 0, sizeof(struct node_conf));
-			newnode->addr = addr;
-			newnode->len = addr_cnt;
-			newnode->refcount = 1;
-			struct node_conf *oldnode = config.node;
-			config.node = newnode;
-			conf_node_dec_ref(oldnode);
-		}
+        {
+            struct node_conf *newnode = cv_calloc(1, sizeof(struct node_conf));
+            memset(newnode, 0, sizeof(struct node_conf));
+            newnode->addr = addr;
+            newnode->len = addr_cnt;
+            newnode->refcount = 1;
+            pthread_mutex_lock(&lock_conf_node);
+            struct node_conf *oldnode = config.node;
+            config.node = newnode;
+            pthread_mutex_unlock(&lock_conf_node);
+            conf_node_dec_ref(oldnode);
+        }
     } else if (strcmp(name, "slowlog-log-slower-than") == 0) {
         config.slowlog_log_slower_than = atoi(value);
     } else if (strcmp(name, "slowlog-max-len") == 0) {
@@ -182,14 +183,12 @@ struct node_conf *conf_node_inc_ref()
 
 void conf_node_dec_ref(struct node_conf *node)
 {
-    pthread_mutex_lock(&lock_conf_node);
     int refcount = ATOMIC_DEC(node->refcount, 1);
     assert(refcount >= 0);
     if (refcount == 0) {
         cv_free(node->addr);
         cv_free(node);
     }
-    pthread_mutex_unlock(&lock_conf_node);
 }
 
 int read_line(char **line, size_t *bytes, FILE *fp)
