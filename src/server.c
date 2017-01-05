@@ -264,7 +264,7 @@ int server_read(struct connection *server)
         }
         break;
     }
-    info->last_active = -1;
+    info->last_active = time(NULL);
     return status;
 }
 
