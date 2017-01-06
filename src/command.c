@@ -517,7 +517,7 @@ int cmd_config(struct command *cmd, struct redis_data *data)
         //config get <item>
         ASSERT_ELEMENTS(data->elements >= 3, data);
         if (strcasecmp(option, "NODE") == 0) {
-            struct node_conf *node = conf_node_inc_ref();
+            struct node_conf *node = conf_get_node();
             int n = 1024, pos = 0;
             char content[n + ADDRESS_LEN];
             char data[n + ADDRESS_LEN + 100]; //100 bytes for control data

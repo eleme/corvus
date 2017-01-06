@@ -303,7 +303,7 @@ struct connection *conn_get_raw_server(struct context *ctx)
     int i;
     struct connection *server = NULL;
 
-    struct node_conf *node = conf_node_inc_ref();
+    struct node_conf *node = conf_get_node();
     for (i = 0; i < node->len; i++) {
         server = conn_get_server_from_pool(ctx, &node->addr[i], false);
         if (server == NULL) continue;

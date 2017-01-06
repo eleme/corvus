@@ -36,7 +36,7 @@ static struct {
 
 static inline void node_list_init()
 {
-    struct node_conf *node = conf_node_inc_ref();
+    struct node_conf *node = conf_get_node();
     pthread_rwlock_wrlock(&node_list.lock);
     node_list.len = 0;
     for (int i = 0; i < MIN(node->len, MAX_NODE_LIST); i++) {
