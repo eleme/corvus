@@ -36,13 +36,15 @@ static struct {
 
 static inline void node_list_init()
 {
+    struct node_conf *node = conf_node_inc_ref();
     pthread_rwlock_wrlock(&node_list.lock);
     node_list.len = 0;
-    for (int i = 0; i < MIN(config.node.len, MAX_NODE_LIST); i++) {
-        memcpy(&node_list.nodes[i], &config.node.addr[i], sizeof(struct address));
+    for (int i = 0; i < MIN(node->len, MAX_NODE_LIST); i++) {
+        memcpy(&node_list.nodes[i], &node->addr[i], sizeof(struct address));
         node_list.len++;
     }
     pthread_rwlock_unlock(&node_list.lock);
+    conf_node_dec_ref(node);
 }
 
 static inline void node_list_add(struct node_info *node)

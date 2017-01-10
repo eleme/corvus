@@ -146,7 +146,8 @@
     HANDLER(SLOWLOG,           EXTRA,    UNKNOWN) \
     HANDLER(QUIT,              EXTRA,    UNKNOWN) \
     HANDLER(SELECT,            UNIMPL,   UNKNOWN) \
-    HANDLER(TIME,              EXTRA,    UNKNOWN)
+    HANDLER(TIME,              EXTRA,    UNKNOWN) \
+    HANDLER(CONFIG,            EXTRA,    UNKNOWN)
 
 #define CMD_DEFINE(cmd, type, access) CMD_##cmd,
 

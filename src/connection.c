@@ -303,11 +303,13 @@ struct connection *conn_get_raw_server(struct context *ctx)
     int i;
     struct connection *server = NULL;
 
-    for (i = 0; i < config.node.len; i++) {
-        server = conn_get_server_from_pool(ctx, &config.node.addr[i], false);
+    struct node_conf *node = conf_node_inc_ref();
+    for (i = 0; i < node->len; i++) {
+        server = conn_get_server_from_pool(ctx, &node->addr[i], false);
         if (server == NULL) continue;
         break;
     }
+    conf_node_dec_ref(node);
     if (server == NULL) {
         LOG(ERROR, "conn_get_raw_server: cannot connect to redis server.");
         return NULL;

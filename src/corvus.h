@@ -54,6 +54,7 @@ enum {
 struct node_conf {
     struct address *addr;
     int len;
+    int refcount;
 };
 
 struct context {
@@ -95,7 +96,7 @@ struct context {
 struct {
     char cluster[CLUSTER_NAME_SIZE + 1];
     uint16_t bind;
-    struct node_conf node;
+    struct node_conf *node;
     int thread;
     int loglevel;
     bool syslog;
@@ -114,7 +115,10 @@ struct {
 } config;
 
 int64_t get_time();
+struct node_conf *conf_node_inc_ref();
+void conf_node_dec_ref(struct node_conf *node);
 struct context *get_contexts();
 int thread_spawn(struct context *ctx, void *(*start_routine) (void *));
+int config_add(char *name, char *value);
 
 #endif /* end of include guard: CORVUS_H */
