@@ -293,7 +293,7 @@ static const char *opts_desc[] = {
     "interval to capture metrics, in seconds",
     "level including debug, info, warn, error",
     "password needed to auth",
-    "slowlog time in seconds",
+    "slowlog time in microseconds",
     "slowlog max len",
     "slowlog whether writing to statsd",
 };
@@ -385,7 +385,7 @@ int main(int argc, const char *argv[])
     }
 
     config_init();
-    if (read_conf(argv[argc - 1]) == -1) {
+    if (config_read(argv[argc - 1]) == CORVUS_ERR) {
         fprintf(stderr, "Error: invalid config.\n");
         return EXIT_FAILURE;
     }

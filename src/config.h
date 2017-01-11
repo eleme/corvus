@@ -4,6 +4,8 @@
 #include "socket.h"
 
 #define CLUSTER_NAME_SIZE 127
+#define CONFIG_FILE_PATH_SIZE 256
+#define DEFAULT_TMP_CONFIG = "/tmp/tmp_corvus.config"
 
 struct node_conf {
     struct address *addr;
@@ -11,7 +13,8 @@ struct node_conf {
     int refcount;
 };
 
-struct {
+struct corvus_config {
+    char config_file_path[CONFIG_FILE_PATH_SIZE + 1];
     char cluster[CLUSTER_NAME_SIZE + 1];
     uint16_t bind;
     struct node_conf *node;
@@ -29,16 +32,18 @@ struct {
     int bufsize;
     int slowlog_log_slower_than;
     int slowlog_max_len;
-    int slowlog_statsd_enabled;
+    bool slowlog_statsd_enabled;
 } config;
 
 void config_init();
 void config_free();
-int read_conf(const char *filename);
+int config_read(const char *filename);
+int config_add(char *name, char *value);
+int config_get(const char *name, char *value, size_t max_len);
 
-struct node_conf *conf_get_node();
-void conf_set_node(struct node_conf *node);
-void conf_node_dec_ref(struct node_conf *node);
+struct node_conf *config_get_node();
+void config_set_node(struct node_conf *node);
+void config_node_dec_ref(struct node_conf *node);
 int config_add(char *name, char *value);
 
 #endif /* end of include guard: CONFIG_H */

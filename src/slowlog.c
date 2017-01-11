@@ -158,7 +158,8 @@ bool slowlog_cmd_enabled()
 bool slowlog_statsd_enabled()
 {
     return config.slowlog_log_slower_than >= 0
-        && config.slowlog_statsd_enabled;
+        && config.slowlog_statsd_enabled
+        && config.stats;
 }
 
 bool slowlog_type_need_log(struct command *cmd)
