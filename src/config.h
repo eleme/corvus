@@ -45,5 +45,6 @@ struct node_conf *config_get_node();
 void config_set_node(struct node_conf *node);
 void config_node_dec_ref(struct node_conf *node);
 int config_add(char *name, char *value);
+bool config_option_changable(const char *option);
 
 #endif /* end of include guard: CONFIG_H */

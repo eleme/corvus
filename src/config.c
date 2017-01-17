@@ -189,14 +189,16 @@ int config_add(char *name, char *value)
         config.metric_interval = atoi(value);
         if (config.metric_interval <= 0) config.metric_interval = 10;
     } else if (strcmp(name, "loglevel") == 0) {
-        if (strcmp(value, "debug") == 0) {
-            config.loglevel = DEBUG;
-        } else if (strcmp(value, "warn") == 0) {
-            config.loglevel = WARN;
-        } else if (strcmp(value, "error") == 0) {
-            config.loglevel = ERROR;
+        if (strcasecmp(value, "debug") == 0) {
+            ATOMIC_SET(config.loglevel, DEBUG);
+        } else if (strcasecmp(value, "warn") == 0) {
+            ATOMIC_SET(config.loglevel, WARN);
+        } else if (strcasecmp(value, "error") == 0) {
+            ATOMIC_SET(config.loglevel, ERROR);
+        } else if (strcasecmp(value, "crit") == 0) {
+            ATOMIC_SET(config.loglevel, CRIT);
         } else {
-            config.loglevel = INFO;
+            ATOMIC_SET(config.loglevel, INFO);
         }
     } else if (strcmp(name, "requirepass") == 0) {
         // Last config overwrites previous ones.
@@ -235,7 +237,7 @@ int config_add(char *name, char *value)
         newnode->refcount = 1;
         config_set_node(newnode);
     } else if (strcmp(name, "slowlog-log-slower-than") == 0) {
-        config.slowlog_log_slower_than = atoi(value);
+        ATOMIC_SET(config.slowlog_log_slower_than, atoi(value));
     } else if (strcmp(name, "slowlog-max-len") == 0) {
         config.slowlog_max_len = atoi(value);
     } else if (strcmp(name, "slowlog-statsd-enabled") == 0) {
@@ -258,7 +260,7 @@ int config_get(const char *name, char *value, size_t max_len)
     } else if (strcmp(name, "thread") == 0) {
         snprintf(value, max_len, "%d", config.thread);
     } else if (strcmp(name, "loglevel") == 0) {
-        strncpy(value, LOG_LEVEL_STR(config.loglevel), max_len);
+        strncpy(value, LOG_LEVEL_STR(ATOMIC_GET(config.loglevel)), max_len);
     } else if (strcmp(name, "syslog") == 0) {
         strncpy(value, BOOL_STR(config.syslog), max_len);
     } else if (strcmp(name, "statsd") == 0) {
@@ -282,7 +284,7 @@ int config_get(const char *name, char *value, size_t max_len)
     } else if (strcmp(name, "bufsize") == 0) {
         snprintf(value, max_len, "%d", config.bufsize);
     } else if (strcmp(name, "slowlog-log-slower-than") == 0) {
-        snprintf(value, max_len, "%d", config.slowlog_log_slower_than);
+        snprintf(value, max_len, "%d", ATOMIC_GET(config.slowlog_log_slower_than));
     } else if (strcmp(name, "slowlog-max-len") == 0) {
         snprintf(value, max_len, "%d", config.slowlog_max_len);
     } else if (strcmp(name, "slowlog-statsd-enabled") == 0) {
@@ -506,4 +508,16 @@ int config_rewrite()
 
     pthread_mutex_unlock(&lock_config_rewrite);
     return CORVUS_OK;
+}
+
+bool config_option_changable(const char *option)
+{
+    const char *CHANGABLE_OPTIONS[] = {"node", "loglevel", "slowlog-log-slower-than"};
+    const size_t OPTIONS_NUM = sizeof(CHANGABLE_OPTIONS) / sizeof(char*);
+    for (size_t i = 0; i != OPTIONS_NUM; i++) {
+        if (strcasecmp(CHANGABLE_OPTIONS[i], option) == 0) {
+            return true;
+        }
+    }
+    return false;
 }

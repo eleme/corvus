@@ -152,12 +152,12 @@ struct slowlog_entry *slowlog_get(struct slowlog_queue *queue, size_t index)
 bool slowlog_cmd_enabled()
 {
     return config.slowlog_max_len > 0
-        && config.slowlog_log_slower_than >= 0;
+        && ATOMIC_GET(config.slowlog_log_slower_than) >= 0;
 }
 
 bool slowlog_statsd_enabled()
 {
-    return config.slowlog_log_slower_than >= 0
+    return ATOMIC_GET(config.slowlog_log_slower_than) >= 0
         && config.slowlog_statsd_enabled
         && config.stats;
 }
@@ -171,9 +171,10 @@ bool slowlog_type_need_log(struct command *cmd)
 
 bool slowlog_need_log(struct command *cmd, long long latency)
 {
-    return config.slowlog_log_slower_than >= 0
+    int slowlog_log_slower_than = ATOMIC_GET(config.slowlog_log_slower_than);
+    return slowlog_log_slower_than >= 0
         && slowlog_type_need_log(cmd)
-        && latency > config.slowlog_log_slower_than * 1000;
+        && latency > slowlog_log_slower_than * 1000;
 }
 
 void slowlog_init_stats()

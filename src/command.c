@@ -472,21 +472,32 @@ int cmd_proxy(struct command *cmd, struct redis_data *data)
     return CORVUS_OK;
 }
 
-int cmd_config_set(struct command *cmd, const char *option, struct pos_array *value_param)
+int cmd_config_set(struct command *cmd, char *option, struct pos_array *value_param)
 {
-    if (strcasecmp(option, "NODE") == 0) {
+    if (!config_option_changable(option)) {
+        cmd_mark_fail(cmd, rep_config_unsupported_err);
+        return CORVUS_OK;
+    }
+
+    char value[value_param->str_len + 1];
+    if (pos_to_str(value_param, value) != CORVUS_OK) {
+        cmd_mark_fail(cmd, rep_config_parse_err);
+        return CORVUS_OK;
+    }
+
+    if (strcmp(option, "node") == 0) {
         // config set node host:port,host1:port1
-        char value[value_param->str_len + 1];
-        if (pos_to_str(value_param, value) != CORVUS_OK) {
-            cmd_mark_fail(cmd, rep_config_parse_err);
-        } else if (config_add("node", value) != CORVUS_OK) {
+        if (config_add("node", value) != CORVUS_OK) {
             cmd_mark_fail(cmd, rep_config_addr_err);
+            return CORVUS_OK;
         } else {
             slot_create_job(SLOT_UPDATE);
         }
     } else {
-        cmd_mark_fail(cmd, rep_config_unsupported_err);
-        return CORVUS_ERR;
+        if (config_add(option, value) != CORVUS_OK) {
+            cmd_mark_fail(cmd, rep_config_parse_err);
+            return CORVUS_OK;
+        }
     }
     conn_add_data(cmd->client, (uint8_t*) rep_ok, strlen(rep_ok),
             &cmd->rep_buf[0], &cmd->rep_buf[1]);
@@ -539,6 +550,10 @@ int cmd_config(struct command *cmd, struct redis_data *data)
         LOG(ERROR, "cmd_config: parse error");
         return CORVUS_ERR;
     }
+    for (char *p = option; *p; p++) {
+        *p = tolower(*p);
+    }
+
     if (strcasecmp(type, "SET") == 0) {
         //config set <item> <val>
         ASSERT_ELEMENTS(data->elements == 4, data);
