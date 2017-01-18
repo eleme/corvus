@@ -1,6 +1,6 @@
 #include <assert.h>
 #include <string.h>
-#include "vector.h"
+#include "array.h"
 #include "alloc.h"
 
 struct vector vector_new()
@@ -13,7 +13,7 @@ struct vector vector_new()
     return v;
 }
 
-void *vector_get(struct vector *v, size_t index)
+void *vector_at(struct vector *v, size_t index)
 {
     assert(index < v->size);
     return v->data[index];
@@ -22,7 +22,7 @@ void *vector_get(struct vector *v, size_t index)
 void vector_push_back(struct vector *v, void *element)
 {
     if (v->size == v->capacity) {
-        v->data = cv_realloc(v->data, v->capacity * 2);
+        v->data = cv_realloc(v->data, v->capacity * 2 * sizeof(void*));
         v->capacity *= 2;
     }
     v->data[v->size++] = element;
@@ -49,8 +49,8 @@ struct cvstr cvstr_new(size_t capacity)
     size_t cap = CVSTR_BASIC_SIZE;
     while (cap < capacity) cap *= 2;
     struct cvstr s = {
-        .data = cv_malloc(capacity),
-        .capacity = capacity,
+        .data = cv_malloc(cap),
+        .capacity = cap,
     };
     return s;
 }

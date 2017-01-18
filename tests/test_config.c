@@ -94,6 +94,7 @@ TEST(test_config_change) {
     struct corvus_config tmp = config;
     tmp.node->refcount++;
     char buf[1024];
+    config.requirepass = NULL;  // will be reset
 
 #define ASSERT_CONFIG(option, value) do { \
     ASSERT(config_add(option, value) == CORVUS_OK); \
@@ -109,7 +110,7 @@ TEST(test_config_change) {
     ASSERT_CONFIG("syslog", "true");
     ASSERT_CONFIG("statsd", "www.somewhere.com");
     ASSERT_CONFIG("metric_interval", "10");
-    // ignore the password
+    ASSERT_CONFIG("requirepass", "1234567890");
     ASSERT_CONFIG("client_timeout", "233");
     ASSERT_CONFIG("server_timeout", "666");
     ASSERT_CONFIG("bufsize", "23333");
@@ -121,6 +122,7 @@ TEST(test_config_change) {
     ASSERT_CONFIG("read-strategy", "read-slave-only");
     ASSERT_CONFIG("read-strategy", "both");
 
+    cv_free(config.requirepass);
     config_set_node(tmp.node);  // free the `node` we just setted
     config = tmp;
     PASS(NULL);

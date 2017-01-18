@@ -5,7 +5,6 @@
 
 #define CLUSTER_NAME_SIZE 127
 #define CONFIG_FILE_PATH_SIZE 256
-#define DEFAULT_TMP_CONFIG = "/tmp/tmp_corvus.config"
 
 struct node_conf {
     struct address *addr;
@@ -40,6 +39,7 @@ void config_free();
 int config_read(const char *filename);
 int config_add(char *name, char *value);
 int config_get(const char *name, char *value, size_t max_len);
+int config_rewrite();
 
 struct node_conf *config_get_node();
 void config_set_node(struct node_conf *node);

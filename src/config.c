@@ -6,15 +6,15 @@
 #include <stdlib.h>
 #include <libgen.h>
 #include <inttypes.h>
+#include <linux/limits.h>
 #include "corvus.h"
 #include "alloc.h"
 #include "logging.h"
 #include "socket.h"
-#include "vector.h"
+#include "array.h"
 
 #define DEFAULT_BUFSIZE 16384
 #define MIN_BUFSIZE 64
-#define MAX_PATH_LEN CONFIG_FILE_PATH_SIZE
 #define TMP_CONFIG_FILE "tmp-corvus.conf"
 
 static pthread_mutex_t lock_conf_node = PTHREAD_MUTEX_INITIALIZER;
@@ -26,11 +26,10 @@ const char * CONFIG_OPTIONS[] = {
     "thread",
     "loglevel",
     "syslog",
-    "statsd_addr",
+    "statsd",
     "metric_interval",
     "stats",
-    "readslave",
-    "readmasterslave",
+    "read-strategy",
     "requirepass",
     "client_timeout",
     "server_timeout",
@@ -57,7 +56,7 @@ void config_init()
     config.bufsize = DEFAULT_BUFSIZE;
     config.requirepass = NULL;
     config.readslave = config.readmasterslave = false;
-    config.slowlog_max_len = -1;
+    config.slowlog_max_len = 1024;
     config.slowlog_log_slower_than = -1;
     config.slowlog_statsd_enabled = 0;
 
@@ -197,8 +196,10 @@ int config_add(char *name, char *value)
             ATOMIC_SET(config.loglevel, ERROR);
         } else if (strcasecmp(value, "crit") == 0) {
             ATOMIC_SET(config.loglevel, CRIT);
-        } else {
+        } else if (strcasecmp(value, "info") == 0) {
             ATOMIC_SET(config.loglevel, INFO);
+        } else {
+            return CORVUS_ERR;
         }
     } else if (strcmp(name, "requirepass") == 0) {
         // Last config overwrites previous ones.
@@ -215,8 +216,8 @@ int config_add(char *name, char *value)
         char buf[strlen(value) + 1];
         strcpy(buf, value);
 
-    	struct address *addr = NULL;
-    	int addr_cnt = 0;
+        struct address *addr = NULL;
+        int addr_cnt = 0;
         char *p = strtok(buf, ",");
         while (p) {
             addr = cv_realloc(addr, sizeof(struct address) * (addr_cnt + 1));
@@ -277,6 +278,12 @@ int config_get(const char *name, char *value, size_t max_len)
         } else {
             strncpy(value, "master", max_len);
         }
+    } else if (strcmp(name, "requirepass") == 0) {
+        if (config.requirepass) {
+            strncpy(value, config.requirepass, max_len);
+        } else {
+            strncpy(value, "", max_len);
+        }
     } else if (strcmp(name, "client_timeout") == 0) {
         snprintf(value, max_len, "%" PRId64, config.client_timeout);
     } else if (strcmp(name, "server_timeout") == 0) {
@@ -330,6 +337,48 @@ bool parse_option(const char *line, char *name, char *value)
     return true;
 }
 
+// Caller should free the returned string
+char *get_abs_dir(const char *path)
+{
+    // `realpath` requires path exist, we should convert it to directory first.
+    // `dirname` may modify the input parameter so we should copy it first.
+    char *dir_buf = cv_strndup(path, strlen(path));
+    const char *dir = dirname(dir_buf);
+
+    // Here's the flaw of realpath - it doesn't provide a max_size argument.
+    // The realpath will just assume the buffer is PATH_MAX long
+    // and tell it to getcwd.
+    // And the much more troubling stuff is the getcwd call in realpath will write
+    // a '\0' at the end of the whole buffer first, which will cause corruption
+    // if the buffer is not allocated properly.
+    // So we MUST make it big enough.
+    char *buf = cv_malloc(PATH_MAX);
+    if (realpath(dir, buf) == NULL) {
+        LOG(ERROR, "Fail to generate realpath: %s", strerror(errno));
+        cv_free(dir_buf);
+        cv_free(buf);
+        return NULL;
+    }
+    cv_free(dir_buf);
+    // returned path does not contain trailing '/'
+    return buf;
+}
+
+int config_set_file_path(const char *path)
+{
+    char *dirname = get_abs_dir(path);
+    if (dirname == NULL) {
+        return CORVUS_ERR;
+    }
+    char buf[CONFIG_FILE_PATH_SIZE + 1];
+    strncpy(buf, path, CONFIG_FILE_PATH_SIZE);
+    char *filename = basename(buf);
+    snprintf(config.config_file_path, CONFIG_FILE_PATH_SIZE, "%s/%s",
+        dirname, filename);
+    cv_free(dirname);
+    return CORVUS_OK;
+}
+
 int config_read(const char *filename)
 {
     if (strlen(filename) > CONFIG_FILE_PATH_SIZE) {
@@ -337,10 +386,15 @@ int config_read(const char *filename)
             CONFIG_FILE_PATH_SIZE);
         return CORVUS_ERR;
     }
-    strcpy(config.config_file_path, filename);
+
+    if (config_set_file_path(filename) == CORVUS_ERR) {
+        return CORVUS_ERR;
+    }
 
     FILE *fp = fopen(filename, "r");
     if (fp == NULL) {
+        // Maybe config.syslog hasn't been initialized yet
+        // so should not use LOG() here
         fprintf(stderr, "config file: %s\n", strerror(errno));
         return -1;
     }
@@ -373,31 +427,18 @@ struct vector get_curr_file_content()
     FILE *fp = fopen(config.config_file_path, "r");
     if (fp == NULL) {
         LOG(ERROR, "Can't open config file: %s\n", strerror(errno));
-        fclose(fp);
         return lines;
     }
 
-    struct cvstr line = cvstr_new(1024);
+    struct cvstr line = cvstr_new(128);
     size_t len;
     while ((len = read_line(&line, fp)) != -1) {
         vector_push_back(&lines, cvstr_move(&line));
+        line = cvstr_new(128);
     }
     cvstr_free(&line);
     fclose(fp);
     return lines;
-}
-
-// Caller should free the returned string
-char *get_abs_dir(const char *path)
-{
-    char buf[MAX_PATH_LEN];
-    if (realpath(path, buf) == NULL) {
-        LOG(ERROR, "Fail to generate realpath: %s", strerror(errno));
-        return NULL;
-    }
-    char *p = cv_strndup(buf, strlen(buf));
-    // returned path does not contain trailing '/'
-    return dirname(p);
 }
 
 int gen_tmp_conf(const char *tmpfile)
@@ -415,10 +456,11 @@ int gen_tmp_conf(const char *tmpfile)
 
     const size_t OPTIONS_NUM = sizeof(CONFIG_OPTIONS) / sizeof(char*);
     void *WRITTEN_TAG = (void*)1;
-    struct dict written_tags;
+    struct dict written_tags, options_map;
     dict_init(&written_tags);
+    dict_init(&options_map);
     for (size_t i = 0; i != OPTIONS_NUM; i++) {
-        dict_set(&written_tags, CONFIG_OPTIONS[i], NULL);
+        dict_set(&options_map, CONFIG_OPTIONS[i], (void*)CONFIG_OPTIONS[i]);
     }
     // Since we use goto to handle error,
     // we can't use the variable length array at the same time
@@ -427,13 +469,13 @@ int gen_tmp_conf(const char *tmpfile)
     struct cvstr value = cvstr_new(1024);
 
     for (size_t i = 0; i != lines.size; i++) {
-        const char *line = vector_get(&lines, i);
+        const char *line = vector_at(&lines, i);
         const size_t len = strlen(line);
         cvstr_reserve(&name, len + 1);
         cvstr_reserve(&value, len + 1);
         cvstr_reserve(&buf, 2 * len + 2);  // "name value\n"
         if (!parse_option(line, name.data, value.data)
-                || config_get(name.data, value.data, len) == CORVUS_ERR) {
+                || config_get(name.data, value.data, value.capacity) == CORVUS_ERR) {
             // Just keep other lines
             if (EOF == fputs(line, fp)) {
                 goto end;
@@ -444,7 +486,10 @@ int gen_tmp_conf(const char *tmpfile)
         if (EOF == fputs(buf.data, fp)) {
             goto end;
         }
-        dict_set(&written_tags, name.data, WRITTEN_TAG);
+        // Note that dict_set will save the key in its inner space
+        // and name.data will be changed to other string in next loop.
+        const char *key = dict_get(&options_map, name.data);
+        dict_set(&written_tags, key, WRITTEN_TAG);
     }
 
     // Append the options that did not exist in the config file
@@ -455,6 +500,10 @@ int gen_tmp_conf(const char *tmpfile)
                 assert(res == CORVUS_OK);
                 if (!cvstr_full(&value)) break;
                 cvstr_reserve(&value, value.capacity * 2);
+            }
+            if (strlen(value.data) == 0) {
+                LOG(WARN, "Ignored empty option `%s` when rewriting config file", CONFIG_OPTIONS[i]);
+                continue;
             }
             cvstr_reserve(&buf, strlen(CONFIG_OPTIONS[i]) + strlen(value.data) + 2);
             sprintf(buf.data, "%s %s\n", CONFIG_OPTIONS[i], value.data);
@@ -473,8 +522,9 @@ end:
     cvstr_free(&buf);
     cvstr_free(&name);
     cvstr_free(&value);
+    dict_free(&options_map);
     dict_free(&written_tags);
-    vector_free(&lines);
+    vector_free_all(&lines);
     fclose(fp);
     return result;
 }
@@ -485,15 +535,15 @@ int config_rewrite()
         return CORVUS_AGAIN;
     }
 
-    char tmpfile[CONFIG_FILE_PATH_SIZE];
-    char *basename = get_abs_dir(config.config_file_path);
-    if (basename == NULL) {
+    char tmpfile[CONFIG_FILE_PATH_SIZE + 1];
+    char *dirname = get_abs_dir(config.config_file_path);
+    if (dirname == NULL) {
         pthread_mutex_unlock(&lock_config_rewrite);
         return CORVUS_ERR;
     }
     snprintf(tmpfile, CONFIG_FILE_PATH_SIZE, "%s/%s",
-        basename, TMP_CONFIG_FILE);
-    cv_free(basename);
+        dirname, TMP_CONFIG_FILE);
+    cv_free(dirname);
 
     if (CORVUS_ERR == gen_tmp_conf(tmpfile)) {
         pthread_mutex_unlock(&lock_config_rewrite);
@@ -507,6 +557,8 @@ int config_rewrite()
     }
 
     pthread_mutex_unlock(&lock_config_rewrite);
+    LOG(INFO, "Rewrite config file successfully in %s",
+        config.config_file_path);
     return CORVUS_OK;
 }
 
