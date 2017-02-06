@@ -39,6 +39,8 @@ void slowlog_free(struct slowlog_queue *slowlog);
 
 // only called by the thread who creates the log
 struct slowlog_entry *slowlog_create_entry(struct command *cmd, int64_t remote_latency, int64_t total_latency);
+// create entry for the slowlest sub cmd, its total_latency should be the same as parent cmd
+struct slowlog_entry *slowlog_create_sub_entry(struct command *cmd, int64_t total_latency);
 // called by all worker threads
 void slowlog_set(struct slowlog_queue *queue, struct slowlog_entry *entry);
 void slowlog_dec_ref(struct slowlog_entry *entry);

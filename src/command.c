@@ -287,6 +287,9 @@ int cmd_forward_multikey(struct command *cmd, struct redis_data *data, const cha
         memcpy(&ncmd->req_buf[0], &key->buf[0], sizeof(key->buf[0]));
         memcpy(&ncmd->req_buf[1], &key->buf[1], sizeof(key->buf[1]));
         ncmd->prefix = (char*)prefix;
+        ncmd->data.type = REP_ARRAY;
+        ncmd->data.elements = 1;
+        ncmd->data.element = key;
 
         if (cmd_forward_basic(ncmd) == CORVUS_ERR) {
             cmd_mark_fail(ncmd, rep_forward_err);
@@ -328,6 +331,9 @@ int cmd_forward_mset(struct command *cmd, struct redis_data *data)
         memcpy(&ncmd->req_buf[0], &key->buf[0], sizeof(key->buf[0]));
         memcpy(&ncmd->req_buf[1], &value->buf[1], sizeof(value->buf[1]));
         ncmd->prefix = (char*)rep_set;
+        ncmd->data.type = REP_ARRAY;
+        ncmd->data.elements = 2;
+        ncmd->data.element = &data->element[i];
 
         if (cmd_forward_basic(ncmd) == CORVUS_ERR) {
             cmd_mark_fail(ncmd, rep_forward_err);
@@ -1271,6 +1277,10 @@ void cmd_stats(struct command *cmd, int64_t end_time)
             struct slowlog_entry *entry = slowlog_create_entry(cmd,
                 remote_latency / 1000, total_latency / 1000);
             slowlog_set(&cmd->ctx->slowlog, entry);
+            entry = slowlog_create_sub_entry(cmd, total_latency / 1000);
+            if (entry) {
+                slowlog_set(&cmd->ctx->slowlog, entry);
+            }
         }
     }
 
@@ -1357,7 +1367,10 @@ void cmd_free(struct command *cmd)
     struct command *c;
     struct context *ctx = cmd->ctx;
 
-    if (cmd->data.type != REP_UNKNOWN) {
+    // When cmd->prefix is not NULL it's a sub command,
+    // cmd->data of sub command is a weak reference
+    // and should never be deallocated.
+    if (cmd->data.type != REP_UNKNOWN && cmd->prefix == NULL) {
         redis_data_free(&cmd->data);
         cmd->data.type = REP_UNKNOWN;
     }

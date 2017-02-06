@@ -96,9 +96,13 @@ Commands
 * `DEL`: split to multiple single key `DEL`.
 * `EXISTS`: split to multiple single key `EXISTS`.
 * `PING`: ignored and won't be forwarded.
-* `INFO`, `TIME`, `SLOWLOG`: won't be forwarded to backend redis, information collected in proxy
-   will be returned. Note that in the slowlog entry there's an additional
-   `remote latency` field before the `total latency` field.
+* `INFO`, `TIME`: won't be forwarded to backend redis, information collected in proxy
+   will be returned.
+* `SLOWLOG`: return the slowlogs saved by corvus itself. Note that unlike redis,
+   in the slowlog entry there's an additional `remote latency` field before
+   the `total latency` field. The slowlog will also log the slowest
+   sub command for multiple-key commands: `MGET`, `MSET`, `DEL`, `EXISTS`.
+   The total latency of sub cmd entry will just be the same as its parent cmd.
 * `AUTH`: do authentication in proxy.
 * `CONFIG`: support `get`, `set`, and `rewrite` sub-command to retrieve and manipulate corvus config.
 
