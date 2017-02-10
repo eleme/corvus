@@ -183,6 +183,8 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             "remote_latency:%.6f\r\n"
             "total_latency:%.6f\r\n"
             "last_command_latency:%s\r\n"
+            "ask_recv:%lld\r\n"
+            "moved_recv:%lld\r\n"
             "remotes:%s\r\n",
             config.cluster, VERSION, getpid(), config.thread,
             CV_MALLOC_LIB,
@@ -193,6 +195,8 @@ static int cmd_format_stats(char *dest, size_t n, struct stats *stats, char *lat
             stats->basic.recv_bytes, stats->basic.send_bytes,
             stats->basic.remote_latency / 1000000.0,
             stats->basic.total_latency / 1000000.0, latency,
+            stats->basic.ask_recv,
+            stats->basic.moved_recv,
             stats->remote_nodes);
 }
 
