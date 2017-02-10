@@ -144,6 +144,26 @@ TEST(test_parse_option) {
     PASS(NULL);
 }
 
+int parse_int(char *s, int *result);
+
+TEST(test_parse_int) {
+    int value;
+    ASSERT(parse_int("233", &value) == CORVUS_OK);
+    ASSERT(value == 233);
+    ASSERT(parse_int("-233", &value) == CORVUS_OK);
+    ASSERT(value == -233);
+    ASSERT(parse_int("+233", &value) == CORVUS_OK);
+    ASSERT(value == 233);
+
+    ASSERT(parse_int(" 233", &value) == CORVUS_ERR);
+    ASSERT(parse_int("233 ", &value) == CORVUS_ERR);
+    ASSERT(parse_int("+ 233", &value) == CORVUS_ERR);
+    ASSERT(parse_int("23a3", &value) == CORVUS_ERR);
+    ASSERT(parse_int("23-3", &value) == CORVUS_ERR);
+    ASSERT(parse_int("23333333333333", &value) == CORVUS_ERR);
+    PASS(NULL);
+}
+
 TEST_CASE(test_config) {
     RUN_TEST(test_config_bind);
     RUN_TEST(test_config_syslog);
@@ -152,4 +172,5 @@ TEST_CASE(test_config) {
     RUN_TEST(test_config_node_to_str);
     RUN_TEST(test_config_change);
     RUN_TEST(test_parse_option);
+    RUN_TEST(test_parse_int);
 }

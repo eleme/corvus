@@ -133,9 +133,41 @@ void config_node_to_str(char *str, size_t max_len)
     config_node_dec_ref(nodes);
 }
 
+int parse_int(char *s, int *result)
+{
+    const int max = 100000000;
+    int res = 0, sign = 1;
+    if (*s == '-') {
+        sign = -1;
+        s++;
+    } else if (*s == '+') {
+        s++;
+    }
+    for (; *s; s++) {
+        int digit = *s - '0';
+        if (digit < 0 || digit > 9) {
+            LOG(WARN, "parse_int: invalid digit char '%c'", *s);
+            return CORVUS_ERR;
+        }
+        res = 10 * res + digit;
+        if (res > max) {
+            LOG(WARN, "parse_int: result too large");
+            return CORVUS_ERR;
+        }
+    }
+    *result = sign * res;
+    return CORVUS_OK;
+}
+
 int config_add(char *name, char *value)
 {
     int val;
+#define TRY_PARSE_INT() do {                    \
+    if (CORVUS_ERR == parse_int(value, &val)) { \
+        return CORVUS_ERR;                      \
+    }                                           \
+} while(0)                                      \
+
     if (strcmp(name, "cluster") == 0) {
         if (strlen(value) <= 0) return CORVUS_OK;
         strncpy(config.cluster, value, CLUSTER_NAME_SIZE);
@@ -164,10 +196,10 @@ int config_add(char *name, char *value)
             config.readmasterslave = config.readslave = false;
         }
     } else if (strcmp(name, "thread") == 0) {
-        config.thread = atoi(value);
+        return parse_int(value, &config.thread);
         if (config.thread <= 0) config.thread = 4;
     } else if (strcmp(name, "bufsize") == 0) {
-        val = atoi(value);
+        TRY_PARSE_INT();
         if (val <= 0) {
             config.bufsize = DEFAULT_BUFSIZE;
         } else if (val < MIN_BUFSIZE) {
@@ -176,17 +208,17 @@ int config_add(char *name, char *value)
             config.bufsize = val;
         }
     } else if (strcmp(name, "client_timeout") == 0) {
-        val = atoi(value);
+        TRY_PARSE_INT();
         config.client_timeout = val < 0 ? 0 : val;
     } else if (strcmp(name, "server_timeout") == 0) {
-        val = atoi(value);
+        TRY_PARSE_INT();
         config.server_timeout = val < 0 ? 0 : val;
     } else if (strcmp(name, "statsd") == 0) {
         strncpy(config.statsd_addr, value, ADDRESS_LEN);
         config.stats = true;
     } else if (strcmp(name, "metric_interval") == 0) {
-        config.metric_interval = atoi(value);
-        if (config.metric_interval <= 0) config.metric_interval = 10;
+        TRY_PARSE_INT();
+        config.metric_interval = val > 0 ? val : 10;
     } else if (strcmp(name, "loglevel") == 0) {
         if (strcasecmp(value, "debug") == 0) {
             ATOMIC_SET(config.loglevel, DEBUG);
@@ -238,9 +270,11 @@ int config_add(char *name, char *value)
         newnode->refcount = 1;
         config_set_node(newnode);
     } else if (strcmp(name, "slowlog-log-slower-than") == 0) {
-        ATOMIC_SET(config.slowlog_log_slower_than, atoi(value));
+        TRY_PARSE_INT();
+        ATOMIC_SET(config.slowlog_log_slower_than, val);
     } else if (strcmp(name, "slowlog-max-len") == 0) {
-        config.slowlog_max_len = atoi(value);
+        TRY_PARSE_INT();
+        config.slowlog_max_len = val;
     } else if (strcmp(name, "slowlog-statsd-enabled") == 0) {
         config_boolean(&config.slowlog_statsd_enabled, value);
     }
