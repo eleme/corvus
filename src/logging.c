@@ -18,7 +18,7 @@ void logger(const char *file, int line, int level, const char *fmt, ...)
     char timestamp[64];
     struct timeval now;
 
-    if (level < config.loglevel) return;
+    if (level < ATOMIC_GET(config.loglevel)) return;
 
     pid_t thread_id = (pid_t)syscall(SYS_gettid);
     pid_t process_id = getpid();

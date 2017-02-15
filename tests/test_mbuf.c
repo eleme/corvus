@@ -2,7 +2,7 @@
 #include "alloc.h"
 
 void init_mbuf_for_test(struct mbuf *b, size_t len) {
-    uint8_t *p = cv_malloc(len);
+    uint8_t *p = cv_calloc(len, 1);
     b->start = p;
     b->end = p + len;
     b->pos = p;
