@@ -33,6 +33,21 @@ static struct {
     struct address nodes[MAX_NODE_LIST];
     int len;
 } node_list = {.lock = PTHREAD_RWLOCK_INITIALIZER};
+/*
+There are some certain places where write operation
+of node_list.len is not protected by lock.
+This is ok and its reason is quite subtle:
+(1) we assume that assignment for `int` is atomic,
+    which rely on the alignment of node_list and
+    that only one instruction is generated for the
+    assignment statement.
+(2) `len` is not protected but node_list.nodes is.
+(3) its write operations are all in the thread managing slots
+    and all of them are resetting node_list.len to zero.
+(4) its read operation from other threads is only in node_list_get,
+    inside which `<` operation is used instead of `!=`
+    to determine the loop exit.
+*/
 
 static inline void node_list_init()
 {
@@ -280,7 +295,7 @@ int do_update_slot_map(struct connection *server)
     return count;
 }
 
-void slot_map_update(struct context *ctx)
+void slot_map_update(struct context *ctx, bool reload)
 {
     int i, count = 0;
     struct address node;
@@ -292,9 +307,17 @@ void slot_map_update(struct context *ctx)
         node_list_init();
     }
 
+    int len;
     struct address nodes[MAX_NODE_LIST];
-    memcpy(nodes, node_list.nodes, sizeof(node_list.nodes));
-    int len = node_list.len;
+    if (reload) {
+        struct node_conf *node = config_get_node();
+        len = node->len;
+        memcpy(nodes, node->addr, len * sizeof(struct address));
+        config_node_dec_ref(node);
+    } else {
+        memcpy(nodes, node_list.nodes, sizeof(node_list.nodes));
+        len = node_list.len;
+    }
 
     for (i = len; i > 0; i--) {
         int r = rand_r(&ctx->seed) % i;
@@ -335,7 +358,10 @@ void do_job(struct context *ctx, int job)
 {
     switch (job) {
         case SLOT_UPDATE:
-            slot_map_update(ctx);
+            slot_map_update(ctx, false);
+            break;
+        case SLOT_RELOAD:
+            slot_map_update(ctx, true);
             break;
         case SLOT_UPDATER_QUIT:
             ctx->state = CTX_QUIT;
