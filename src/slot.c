@@ -47,13 +47,12 @@ static inline void node_list_init()
     config_node_dec_ref(node);
 }
 
-static inline void node_list_add(struct node_info *node)
+static inline void node_list_replace(struct address *nodes, size_t len)
 {
     pthread_rwlock_wrlock(&node_list.lock);
-    for (size_t i = 0; i < node->index && node_list.len < MAX_NODE_LIST; i++) {
-        memcpy(&node_list.nodes[node_list.len++], &node->nodes[i],
-                sizeof(struct address));
-    }
+    node_list.len = len;
+    // memcpy works for zero len
+    memcpy(node_list.nodes, nodes, sizeof(struct address) * len);
     pthread_rwlock_unlock(&node_list.lock);
 }
 
@@ -111,6 +110,8 @@ int parse_slots()
     char *p;
     int start, stop, slot_count = 0;
     struct node_info *node;
+    struct address tmp_nodes[MAX_NODE_LIST];
+    size_t tmp_nodes_len = 0;
 
     struct dict_iter iter = DICT_ITER_INITIALIZER;
     DICT_FOREACH(&slot_map.node_map, &iter) {
@@ -122,7 +123,11 @@ int parse_slots()
             continue;
         }
 
-        node_list_add(n);
+        size_t num = MIN(n->index, MAX_NODE_LIST - tmp_nodes_len);
+        if (num > 0) {
+            memcpy(tmp_nodes + tmp_nodes_len, n->nodes, num * sizeof(struct address));
+            tmp_nodes_len += num;
+        }
 
         for (int i = 8; i < n->spec_length + 8; i++) {
             if (n->slot_spec[i].data[0] == '[') {
@@ -157,6 +162,8 @@ int parse_slots()
     pthread_rwlock_wrlock(&slot_map.lock);
     node_map_free(&slot_map.free_nodes);
     pthread_rwlock_unlock(&slot_map.lock);
+
+    node_list_replace(tmp_nodes, tmp_nodes_len);
 
     dict_clear(&slot_map.free_nodes);
     return slot_count;
@@ -288,7 +295,6 @@ void slot_map_update(struct context *ctx)
     struct address nodes[MAX_NODE_LIST];
     memcpy(nodes, node_list.nodes, sizeof(node_list.nodes));
     int len = node_list.len;
-    node_list.len = 0;
 
     for (i = len; i > 0; i--) {
         int r = rand_r(&ctx->seed) % i;
@@ -318,6 +324,7 @@ void slot_map_update(struct context *ctx)
     conn_recycle(ctx, server);
 
     if (count == CORVUS_ERR) {
+        node_list.len = 0;  // clear it if we can't update slot map
         LOG(WARN, "can not update slot map");
     } else {
         LOG(INFO, "slot map updated: corverd %d slots", count);
