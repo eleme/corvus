@@ -501,7 +501,7 @@ int cmd_config_set(struct command *cmd, char *option, struct pos_array *value_pa
             cmd_mark_fail(cmd, rep_config_parse_err);
             return CORVUS_OK;
         } else {
-            slot_create_job(SLOT_UPDATE);
+            slot_create_job(SLOT_RELOAD);
         }
     } else {
         if (config_add(option, value) != CORVUS_OK) {
