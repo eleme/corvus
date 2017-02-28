@@ -287,6 +287,9 @@ int cmd_forward_multikey(struct command *cmd, struct redis_data *data, const cha
         memcpy(&ncmd->req_buf[0], &key->buf[0], sizeof(key->buf[0]));
         memcpy(&ncmd->req_buf[1], &key->buf[1], sizeof(key->buf[1]));
         ncmd->prefix = (char*)prefix;
+        ncmd->data.type = REP_ARRAY;
+        ncmd->data.elements = 1;
+        ncmd->data.element = key;
 
         if (cmd_forward_basic(ncmd) == CORVUS_ERR) {
             cmd_mark_fail(ncmd, rep_forward_err);
@@ -328,6 +331,9 @@ int cmd_forward_mset(struct command *cmd, struct redis_data *data)
         memcpy(&ncmd->req_buf[0], &key->buf[0], sizeof(key->buf[0]));
         memcpy(&ncmd->req_buf[1], &value->buf[1], sizeof(value->buf[1]));
         ncmd->prefix = (char*)rep_set;
+        ncmd->data.type = REP_ARRAY;
+        ncmd->data.elements = 2;
+        ncmd->data.element = &data->element[i];
 
         if (cmd_forward_basic(ncmd) == CORVUS_ERR) {
             cmd_mark_fail(ncmd, rep_forward_err);
@@ -728,12 +734,13 @@ int cmd_slowlog_get(struct command *cmd, struct redis_data *data)
 
     // generate redis packet
     const char *hdr_fmt =
-        "*4\r\n"
+        "*5\r\n"
         ":%lld\r\n"  // id
         ":%lld\r\n"  // log time
-        ":%lld\r\n"  // latency
+        ":%lld\r\n"  // remote latency
+        ":%lld\r\n"  // total latency
         "*%d\r\n";  // cmd arg len
-    char buf[150];
+    char buf[200];
 
     int size = snprintf(buf, sizeof buf, "*%d\r\n", count);
     conn_add_data(cmd->client, (uint8_t*)buf, size,
@@ -743,7 +750,7 @@ int cmd_slowlog_get(struct command *cmd, struct redis_data *data)
         struct slowlog_entry *entry = entries[i];
         assert(entry->argc > 0);
         size = snprintf(buf, sizeof buf, hdr_fmt,
-                entry->id, entry->log_time, entry->latency, entry->argc);
+                entry->id, entry->log_time, entry->remote_latency, entry->total_latency, entry->argc);
         assert(size < 150);
         conn_add_data(cmd->client, (uint8_t*)buf, size, NULL, NULL);
 
@@ -1251,28 +1258,33 @@ void cmd_mark_fail(struct command *cmd, const char *reason)
 void cmd_stats(struct command *cmd, int64_t end_time)
 {
     struct context *ctx = cmd->ctx;
-    long long latency;
+    long long remote_latency, total_latency;
 
     ATOMIC_INC(ctx->stats.completed_commands, 1);
 
-    latency = end_time - cmd->parse_time;
+    total_latency = end_time - cmd->parse_time;
 
-    ATOMIC_INC(ctx->stats.total_latency, latency);
-    ATOMIC_SET(ctx->last_command_latency, latency);
+    ATOMIC_INC(ctx->stats.total_latency, total_latency);
+    ATOMIC_SET(ctx->last_command_latency, total_latency);
 
-    latency = cmd->rep_time[1] - cmd->rep_time[0];
+    remote_latency = cmd->rep_time[1] - cmd->rep_time[0];
 
-    if (slowlog_need_log(cmd, latency)) {
+    if (slowlog_need_log(cmd, total_latency)) {
         if (slowlog_statsd_enabled()) {
             slowlog_add_count(cmd);
         }
         if (slowlog_cmd_enabled()) {
-            struct slowlog_entry *entry = slowlog_create_entry(cmd, latency / 1000);
+            struct slowlog_entry *entry = slowlog_create_entry(cmd,
+                remote_latency / 1000, total_latency / 1000);
             slowlog_set(&cmd->ctx->slowlog, entry);
+            entry = slowlog_create_sub_entry(cmd, total_latency / 1000);
+            if (entry) {
+                slowlog_set(&cmd->ctx->slowlog, entry);
+            }
         }
     }
 
-    ATOMIC_INC(ctx->stats.remote_latency, latency);
+    ATOMIC_INC(ctx->stats.remote_latency, remote_latency);
 }
 
 void cmd_set_stale(struct command *cmd)
@@ -1355,7 +1367,10 @@ void cmd_free(struct command *cmd)
     struct command *c;
     struct context *ctx = cmd->ctx;
 
-    if (cmd->data.type != REP_UNKNOWN) {
+    // When cmd->prefix is not NULL it's a sub command,
+    // cmd->data of sub command is a weak reference
+    // and should never be deallocated.
+    if (cmd->data.type != REP_UNKNOWN && cmd->prefix == NULL) {
         redis_data_free(&cmd->data);
         cmd->data.type = REP_UNKNOWN;
     }
