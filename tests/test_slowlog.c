@@ -23,8 +23,9 @@ TEST(test_slowlog_create_entry) {
     cmd.data = r.data;
     cmd.prefix = NULL;
 
-    struct slowlog_entry *entry = slowlog_create_entry(&cmd, 233666);
-    ASSERT(entry->latency == 233666);
+    struct slowlog_entry *entry = slowlog_create_entry(&cmd, 233666, 666233);
+    ASSERT(entry->remote_latency == 233666);
+    ASSERT(entry->total_latency == 666233);
     ASSERT(entry->refcount == 1);
     ASSERT(entry->argc == 3);
     ASSERT(entry->argv[0].len == args_len[0]);
@@ -80,8 +81,9 @@ TEST(test_slowlog_create_entry_with_prefix) {
     cmd.data.type = REP_ARRAY;
     cmd.prefix = (char*)rep_set;
 
-    struct slowlog_entry *entry = slowlog_create_entry(&cmd, 9394);
-    ASSERT(entry->latency == 9394);
+    struct slowlog_entry *entry = slowlog_create_entry(&cmd, 9394, 9493);
+    ASSERT(entry->remote_latency == 9394);
+    ASSERT(entry->total_latency == 9493);
     ASSERT(entry->refcount == 1);
     ASSERT(entry->argc == 3);
     ASSERT(entry->argv[0].len == args_len[0]);
@@ -130,7 +132,7 @@ TEST(test_slowlog_create_entry_with_long_arg) {
     cmd.data = r.data;
     cmd.prefix = NULL;
 
-    struct slowlog_entry *entry = slowlog_create_entry(&cmd, 233666);
+    struct slowlog_entry *entry = slowlog_create_entry(&cmd, 233666, 666233);
     ASSERT(SLOWLOG_ENTRY_MAX_STRING == strlen(long_value));
     ASSERT(entry->argv[1].len == strlen(long_value));
     ASSERT(strncmp(long_value, entry->argv[1].str, strlen(long_value)) == 0);

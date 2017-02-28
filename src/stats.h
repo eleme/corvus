@@ -28,6 +28,9 @@ struct basic_stats {
 
     long long remote_latency;
     long long total_latency;
+
+    long long ask_recv;
+    long long moved_recv;
 };
 
 struct stats {

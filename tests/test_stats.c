@@ -11,6 +11,8 @@ void set_stats(struct context *ctx)
     ctx->stats.recv_bytes = 16;
     ctx->stats.send_bytes = 32;
     ctx->stats.connected_clients = 5;
+    ctx->stats.ask_recv = 233;
+    ctx->stats.moved_recv = 600;
 }
 
 TEST(test_stats_get_simple_reset) {
@@ -29,12 +31,16 @@ TEST(test_stats_get_simple_reset) {
     ASSERT(stats.basic.recv_bytes == 16);
     ASSERT(stats.basic.send_bytes == 32);
     ASSERT(stats.basic.connected_clients == 5);
+    ASSERT(stats.basic.ask_recv == 233);
+    ASSERT(stats.basic.moved_recv == 600);
 
     ASSERT(ctxs[0].stats.completed_commands == 0);
     ASSERT(ctxs[0].stats.remote_latency == 0);
     ASSERT(ctxs[0].stats.total_latency == 0);
     ASSERT(ctxs[0].stats.recv_bytes == 0);
     ASSERT(ctxs[0].stats.send_bytes == 0);
+    ASSERT(ctxs[0].stats.ask_recv == 0);
+    ASSERT(ctxs[0].stats.moved_recv == 0);
     PASS(NULL);
 }
 
@@ -54,6 +60,8 @@ TEST(test_stats_get_simple_cumulative) {
     ASSERT(stats.basic.recv_bytes == 32);
     ASSERT(stats.basic.send_bytes == 64);
     ASSERT(stats.basic.connected_clients == 5);
+    ASSERT(stats.basic.ask_recv == 466);
+    ASSERT(stats.basic.moved_recv == 1200);
 
     ASSERT(ctxs[0].stats.completed_commands == 10);
     ASSERT(ctxs[0].stats.remote_latency == 1000);
@@ -61,6 +69,8 @@ TEST(test_stats_get_simple_cumulative) {
     ASSERT(ctxs[0].stats.recv_bytes == 16);
     ASSERT(ctxs[0].stats.send_bytes == 32);
     ASSERT(ctxs[0].stats.connected_clients == 5);
+    ASSERT(ctxs[0].stats.ask_recv == 233);
+    ASSERT(ctxs[0].stats.moved_recv == 600);
     PASS(NULL);
 }
 
