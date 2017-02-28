@@ -54,6 +54,8 @@ static inline void stats_copy_basic_fields(struct basic_stats *dst, struct basic
     dst->total_latency = ATOMIC_GET(src->total_latency);
     dst->recv_bytes = ATOMIC_GET(src->recv_bytes);
     dst->send_bytes = ATOMIC_GET(src->send_bytes);
+    dst->ask_recv = ATOMIC_GET(src->ask_recv);
+    dst->moved_recv = ATOMIC_GET(src->moved_recv);
 }
 
 static inline void stats_cumulate(struct stats *stats)
@@ -64,6 +66,8 @@ static inline void stats_cumulate(struct stats *stats)
     ATOMIC_INC(cumulation.basic.total_latency, stats->basic.total_latency);
     ATOMIC_INC(cumulation.basic.recv_bytes, stats->basic.recv_bytes);
     ATOMIC_INC(cumulation.basic.send_bytes, stats->basic.send_bytes);
+    ATOMIC_INC(cumulation.basic.ask_recv, stats->basic.ask_recv);
+    ATOMIC_INC(cumulation.basic.moved_recv, stats->basic.moved_recv);
 }
 
 static void stats_send(char *metric, double value)
@@ -143,6 +147,8 @@ void stats_get_simple(struct stats *stats, bool reset)
         STATS_ASSIGN(total_latency);
         STATS_ASSIGN(recv_bytes);
         STATS_ASSIGN(send_bytes);
+        STATS_ASSIGN(ask_recv);
+        STATS_ASSIGN(moved_recv);
         stats->basic.connected_clients += ATOMIC_GET(contexts[i].stats.connected_clients);
     }
 
