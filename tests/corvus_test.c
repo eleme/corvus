@@ -110,6 +110,7 @@ int main(int argc, const char *argv[])
     for (int i = 0; i <= config.thread; i++) {
         context_free(&contexts[i]);
     }
+    cv_free(config.node);
 
     destroy_contexts();
 

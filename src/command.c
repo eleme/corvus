@@ -19,6 +19,8 @@
 #include "stats.h"
 #include "alloc.h"
 #include "slowlog.h"
+#include "config.h"
+#include "array.h"
 
 #define CMD_RECYCLE_SIZE 1024
 
@@ -40,11 +42,11 @@ const char *rep_addr_err = "-ERR Proxy fail to parse server address\r\n";
 const char *rep_server_err = "-ERR Proxy fail to get server\r\n";
 const char *rep_timeout_err = "-ERR Proxy timed out\r\n";
 const char *rep_slowlog_not_enabled = "-ERR Slowlog not enabled\r\n";
+const char *rep_in_progress = "-ERR Operation in progress\r\n";
 
 const char *rep_config_err = "-ERR Config error\r\n";
-const char *rep_config_unsupported_err = "-ERR Config cmd not supported\r\n";
-const char *rep_config_parse_err = "-ERR Config fail to parse command\r\n";
-const char *rep_config_addr_err = "-ERR Config fail to parse address\r\n";
+const char *rep_config_unsupported_err = "-ERR Config option not supported\r\n";
+const char *rep_config_parse_err = "-ERR Invalid config option or value\r\n";
 
 const char *rep_get = "*2\r\n$3\r\nGET\r\n";
 const char *rep_set = "*3\r\n$3\r\nSET\r\n";
@@ -289,6 +291,9 @@ int cmd_forward_multikey(struct command *cmd, struct redis_data *data, const cha
         memcpy(&ncmd->req_buf[0], &key->buf[0], sizeof(key->buf[0]));
         memcpy(&ncmd->req_buf[1], &key->buf[1], sizeof(key->buf[1]));
         ncmd->prefix = (char*)prefix;
+        ncmd->data.type = REP_ARRAY;
+        ncmd->data.elements = 1;
+        ncmd->data.element = key;
 
         if (cmd_forward_basic(ncmd) == CORVUS_ERR) {
             cmd_mark_fail(ncmd, rep_forward_err);
@@ -330,6 +335,9 @@ int cmd_forward_mset(struct command *cmd, struct redis_data *data)
         memcpy(&ncmd->req_buf[0], &key->buf[0], sizeof(key->buf[0]));
         memcpy(&ncmd->req_buf[1], &value->buf[1], sizeof(value->buf[1]));
         ncmd->prefix = (char*)rep_set;
+        ncmd->data.type = REP_ARRAY;
+        ncmd->data.elements = 2;
+        ncmd->data.element = &data->element[i];
 
         if (cmd_forward_basic(ncmd) == CORVUS_ERR) {
             cmd_mark_fail(ncmd, rep_forward_err);
@@ -474,76 +482,124 @@ int cmd_proxy(struct command *cmd, struct redis_data *data)
     return CORVUS_OK;
 }
 
+int cmd_config_set(struct command *cmd, char *option, struct pos_array *value_param)
+{
+    if (!config_option_changable(option)) {
+        cmd_mark_fail(cmd, rep_config_unsupported_err);
+        return CORVUS_OK;
+    }
+
+    char value[value_param->str_len + 1];
+    if (pos_to_str(value_param, value) != CORVUS_OK) {
+        cmd_mark_fail(cmd, rep_err);
+        return CORVUS_OK;
+    }
+
+    if (strcmp(option, "node") == 0) {
+        // config set node host:port,host1:port1
+        if (config_add("node", value) != CORVUS_OK) {
+            cmd_mark_fail(cmd, rep_config_parse_err);
+            return CORVUS_OK;
+        } else {
+            slot_create_job(SLOT_UPDATE);
+        }
+    } else {
+        if (config_add(option, value) != CORVUS_OK) {
+            cmd_mark_fail(cmd, rep_config_parse_err);
+            return CORVUS_OK;
+        }
+    }
+    conn_add_data(cmd->client, (uint8_t*) rep_ok, strlen(rep_ok),
+            &cmd->rep_buf[0], &cmd->rep_buf[1]);
+    CMD_INCREF(cmd);
+    cmd_mark_done(cmd);
+    return CORVUS_OK;
+}
+
+int cmd_config_get(struct command *cmd, const char *option)
+{
+    if (strcmp(option, "requirepass") == 0) {
+        cmd_mark_fail(cmd, rep_config_unsupported_err);
+        return CORVUS_OK;
+    }
+    struct cvstr value = cvstr_new(1024);
+    while (true) {
+        int res = config_get(option, value.data, value.capacity);
+        if (res == CORVUS_ERR) {
+            cmd_mark_fail(cmd, rep_config_unsupported_err);
+            cvstr_free(&value);
+            return CORVUS_OK;
+        }
+        if (!cvstr_full(&value)) break;
+        cvstr_reserve(&value, value.capacity * 2);
+    }
+    const size_t RESP_LEN = 100;
+    struct cvstr packet = cvstr_new(value.capacity + RESP_LEN);
+    int data_len = snprintf(packet.data, packet.capacity,
+            "$%zu\r\n%s\r\n", strlen(value.data), value.data);
+    conn_add_data(cmd->client, (uint8_t*) packet.data, data_len,
+            &cmd->rep_buf[0], &cmd->rep_buf[1]);
+    CMD_INCREF(cmd);
+    cmd_mark_done(cmd);
+
+    cvstr_free(&value);
+    cvstr_free(&packet);
+    return CORVUS_OK;
+}
+
+int cmd_config_rewrite(struct command *cmd)
+{
+    int res = config_rewrite();
+    if (res == CORVUS_AGAIN) {
+        LOG(INFO, "Config rewrite is already in progress");
+        cmd_mark_fail(cmd, rep_in_progress);
+    } else if (res == CORVUS_OK) {
+        conn_add_data(cmd->client, (uint8_t*) rep_ok, strlen(rep_ok),
+            &cmd->rep_buf[0], &cmd->rep_buf[1]);
+        CMD_INCREF(cmd);
+        cmd_mark_done(cmd);
+    } else {
+        cmd_mark_fail(cmd, rep_err);
+    }
+    return CORVUS_OK;
+}
+
 int cmd_config(struct command *cmd, struct redis_data *data)
 {
     ASSERT_TYPE(data, REP_ARRAY);
     ASSERT_ELEMENTS(data->elements >= 2, data);
 
     struct redis_data *op = &data->element[1];
-    struct redis_data *opt = &data->element[2];
     ASSERT_TYPE(op, REP_STRING);
-    ASSERT_TYPE(opt, REP_STRING);
 
     char type[op->pos.str_len + 1];
-    char option[opt->pos.str_len + 1];
-    if (pos_to_str(&op->pos, type) == CORVUS_ERR
-            || pos_to_str(&opt->pos, option) == CORVUS_ERR) {
+    if (pos_to_str(&op->pos, type) == CORVUS_ERR) {
         LOG(ERROR, "cmd_config: parse error");
         return CORVUS_ERR;
     }
-    if (strcasecmp(type, "SET") == 0) {
-        //config set <item> <val>
-        ASSERT_ELEMENTS(data->elements >= 4, data);
-        if (strcasecmp(option, "NODE") == 0) {
-            // config set node host:port,host1:port1
-            if (data->elements != 4) {
-                cmd_mark_fail(cmd, rep_config_parse_err);
-            } else {
-                char value[data->element[3].pos.str_len + 1];
-                // the host-port pair is in form "1.1.1.1:1"(9 bytes) at least
-                if (data->element[3].pos.str_len < 9
-                        || pos_to_str(&data->element[3].pos, value) != CORVUS_OK) {
-                    cmd_mark_fail(cmd, rep_config_parse_err);
-                } else if (config_add("node", value) != CORVUS_OK) {
-                    cmd_mark_fail(cmd, rep_config_addr_err);
-                } else {
-                    slot_create_job(SLOT_UPDATE);
-                    conn_add_data(cmd->client, (uint8_t*) rep_ok, strlen(rep_ok),
-                            &cmd->rep_buf[0], &cmd->rep_buf[1]);
-                    CMD_INCREF(cmd);
-                    cmd_mark_done(cmd);
-                }
-            }
-        } else {
-            cmd_mark_fail(cmd, rep_config_unsupported_err);
+
+    if (data->elements >= 3) {
+        struct redis_data *opt = &data->element[2];
+        ASSERT_TYPE(opt, REP_STRING);
+        char option[opt->pos.str_len + 1];
+        if (pos_to_str(&opt->pos, option) == CORVUS_ERR) {
+            LOG(ERROR, "cmd_config: parse error");
+            return CORVUS_ERR;
         }
-    } else if (strcasecmp(type, "GET") == 0) {
-        //config get <item>
-        ASSERT_ELEMENTS(data->elements >= 3, data);
-        if (strcasecmp(option, "NODE") == 0) {
-            struct node_conf *node = conf_node_inc_ref();
-            int n = 1024, pos = 0;
-            char content[n + ADDRESS_LEN];
-            char data[n + ADDRESS_LEN + 100]; //100 bytes for control data
-            for (int i = 0; i < node->len; i++) {
-                if (i > 0) {
-                    content[pos++] = ',';
-                }
-                pos += snprintf(content + pos, ADDRESS_LEN, "%s:%d",
-                        node->addr[i].ip, node->addr[i].port);
-                if (pos >= n) {
-                    break;
-                }
-            }
-            conf_node_dec_ref(node);
-            int data_len = snprintf(data, sizeof(data), "$%d\r\n%s\r\n", pos, content);
-            conn_add_data(cmd->client, (uint8_t*) data, data_len,
-                    &cmd->rep_buf[0], &cmd->rep_buf[1]);
-            CMD_INCREF(cmd);
-            cmd_mark_done(cmd);
-        } else {
-            cmd_mark_fail(cmd, rep_config_parse_err);
+        for (char *p = option; *p; p++) {
+            *p = tolower(*p);
         }
+        if (strcasecmp(type, "SET") == 0) {
+            //config set <item> <val>
+            ASSERT_ELEMENTS(data->elements == 4, data);
+            return cmd_config_set(cmd, option, &data->element[3].pos);
+        } else if (strcasecmp(type, "GET") == 0) {
+            //config get <item>
+            ASSERT_ELEMENTS(data->elements == 3, data);
+            return cmd_config_get(cmd, option);
+        }
+    } else if (strcasecmp(type, "REWRITE") == 0) {
+        return cmd_config_rewrite(cmd);
     } else {
         cmd_mark_fail(cmd, rep_config_err);
     }
@@ -682,12 +738,13 @@ int cmd_slowlog_get(struct command *cmd, struct redis_data *data)
 
     // generate redis packet
     const char *hdr_fmt =
-        "*4\r\n"
+        "*5\r\n"
         ":%lld\r\n"  // id
         ":%lld\r\n"  // log time
-        ":%lld\r\n"  // latency
+        ":%lld\r\n"  // remote latency
+        ":%lld\r\n"  // total latency
         "*%d\r\n";  // cmd arg len
-    char buf[150];
+    char buf[200];
 
     int size = snprintf(buf, sizeof buf, "*%d\r\n", count);
     conn_add_data(cmd->client, (uint8_t*)buf, size,
@@ -697,7 +754,7 @@ int cmd_slowlog_get(struct command *cmd, struct redis_data *data)
         struct slowlog_entry *entry = entries[i];
         assert(entry->argc > 0);
         size = snprintf(buf, sizeof buf, hdr_fmt,
-                entry->id, entry->log_time, entry->latency, entry->argc);
+                entry->id, entry->log_time, entry->remote_latency, entry->total_latency, entry->argc);
         assert(size < 150);
         conn_add_data(cmd->client, (uint8_t*)buf, size, NULL, NULL);
 
@@ -1205,28 +1262,33 @@ void cmd_mark_fail(struct command *cmd, const char *reason)
 void cmd_stats(struct command *cmd, int64_t end_time)
 {
     struct context *ctx = cmd->ctx;
-    long long latency;
+    long long remote_latency, total_latency;
 
     ATOMIC_INC(ctx->stats.completed_commands, 1);
 
-    latency = end_time - cmd->parse_time;
+    total_latency = end_time - cmd->parse_time;
 
-    ATOMIC_INC(ctx->stats.total_latency, latency);
-    ATOMIC_SET(ctx->last_command_latency, latency);
+    ATOMIC_INC(ctx->stats.total_latency, total_latency);
+    ATOMIC_SET(ctx->last_command_latency, total_latency);
 
-    latency = cmd->rep_time[1] - cmd->rep_time[0];
+    remote_latency = cmd->rep_time[1] - cmd->rep_time[0];
 
-    if (slowlog_need_log(cmd, latency)) {
+    if (slowlog_need_log(cmd, total_latency)) {
         if (slowlog_statsd_enabled()) {
             slowlog_add_count(cmd);
         }
         if (slowlog_cmd_enabled()) {
-            struct slowlog_entry *entry = slowlog_create_entry(cmd, latency / 1000);
+            struct slowlog_entry *entry = slowlog_create_entry(cmd,
+                remote_latency / 1000, total_latency / 1000);
             slowlog_set(&cmd->ctx->slowlog, entry);
+            entry = slowlog_create_sub_entry(cmd, total_latency / 1000);
+            if (entry) {
+                slowlog_set(&cmd->ctx->slowlog, entry);
+            }
         }
     }
 
-    ATOMIC_INC(ctx->stats.remote_latency, latency);
+    ATOMIC_INC(ctx->stats.remote_latency, remote_latency);
 }
 
 void cmd_set_stale(struct command *cmd)
@@ -1309,7 +1371,10 @@ void cmd_free(struct command *cmd)
     struct command *c;
     struct context *ctx = cmd->ctx;
 
-    if (cmd->data.type != REP_UNKNOWN) {
+    // When cmd->prefix is not NULL it's a sub command,
+    // cmd->data of sub command is a weak reference
+    // and should never be deallocated.
+    if (cmd->data.type != REP_UNKNOWN && cmd->prefix == NULL) {
         redis_data_free(&cmd->data);
         cmd->data.type = REP_UNKNOWN;
     }

@@ -31,8 +31,9 @@ struct node_desc {
 
 struct node_info {
     char name[64];
+    // contains master and slaves of one shard
     struct address nodes[MAX_SLAVE_NODES + 1];
-    size_t index;
+    size_t index;  // length of `nodes` above
     int refcount;
     // for parsing slots of a master node
     struct desc_part *slot_spec;
