@@ -597,6 +597,8 @@ int cmd_config(struct command *cmd, struct redis_data *data)
             //config get <item>
             ASSERT_ELEMENTS(data->elements == 3, data);
             return cmd_config_get(cmd, option);
+        } else {
+            cmd_mark_fail(cmd, rep_config_err);
         }
     } else if (strcasecmp(type, "REWRITE") == 0) {
         return cmd_config_rewrite(cmd);
