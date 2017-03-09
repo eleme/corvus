@@ -249,7 +249,10 @@ void *main_loop(void *data)
 {
     struct context *ctx = data;
 
-    if (slowlog_cmd_enabled()) {
+    // Still initialize it no matter whether slowlog_log_slower_than
+    // is not negative so that we can turn on slowlog dynamically by
+    // changing slowlog_log_slower_than at runtime.
+    if (config.slowlog_max_len > 0) {
         LOG(DEBUG, "slowlog enabled");
         if (slowlog_init(&ctx->slowlog) == CORVUS_ERR) {
             LOG(ERROR, "Fatal: fail to init slowlog.");
