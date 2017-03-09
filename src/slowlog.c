@@ -50,12 +50,13 @@ void slowlog_free(struct slowlog_queue *slowlog)
     cv_free(slowlog->entry_locks);
 }
 
-struct slowlog_entry *slowlog_create_entry(struct command *cmd, int64_t latency)
+struct slowlog_entry *slowlog_create_entry(struct command *cmd, int64_t remote_latency, int64_t total_latency)
 {
     struct slowlog_entry *entry = cv_calloc(1, sizeof(struct slowlog_entry));
     entry->id = ATOMIC_INC(slowlog_id, 1);
     entry->log_time = time(NULL);  // redis also uses time(NULL);
-    entry->latency = latency;
+    entry->remote_latency = remote_latency;
+    entry->total_latency = total_latency;
     entry->refcount = 1;
 
     const char *bytes_fmt = "(%zd bytes)";
@@ -110,6 +111,33 @@ struct slowlog_entry *slowlog_create_entry(struct command *cmd, int64_t latency)
     return entry;
 }
 
+// Return NULL when `cmd` is not a multiple keys command
+struct slowlog_entry *slowlog_create_sub_entry(struct command *cmd, int64_t total_latency)
+{
+    switch (cmd->cmd_type) {
+        case CMD_MGET:
+        case CMD_MSET:
+        case CMD_DEL:
+        case CMD_EXISTS:
+            break;
+        default:
+            return NULL;
+    }
+    if (STAILQ_EMPTY(&cmd->sub_cmds)) {
+        return NULL;
+    }
+    int64_t max_remote_latency = 0;
+    struct command *c, *slowest_sub_cmd = NULL;
+    STAILQ_FOREACH(c, &cmd->sub_cmds, sub_cmd_next) {
+        int64_t remote_latency = c->rep_time[1] - c->rep_time[0];
+        if (remote_latency > max_remote_latency) {
+            max_remote_latency = remote_latency;
+            slowest_sub_cmd = c;
+        }
+    }
+    return slowlog_create_entry(slowest_sub_cmd, max_remote_latency / 1000, total_latency);
+}
+
 void slowlog_dec_ref(struct slowlog_entry *entry)
 {
     int refcount = ATOMIC_DEC(entry->refcount, 1);
@@ -152,13 +180,14 @@ struct slowlog_entry *slowlog_get(struct slowlog_queue *queue, size_t index)
 bool slowlog_cmd_enabled()
 {
     return config.slowlog_max_len > 0
-        && config.slowlog_log_slower_than >= 0;
+        && ATOMIC_GET(config.slowlog_log_slower_than) >= 0;
 }
 
 bool slowlog_statsd_enabled()
 {
-    return config.slowlog_log_slower_than >= 0
-        && config.slowlog_statsd_enabled;
+    return ATOMIC_GET(config.slowlog_log_slower_than) >= 0
+        && config.slowlog_statsd_enabled
+        && config.stats;
 }
 
 bool slowlog_type_need_log(struct command *cmd)
@@ -170,9 +199,12 @@ bool slowlog_type_need_log(struct command *cmd)
 
 bool slowlog_need_log(struct command *cmd, long long latency)
 {
-    return config.slowlog_log_slower_than >= 0
+    int slowlog_log_slower_than = ATOMIC_GET(config.slowlog_log_slower_than);
+    return slowlog_log_slower_than >= 0
         && slowlog_type_need_log(cmd)
-        && latency > config.slowlog_log_slower_than * 1000;
+        // for those couldn't be forwarded and their cmd->data have been deallocated
+        && cmd->data.elements > 0
+        && latency > slowlog_log_slower_than * 1000;
 }
 
 void slowlog_init_stats()

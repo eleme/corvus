@@ -1,12 +1,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
-#include <errno.h>
 #include <signal.h>
 #include <pthread.h>
 #include <unistd.h>
 #include <execinfo.h>
 #include <getopt.h>
+#include <errno.h>
 #include "corvus.h"
 #include "mbuf.h"
 #include "slot.h"
@@ -18,208 +18,7 @@
 #include "timer.h"
 #include "alloc.h"
 
-#define DEFAULT_BUFSIZE 16384
-#define MIN_BUFSIZE 64
-
 static struct context *contexts;
-
-void config_init()
-{
-    memset(config.cluster, 0, CLUSTER_NAME_SIZE + 1);
-    strncpy(config.cluster, "default", CLUSTER_NAME_SIZE);
-
-    config.bind = 12345;
-    memset(&config.node, 0, sizeof(struct node_conf));
-    config.thread = 4;
-    config.loglevel = INFO;
-    config.syslog = 0;
-    config.stats = false;
-    config.client_timeout = 0;
-    config.server_timeout = 0;
-    config.bufsize = DEFAULT_BUFSIZE;
-    config.requirepass = NULL;
-    config.readslave = config.readmasterslave = false;
-    config.slowlog_max_len = -1;
-    config.slowlog_log_slower_than = -1;
-    config.slowlog_statsd_enabled = 0;
-
-    memset(config.statsd_addr, 0, sizeof(config.statsd_addr));
-    config.metric_interval = 10;
-}
-
-void config_boolean(bool *item, char *value)
-{
-    if (strcasecmp(value, "false") == 0) {
-        *item = false;
-    } else if (strcasecmp(value, "true") == 0) {
-        *item = true;
-    } else {
-        if (atoi(value) == 0) {
-            *item = false;
-        } else {
-            *item = true;
-        }
-    }
-}
-
-int config_add(char *name, char *value)
-{
-    int val;
-    if (strcmp(name, "cluster") == 0) {
-        if (strlen(value) <= 0) return CORVUS_OK;
-        strncpy(config.cluster, value, CLUSTER_NAME_SIZE);
-    } else if (strcmp(name, "bind") == 0) {
-        if (socket_parse_port(value, &config.bind) == CORVUS_ERR) {
-            return CORVUS_ERR;
-        }
-    } else if (strcmp(name, "syslog") == 0) {
-        config_boolean(&config.syslog, value);
-    } else if (strcmp(name, "read-slave") == 0) {
-        LOG(WARN, "Config `read-slave` is obsolete, use `read-strategy` instead");
-        config_boolean(&config.readslave, value);
-    } else if (strcmp(name, "read-master-slave") == 0) {
-        LOG(WARN, "Config `read-master-slave` is obsolete, use `read-strategy` instead");
-        config_boolean(&config.readmasterslave, value);
-        if (config.readmasterslave) {
-            config.readslave = true;
-        }
-    } else if (strcmp(name, "read-strategy") == 0) {
-        if (strcmp(value, "read-slave-only") == 0) {
-            config.readmasterslave = false;
-            config.readslave = true;
-        } else if (strcmp(value, "both") == 0) {
-            config.readmasterslave = config.readslave = true;
-        } else {
-            config.readmasterslave = config.readslave = false;
-        }
-    } else if (strcmp(name, "thread") == 0) {
-        config.thread = atoi(value);
-        if (config.thread <= 0) config.thread = 4;
-    } else if (strcmp(name, "bufsize") == 0) {
-        val = atoi(value);
-        if (val <= 0) {
-            config.bufsize = DEFAULT_BUFSIZE;
-        } else if (val < MIN_BUFSIZE) {
-            config.bufsize = MIN_BUFSIZE;
-        } else {
-            config.bufsize = val;
-        }
-    } else if (strcmp(name, "client_timeout") == 0) {
-        val = atoi(value);
-        config.client_timeout = val < 0 ? 0 : val;
-    } else if (strcmp(name, "server_timeout") == 0) {
-        val = atoi(value);
-        config.server_timeout = val < 0 ? 0 : val;
-    } else if (strcmp(name, "statsd") == 0) {
-        strncpy(config.statsd_addr, value, ADDRESS_LEN);
-    } else if (strcmp(name, "metric_interval") == 0) {
-        config.metric_interval = atoi(value);
-        if (config.metric_interval <= 0) config.metric_interval = 10;
-    } else if (strcmp(name, "loglevel") == 0) {
-        if (strcmp(value, "debug") == 0) {
-            config.loglevel = DEBUG;
-        } else if (strcmp(value, "warn") == 0) {
-            config.loglevel = WARN;
-        } else if (strcmp(value, "error") == 0) {
-            config.loglevel = ERROR;
-        } else {
-            config.loglevel = INFO;
-        }
-    } else if (strcmp(name, "requirepass") == 0) {
-        // Last config overwrites previous ones.
-        cv_free(config.requirepass);
-        config.requirepass = NULL;
-
-        if (strlen(value) > 0) {
-            config.requirepass = cv_calloc(strlen(value) + 1, sizeof(char));
-            memcpy(config.requirepass, value, strlen(value));
-        }
-    } else if (strcmp(name, "node") == 0) {
-        cv_free(config.node.addr);
-        memset(&config.node, 0, sizeof(config.node));
-
-        char *p = strtok(value, ",");
-        while (p) {
-            config.node.addr = cv_realloc(config.node.addr,
-                    sizeof(struct address) * (config.node.len + 1));
-
-            if (socket_parse_ip(p, &config.node.addr[config.node.len]) == -1) {
-                cv_free(config.node.addr);
-                return -1;
-            }
-
-            config.node.len++;
-            p = strtok(NULL, ",");
-        }
-    } else if (strcmp(name, "slowlog-log-slower-than") == 0) {
-        config.slowlog_log_slower_than = atoi(value);
-    } else if (strcmp(name, "slowlog-max-len") == 0) {
-        config.slowlog_max_len = atoi(value);
-    } else if (strcmp(name, "slowlog-statsd-enabled") == 0) {
-        config.slowlog_statsd_enabled = atoi(value);
-    }
-    return 0;
-}
-
-int read_line(char **line, size_t *bytes, FILE *fp)
-{
-    size_t len, index = 0;
-    char buf[1024];
-    bool should_realloc = false;
-
-    while (fgets(buf, 1024, fp) != NULL) {
-        len = strlen(buf);
-        while (*bytes - index <= len) {
-            should_realloc = true;
-            *bytes = (*bytes == 0) ? 1024 : (*bytes << 1);
-        }
-        if (should_realloc) {
-            *line = cv_realloc(*line, (*bytes) * sizeof(char));
-            should_realloc = false;
-        }
-        memcpy(*line + index, buf, len);
-        index += len;
-        if ((*line)[index - 1] == '\n') {
-            (*line)[index] = '\0';
-            return index;
-        }
-    }
-    return -1;
-}
-
-int read_conf(const char *filename)
-{
-    FILE *fp = fopen(filename, "r");
-    if (fp == NULL) {
-        fprintf(stderr, "config file: %s\n", strerror(errno));
-        return -1;
-    }
-    int i, len = 0;
-    size_t bytes = 0;
-    char *line = NULL;
-    while ((len = read_line(&line, &bytes, fp)) != -1) {
-        char name[len + 1], value[len + 1];
-        memset(name, 0, sizeof(name));
-        memset(value, 0, sizeof(value));
-
-        for (i = 0; i < len && (line[i] == ' ' || line[i] == '\r'
-                    || line[i] == '\t' || line[i] == '\n'); i++);
-
-        if (i == len || line[i] == '#') {
-            continue;
-        }
-
-        sscanf(line, "%s%s", name, value);
-        if (config_add(name, value) == -1) {
-            cv_free(line);
-            fclose(fp);
-            return CORVUS_ERR;
-        }
-    }
-    cv_free(line);
-    fclose(fp);
-    return CORVUS_OK;
-}
 
 void sig_handler(int sig)
 {
@@ -248,15 +47,48 @@ void sig_handler(int sig)
     }
 }
 
-void setup_signal()
+int ignore_signal(int sig)
+{
+    if (signal(sig, SIG_IGN) == SIG_ERR) {
+        LOG(CRIT, "Failed to ignore signal[%s]: %s",
+            strsignal(sig), strerror(errno));
+        return CORVUS_ERR;
+    }
+    return CORVUS_OK;
+}
+
+int register_signal(int sig, struct sigaction *act)
+{
+    LOG(DEBUG, "Registering signal[%s]", strsignal(sig));
+    if (sigaction(sig, act, NULL) != 0) {
+        LOG(CRIT, "Failed to register signal[%s]: %s",
+            strsignal(sig), strerror(errno));
+        return CORVUS_ERR;
+    }
+    return CORVUS_OK;
+}
+
+int create_signal_action(struct sigaction *act)
+{
+    if (sigemptyset(&(act->sa_mask)) != 0) {
+        LOG(CRIT, "Failed to initialize signal set: %s", strerror(errno));
+        return CORVUS_ERR;
+    }
+    act->sa_flags = 0;
+    act->sa_handler = sig_handler;
+    return CORVUS_OK;
+}
+
+int setup_signals()
 {
     struct sigaction act;
-    sigemptyset(&act.sa_mask);
-    act.sa_flags = 0;
-    act.sa_handler = sig_handler;
-    sigaction(SIGINT, &act, NULL);
-    sigaction(SIGTERM, &act, NULL);
-    sigaction(SIGSEGV, &act, NULL);
+    RET_NOT_OK(create_signal_action(&act));
+    RET_NOT_OK(register_signal(SIGINT, &act));
+    RET_NOT_OK(register_signal(SIGTERM, &act));
+    RET_NOT_OK(register_signal(SIGSEGV, &act));
+    RET_NOT_OK(ignore_signal(SIGHUP));
+    RET_NOT_OK(ignore_signal(SIGPIPE));
+    return CORVUS_OK;
 }
 
 int64_t get_time()
@@ -417,7 +249,10 @@ void *main_loop(void *data)
 {
     struct context *ctx = data;
 
-    if (slowlog_cmd_enabled()) {
+    // Still initialize it no matter whether slowlog_log_slower_than
+    // is not negative so that we can turn on slowlog dynamically by
+    // changing slowlog_log_slower_than at runtime.
+    if (config.slowlog_max_len > 0) {
         LOG(DEBUG, "slowlog enabled");
         if (slowlog_init(&ctx->slowlog) == CORVUS_ERR) {
             LOG(ERROR, "Fatal: fail to init slowlog.");
@@ -495,7 +330,7 @@ static const char *opts_desc[] = {
     "interval to capture metrics, in seconds",
     "level including debug, info, warn, error",
     "password needed to auth",
-    "slowlog time in seconds",
+    "slowlog time in microseconds",
     "slowlog max len",
     "slowlog whether writing to statsd",
 };
@@ -587,7 +422,7 @@ int main(int argc, const char *argv[])
     }
 
     config_init();
-    if (read_conf(argv[argc - 1]) == -1) {
+    if (config_read(argv[argc - 1]) == CORVUS_ERR) {
         fprintf(stderr, "Error: invalid config.\n");
         return EXIT_FAILURE;
     }
@@ -595,7 +430,7 @@ int main(int argc, const char *argv[])
         usage(argv[0]);
         return EXIT_FAILURE;
     }
-    if (config.node.len <= 0) {
+    if (config.node->len <= 0) {
         fprintf(stderr, "Error: invalid upstream list, `node` should be set to a valid nodes list.\n");
         return EXIT_FAILURE;
     }
@@ -607,9 +442,10 @@ int main(int argc, const char *argv[])
     // allocate memory for `contexts`
     build_contexts();
 
-    signal(SIGHUP, SIG_IGN);
-    signal(SIGPIPE, SIG_IGN);
-    setup_signal();
+    if (setup_signals() == CORVUS_ERR) {
+        fprintf(stderr, "Error: failed to setup signals.\n");
+        return EXIT_FAILURE;
+    }
 
     cmd_map_init();
 
@@ -668,7 +504,7 @@ int main(int argc, const char *argv[])
     destroy_contexts();
     cmd_map_destroy();
     cv_free(config.requirepass);
-    cv_free(config.node.addr);
+    config_free();
     if (config.syslog) closelog();
     return EXIT_SUCCESS;
 }

@@ -33,25 +33,41 @@ static struct {
     struct address nodes[MAX_NODE_LIST];
     int len;
 } node_list = {.lock = PTHREAD_RWLOCK_INITIALIZER};
+/*
+There are some certain places where write operation
+of node_list.len is not protected by lock.
+This is ok and its reason is quite subtle:
+(1) we assume that assignment for `int` is atomic,
+    which rely on the alignment of node_list and
+    that only one instruction is generated for the
+    assignment statement.
+(2) `len` is not protected but node_list.nodes is.
+(3) its write operations are all in the thread managing slots
+    and all of them are resetting node_list.len to zero.
+(4) its read operation from other threads is only in node_list_get,
+    inside which `<` operation is used instead of `!=`
+    to determine the loop exit.
+*/
 
 static inline void node_list_init()
 {
+    struct node_conf *node = config_get_node();
     pthread_rwlock_wrlock(&node_list.lock);
     node_list.len = 0;
-    for (int i = 0; i < MIN(config.node.len, MAX_NODE_LIST); i++) {
-        memcpy(&node_list.nodes[i], &config.node.addr[i], sizeof(struct address));
+    for (int i = 0; i < MIN(node->len, MAX_NODE_LIST); i++) {
+        memcpy(&node_list.nodes[i], &node->addr[i], sizeof(struct address));
         node_list.len++;
     }
     pthread_rwlock_unlock(&node_list.lock);
+    config_node_dec_ref(node);
 }
 
-static inline void node_list_add(struct node_info *node)
+static inline void node_list_replace(struct address *nodes, size_t len)
 {
     pthread_rwlock_wrlock(&node_list.lock);
-    for (size_t i = 0; i < node->index && node_list.len < MAX_NODE_LIST; i++) {
-        memcpy(&node_list.nodes[node_list.len++], &node->nodes[i],
-                sizeof(struct address));
-    }
+    node_list.len = len;
+    // memcpy works for zero len
+    memcpy(node_list.nodes, nodes, sizeof(struct address) * len);
     pthread_rwlock_unlock(&node_list.lock);
 }
 
@@ -109,6 +125,8 @@ int parse_slots()
     char *p;
     int start, stop, slot_count = 0;
     struct node_info *node;
+    struct address tmp_nodes[MAX_NODE_LIST];
+    size_t tmp_nodes_len = 0;
 
     struct dict_iter iter = DICT_ITER_INITIALIZER;
     DICT_FOREACH(&slot_map.node_map, &iter) {
@@ -120,7 +138,11 @@ int parse_slots()
             continue;
         }
 
-        node_list_add(n);
+        size_t num = MIN(n->index, MAX_NODE_LIST - tmp_nodes_len);
+        if (num > 0) {
+            memcpy(tmp_nodes + tmp_nodes_len, n->nodes, num * sizeof(struct address));
+            tmp_nodes_len += num;
+        }
 
         for (int i = 8; i < n->spec_length + 8; i++) {
             if (n->slot_spec[i].data[0] == '[') {
@@ -155,6 +177,8 @@ int parse_slots()
     pthread_rwlock_wrlock(&slot_map.lock);
     node_map_free(&slot_map.free_nodes);
     pthread_rwlock_unlock(&slot_map.lock);
+
+    node_list_replace(tmp_nodes, tmp_nodes_len);
 
     dict_clear(&slot_map.free_nodes);
     return slot_count;
@@ -271,7 +295,7 @@ int do_update_slot_map(struct connection *server)
     return count;
 }
 
-void slot_map_update(struct context *ctx)
+void slot_map_update(struct context *ctx, bool reload)
 {
     int i, count = 0;
     struct address node;
@@ -283,10 +307,17 @@ void slot_map_update(struct context *ctx)
         node_list_init();
     }
 
+    int len;
     struct address nodes[MAX_NODE_LIST];
-    memcpy(nodes, node_list.nodes, sizeof(node_list.nodes));
-    int len = node_list.len;
-    node_list.len = 0;
+    if (reload) {
+        struct node_conf *node = config_get_node();
+        len = node->len;
+        memcpy(nodes, node->addr, len * sizeof(struct address));
+        config_node_dec_ref(node);
+    } else {
+        memcpy(nodes, node_list.nodes, sizeof(node_list.nodes));
+        len = node_list.len;
+    }
 
     for (i = len; i > 0; i--) {
         int r = rand_r(&ctx->seed) % i;
@@ -316,6 +347,7 @@ void slot_map_update(struct context *ctx)
     conn_recycle(ctx, server);
 
     if (count == CORVUS_ERR) {
+        node_list.len = 0;  // clear it if we can't update slot map
         LOG(WARN, "can not update slot map");
     } else {
         LOG(INFO, "slot map updated: corverd %d slots", count);
@@ -326,7 +358,10 @@ void do_job(struct context *ctx, int job)
 {
     switch (job) {
         case SLOT_UPDATE:
-            slot_map_update(ctx);
+            slot_map_update(ctx, false);
+            break;
+        case SLOT_RELOAD:
+            slot_map_update(ctx, true);
             break;
         case SLOT_UPDATER_QUIT:
             ctx->state = CTX_QUIT;

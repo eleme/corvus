@@ -13,6 +13,7 @@
 #include "dict.h"
 #include "event.h"
 #include "slowlog.h"
+#include "config.h"
 
 #define VERSION "0.2.5"
 
@@ -24,10 +25,15 @@
 #define CORVUS_ASKING -5
 #define CORVUS_READONLY -6
 
+#define RET_NOT_OK(expr)                   \
+    do {                                   \
+        int __r = expr;                    \
+        if (__r != CORVUS_OK) return __r;  \
+    } while (0)
+
+
 #define THREAD_STACK_SIZE (1024*1024*4)
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
-
-#define CLUSTER_NAME_SIZE 127
 
 #define ATOMIC_GET(data) \
     __atomic_load_n(&(data), __ATOMIC_SEQ_CST)
@@ -49,11 +55,6 @@ enum {
     CTX_QUIT,
     CTX_BEFORE_QUIT,
     CTX_QUITTING,
-};
-
-struct node_conf {
-    struct address *addr;
-    int len;
 };
 
 struct context {
@@ -91,27 +92,6 @@ struct context {
     /* slowlog */
     struct slowlog_queue slowlog;
 };
-
-struct {
-    char cluster[CLUSTER_NAME_SIZE + 1];
-    uint16_t bind;
-    struct node_conf node;
-    int thread;
-    int loglevel;
-    bool syslog;
-    char statsd_addr[ADDRESS_LEN + 1];
-    int metric_interval;
-    bool stats;
-    bool readslave;
-    bool readmasterslave;
-    char *requirepass;
-    int64_t client_timeout;
-    int64_t server_timeout;
-    int bufsize;
-    int slowlog_log_slower_than;
-    int slowlog_max_len;
-    int slowlog_statsd_enabled;
-} config;
 
 int64_t get_time();
 struct context *get_contexts();

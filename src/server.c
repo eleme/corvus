@@ -209,10 +209,12 @@ int server_read_reply(struct connection *server, struct command *cmd)
     }
     switch (info.type) {
         case CMD_ERR_MOVED:
+            ATOMIC_INC(cmd->ctx->stats.moved_recv, 1);
             slot_create_job(SLOT_UPDATE);
             CHECK_REDIRECTED(cmd, info.addr, rep_redirect_err);
             return server_redirect(cmd, &info);
         case CMD_ERR_ASK:
+            ATOMIC_INC(cmd->ctx->stats.ask_recv, 1);
             CHECK_REDIRECTED(cmd, info.addr, rep_redirect_err);
             cmd->asking = 1;
             return server_redirect(cmd, &info);

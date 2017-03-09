@@ -146,7 +146,8 @@
     HANDLER(SLOWLOG,           EXTRA,    UNKNOWN) \
     HANDLER(QUIT,              EXTRA,    UNKNOWN) \
     HANDLER(SELECT,            UNIMPL,   UNKNOWN) \
-    HANDLER(TIME,              EXTRA,    UNKNOWN)
+    HANDLER(TIME,              EXTRA,    UNKNOWN) \
+    HANDLER(CONFIG,            EXTRA,    UNKNOWN)
 
 #define CMD_DEFINE(cmd, type, access) CMD_##cmd,
 
@@ -232,7 +233,15 @@ struct command {
     bool stale;
     bool cmd_fail;
 
-    struct redis_data data;  /* for slowlog */
+    /* For slowlog
+       When used in parent cmd or non-multiple-key command,
+       it contains all command data. When used in sub command,
+       it does not contain command name because it's already
+       in command.prefix. Note that in sub command it's only a
+       weak reference to command.data of parent cmd and should never
+       be deallocated.
+    */
+    struct redis_data data;
 };
 
 struct redirect_info {
