@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <execinfo.h>
 #include <getopt.h>
+#include <errno.h>
 #include "corvus.h"
 #include "mbuf.h"
 #include "slot.h"
@@ -46,15 +47,48 @@ void sig_handler(int sig)
     }
 }
 
-void setup_signal()
+int ignore_signal(int sig)
+{
+    if (signal(sig, SIG_IGN) == SIG_ERR) {
+        LOG(CRIT, "Failed to ignore signal[%s]: %s",
+            strsignal(sig), strerror(errno));
+        return CORVUS_ERR;
+    }
+    return CORVUS_OK;
+}
+
+int register_signal(int sig, struct sigaction *act)
+{
+    LOG(DEBUG, "Registering signal[%s]", strsignal(sig));
+    if (sigaction(sig, act, NULL) != 0) {
+        LOG(CRIT, "Failed to register signal[%s]: %s",
+            strsignal(sig), strerror(errno));
+        return CORVUS_ERR;
+    }
+    return CORVUS_OK;
+}
+
+int create_signal_action(struct sigaction *act)
+{
+    if (sigemptyset(&(act->sa_mask)) != 0) {
+        LOG(CRIT, "Failed to initialize signal set: %s", strerror(errno));
+        return CORVUS_ERR;
+    }
+    act->sa_flags = 0;
+    act->sa_handler = sig_handler;
+    return CORVUS_OK;
+}
+
+int setup_signals()
 {
     struct sigaction act;
-    sigemptyset(&act.sa_mask);
-    act.sa_flags = 0;
-    act.sa_handler = sig_handler;
-    sigaction(SIGINT, &act, NULL);
-    sigaction(SIGTERM, &act, NULL);
-    sigaction(SIGSEGV, &act, NULL);
+    RET_NOT_OK(create_signal_action(&act));
+    RET_NOT_OK(register_signal(SIGINT, &act));
+    RET_NOT_OK(register_signal(SIGTERM, &act));
+    RET_NOT_OK(register_signal(SIGSEGV, &act));
+    RET_NOT_OK(ignore_signal(SIGHUP));
+    RET_NOT_OK(ignore_signal(SIGPIPE));
+    return CORVUS_OK;
 }
 
 int64_t get_time()
@@ -408,9 +442,10 @@ int main(int argc, const char *argv[])
     // allocate memory for `contexts`
     build_contexts();
 
-    signal(SIGHUP, SIG_IGN);
-    signal(SIGPIPE, SIG_IGN);
-    setup_signal();
+    if (setup_signals() == CORVUS_ERR) {
+        fprintf(stderr, "Error: failed to setup signals.\n");
+        return EXIT_FAILURE;
+    }
 
     cmd_map_init();
 
