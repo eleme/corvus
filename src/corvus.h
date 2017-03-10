@@ -25,10 +25,10 @@
 #define CORVUS_ASKING -5
 #define CORVUS_READONLY -6
 
-#define RET_NOT_OK(expr)                   \
-    do {                                   \
-        int __r = expr;                    \
-        if (__r != CORVUS_OK) return __r;  \
+#define RET_NOT_OK(expr)               \
+    do {                               \
+        int r = expr;                  \
+        if (r != CORVUS_OK) return r;  \
     } while (0)
 
 
