@@ -105,7 +105,7 @@ Commands
    The total latency of sub cmd entry will just be the same as its parent cmd.
 * `AUTH`: do authentication in proxy.
 * `CONFIG`: support `get`, `set`, and `rewrite` sub-command to retrieve and manipulate corvus config.
-
+* `SELECT`: Just responses +OK, without sending SELECT to cluster. Thus it always mean SELECT 0
 #### Restricted commands
 
 * `EVAL`: at least one key should be given. If there are multiple keys, all of
@@ -131,7 +131,7 @@ all backend redis instances.
 * `EVALSHA`, `SCRIPT`.
 * `DISCARD`, `EXEC`, `MULTI`, `UNWATCH`, `WATCH`.
 * `CLUSTER`.
-* `ECHO`, `QUIT`, `SELECT`.
+* `ECHO`, `QUIT`,
 * `BGREWRITEAOF`, `BGSAVE`, `CLIENT`, `COMMAND`, `CONFIG`, `DBSIZE`, `DEBUG`, `FLUSHALL`,
    `FLUSHDB`, `LASTSAVE`, `MONITOR`, `ROLE`, `SAVE`, `SHUTDOWN`, `SLAVEOF`, `SYNC`.
 
