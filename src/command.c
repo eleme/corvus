@@ -386,6 +386,16 @@ int cmd_ping(struct command *cmd)
     return CORVUS_OK;
 }
 
+int cmd_select(struct command *cmd)
+{
+    conn_add_data(cmd->client, (uint8_t*)rep_ok, strlen(rep_ok),
+            &cmd->rep_buf[0], &cmd->rep_buf[1]);
+    CMD_INCREF(cmd);
+
+    cmd_mark_done(cmd);
+    return CORVUS_OK;
+}
+
 int cmd_info(struct command *cmd)
 {
     int i, n = 0, size = 0;
@@ -856,6 +866,8 @@ int cmd_extra(struct command *cmd, struct redis_data *data)
     switch (cmd->cmd_type) {
         case CMD_PING:
             return cmd_ping(cmd);
+        case CMD_SELECT:
+            return cmd_select(cmd);
         case CMD_INFO:
             return cmd_info(cmd);
         case CMD_PROXY:
