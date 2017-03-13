@@ -1,9 +1,9 @@
 #! /bin/sh
 ### BEGIN INIT INFO
 # Provides:          corvus
-# Required-Start:    $local_fs $all killprocs
+# Required-Start:    
 # Required-Stop:
-# Default-Start:     1
+# Default-Start:     
 # Default-Stop:
 # Short-Description: Corvus Init script
 ### END INIT INFO
