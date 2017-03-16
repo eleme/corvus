@@ -682,9 +682,7 @@ int cmd_select(struct command *cmd, struct redis_data *data)
     struct redis_data *db_data = &data->element[1];
     ASSERT_TYPE(db_data, REP_STRING);
 
-    struct pos_array *db_str = &db_data->pos;
-    // TODO: Implement pos_to_long then use it here, someday.
-    if (db_str->str_len == 1 && db_str->items->str[0] == '0') {
+    if (pos_is_zero(&db_data->pos) == CORVUS_OK) {
         conn_add_data(cmd->client, (uint8_t*)rep_ok, 5,
                       &cmd->rep_buf[0], &cmd->rep_buf[1]);
         CMD_INCREF(cmd);
