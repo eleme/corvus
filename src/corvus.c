@@ -18,14 +18,33 @@
 #include "timer.h"
 #include "alloc.h"
 
+static pthread_spinlock_t signal_lock;
 static struct context *contexts;
+
+void sigsegv_handler(int sig)
+{
+    if (pthread_spin_trylock(&signal_lock) == EBUSY) {
+        sigset_t mask;
+        sigemptyset(&mask);
+        pselect(0, NULL, NULL, NULL, NULL, &mask);
+    }
+
+    struct sigaction act;
+    void *trace[100];
+    int size = backtrace(trace, 100);
+    backtrace_symbols_fd(trace, size, STDOUT_FILENO);
+
+    // restore default signal handlers
+    sigemptyset(&act.sa_mask);
+    act.sa_flags = SA_NODEFER | SA_ONSTACK | SA_RESETHAND;
+    act.sa_handler = SIG_DFL;
+    sigaction(sig, &act, NULL);
+    kill(getpid(), sig);
+}
 
 void sig_handler(int sig)
 {
     int i;
-    struct sigaction act;
-    void *trace[100];
-
     switch (sig) {
         case SIGINT:
         case SIGTERM:
@@ -34,15 +53,7 @@ void sig_handler(int sig)
             }
             break;
         case SIGSEGV:
-            i = backtrace(trace, 100);
-            backtrace_symbols_fd(trace, i, STDOUT_FILENO);
-
-            // restore default signal handlers
-            sigemptyset(&act.sa_mask);
-            act.sa_flags = SA_NODEFER | SA_ONSTACK | SA_RESETHAND;
-            act.sa_handler = SIG_DFL;
-            sigaction(sig, &act, NULL);
-            kill(getpid(), sig);
+            sigsegv_handler(sig);
             break;
     }
 }
@@ -418,6 +429,20 @@ int main(int argc, const char *argv[])
     int i, err;
     if (argc < 2) {
         usage(argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    /* Load libgcc early to safely call backtrace in signal handler.
+     *
+     * See:
+     * https://www.scribd.com/doc/3726406/Crash-N-Burn-Writing-Linux-application-fault-handlers
+     * https://github.com/gby/libcrash/blob/master/crash.c#L279
+     */
+    void *dummy_trace[1];
+    backtrace(dummy_trace, 1);
+    backtrace_symbols_fd(dummy_trace, 0, -1);
+    if ((err = pthread_spin_init(&signal_lock, 0)) != 0) {
+        LOG(ERROR, "Fail to init spin lock: %s", strerror(err));
         return EXIT_FAILURE;
     }
 
