@@ -10,6 +10,7 @@ extern int process_array(struct reader *r);
 extern int process_string(struct reader *r);
 extern int stack_pop(struct reader *r);
 extern int stack_push(struct reader *r, int type);
+extern int pos_is_zero(struct pos_array *pos);
 
 struct mbuf *get_buf(struct context *ctx, char *data)
 {
@@ -424,6 +425,45 @@ TEST(test_stack_pop) {
     PASS(NULL);
 }
 
+TEST(test_pos_is_zero_single_zero) {
+    struct pos p[] = {
+        {.len = 1, .str = (uint8_t*)"0"},
+    };
+    struct pos_array arr = {.str_len = 1, .items = p, .pos_len = 1};
+    ASSERT(pos_is_zero(&arr) == CORVUS_OK);
+    PASS(NULL);
+}
+
+TEST(test_pos_is_zero_multiple_zero) {
+    struct pos p[] = {
+        {.len = 4, .str = (uint8_t*)"0000"},
+        {.len = 4, .str = (uint8_t*)"0000"},
+    };
+    struct pos_array arr = {.str_len = 8, .items = p, .pos_len = 2};
+    ASSERT(pos_is_zero(&arr) == CORVUS_OK);
+    PASS(NULL);
+}
+
+TEST(test_pos_is_zero_digits) {
+    struct pos p[] = {
+        {.len = 5, .str = (uint8_t*)"01234"},
+        {.len = 5, .str = (uint8_t*)"56789"},
+    };
+    struct pos_array arr = {.str_len = 10, .items = p, .pos_len = 2};
+    ASSERT(pos_is_zero(&arr) == CORVUS_ERR);
+    PASS(NULL);
+}
+
+TEST(test_pos_is_zero_letters) {
+    struct pos p[] = {
+        {.len = 13, .str = (uint8_t*)"abcdefghijklm"},
+        {.len = 13, .str = (uint8_t*)"nopqrstuvwxyz"},
+    };
+    struct pos_array arr = {.str_len = 26, .items = p, .pos_len = 2};
+    ASSERT(pos_is_zero(&arr) == CORVUS_ERR);
+    PASS(NULL);
+}
+
 TEST_CASE(test_parser) {
     RUN_TEST(test_nested_array);
     RUN_TEST(test_partial_parse);
@@ -439,4 +479,8 @@ TEST_CASE(test_parser) {
     RUN_TEST(test_process_array);
     RUN_TEST(test_process_string);
     RUN_TEST(test_stack_pop);
+    RUN_TEST(test_pos_is_zero_single_zero);
+    RUN_TEST(test_pos_is_zero_multiple_zero);
+    RUN_TEST(test_pos_is_zero_digits);
+    RUN_TEST(test_pos_is_zero_letters);
 }

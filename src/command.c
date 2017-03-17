@@ -58,6 +58,8 @@ static const char *rep_ping = "+PONG\r\n";
 static const char *rep_noauth = "-NOAUTH Authentication required.\r\n";
 static const char *rep_auth_err = "-ERR invalid password\r\n";
 static const char *rep_auth_not_set = "-ERR Client sent AUTH, but no password is set\r\n";
+static const char *rep_select_not_allowed = "-ERR SELECT is not allowed in cluster mode\r\n";
+
 
 struct cmd_item cmds[] = {CMD_DO(CMD_BUILD_MAP)};
 const size_t CMD_NUM = sizeof(cmds) / sizeof(struct cmd_item);
@@ -672,6 +674,25 @@ int cmd_quit(struct command *cmd)
     return CORVUS_OK;
 }
 
+int cmd_select(struct command *cmd, struct redis_data *data)
+{
+    ASSERT_TYPE(data, REP_ARRAY);
+    ASSERT_ELEMENTS(data->elements == 2, data);
+
+    struct redis_data *db_data = &data->element[1];
+    ASSERT_TYPE(db_data, REP_STRING);
+
+    if (pos_is_zero(&db_data->pos) == CORVUS_OK) {
+        conn_add_data(cmd->client, (uint8_t*)rep_ok, 5,
+                      &cmd->rep_buf[0], &cmd->rep_buf[1]);
+        CMD_INCREF(cmd);
+        cmd_mark_done(cmd);
+        return CORVUS_OK;
+    }
+    cmd_mark_fail(cmd, rep_select_not_allowed);
+    return CORVUS_OK;
+}
+
 static int cmd_parse_len(struct redis_data *data, int *result)
 {
     ASSERT_TYPE(data, REP_STRING);
@@ -870,6 +891,8 @@ int cmd_extra(struct command *cmd, struct redis_data *data)
             return cmd_quit(cmd);
         case CMD_SLOWLOG:
             return cmd_slowlog(cmd, data);
+        case CMD_SELECT:
+            return cmd_select(cmd, data);
         default:
             LOG(ERROR, "%s: unknown command type %d", __func__, cmd->cmd_type);
             return CORVUS_ERR;

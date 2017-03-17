@@ -559,3 +559,23 @@ size_t pos_to_str_with_limit(struct pos_array *pos, uint8_t *str, size_t limit)
     }
     return len;
 }
+
+int pos_is_zero(struct pos_array *pos)
+{
+    int length = pos->str_len;
+    if (length <= 0) {
+        LOG(ERROR, "pos_is_zero: string length %d <= 0", length);
+        return CORVUS_ERR;
+    }
+
+    struct pos *item;
+    for (size_t i = 0; i < pos->pos_len; i++) {
+        item = &pos->items[i];
+        for (size_t j = 0; j < item->len; j++) {
+            if (item->str[j] != '0') {
+                return CORVUS_ERR;
+            }
+        }
+    }
+    return CORVUS_OK;
+}
