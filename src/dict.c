@@ -68,7 +68,7 @@ void dict_set(struct dict *dict, const char *key, void *data)
     while (1) {
         struct bucket *bucket = &dict->buckets[pos];
 
-        if (!bucket->setted) {
+        if (!bucket->setted || (bucket->deleted && bucket->hash == hash)) {
             set_bucket(bucket, hash, key, data);
             return;
         }
