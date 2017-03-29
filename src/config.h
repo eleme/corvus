@@ -5,7 +5,7 @@
 
 #define CLUSTER_NAME_SIZE 127
 #define CONFIG_FILE_PATH_SIZE 256
-#define CONFIG_BINDADDR_MAX 16
+#define CONFIG_BINDADDR_MAX 46
 
 struct node_conf {
     struct address *addr;

@@ -104,7 +104,7 @@ static int cv_getaddrinfo(const char *addr, int port, struct addrinfo **servinfo
 
     snprintf(port_str, 6, "%d", port);
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
+    hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = socktype;
 
     if ((err = getaddrinfo(addr, port_str, &hints, servinfo)) != 0) {
