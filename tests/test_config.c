@@ -2,8 +2,8 @@
 #include "alloc.h"
 #include "config.h"
 
-TEST(test_config_bind) {
-    char n[] = "bind";
+TEST(test_config_port) {
+    char n[] = "port";
 
     ASSERT(config_add(n, "123456") == -1);
     ASSERT(config_add(n, "123asf") == -1);
@@ -11,7 +11,7 @@ TEST(test_config_bind) {
     ASSERT(config_add(n, "") == -1);
     ASSERT(config_add(n, "abc") == -1);
     ASSERT(config_add(n, "2345") == 0);
-    ASSERT(config.bind == 2345);
+    ASSERT(config.port == 2345);
 
     PASS(NULL);
 }
@@ -165,7 +165,7 @@ TEST(test_parse_int) {
 }
 
 TEST_CASE(test_config) {
-    RUN_TEST(test_config_bind);
+    RUN_TEST(test_config_port);
     RUN_TEST(test_config_syslog);
     RUN_TEST(test_config_requirepass);
     RUN_TEST(test_config_read_strategy);
