@@ -13,6 +13,7 @@
 #include "socket.h"
 #include "array.h"
 
+#define DEFAULT_THREAD 4
 #define DEFAULT_BUFSIZE 16384
 #define MIN_BUFSIZE 64
 #define TMP_CONFIG_FILE "tmp-corvus.conf"
@@ -47,7 +48,7 @@ void config_init()
     config.bind = 12345;
     config.node = cv_calloc(1, sizeof(struct node_conf));
     config.node->refcount = 1;
-    config.thread = 4;
+    config.thread = DEFAULT_THREAD;
     config.loglevel = INFO;
     config.syslog = 0;
     config.stats = false;
@@ -196,8 +197,12 @@ int config_add(char *name, char *value)
             config.readmasterslave = config.readslave = false;
         }
     } else if (strcmp(name, "thread") == 0) {
-        return parse_int(value, &config.thread);
-        if (config.thread <= 0) config.thread = 4;
+        TRY_PARSE_INT();
+        if (val <= 0) {
+            config.thread = DEFAULT_THREAD;
+        } else {
+            config.thread = val;
+        }
     } else if (strcmp(name, "bufsize") == 0) {
         TRY_PARSE_INT();
         if (val <= 0) {
