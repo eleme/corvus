@@ -28,6 +28,9 @@ TEST(test_parse_port) {
 
     ASSERT(socket_parse_port("12345a", &port) == -1);
 
+    ASSERT(socket_parse_port("4242@12345", &port) == 0);
+    ASSERT(port == 4242);
+
     PASS(NULL);
 }
 
@@ -40,6 +43,10 @@ TEST(test_socket_parse_addr) {
     ASSERT(address.port == 8000);
 
     ASSERT(socket_parse_addr("234.233.1.1:65511", &address) == 65511);
+    ASSERT(strcmp(address.ip, "234.233.1.1") == 0);
+    ASSERT(address.port == 65511);
+
+    ASSERT(socket_parse_addr("234.233.1.1:65511@6379", &address) == 65511);
     ASSERT(strcmp(address.ip, "234.233.1.1") == 0);
     ASSERT(address.port == 65511);
 

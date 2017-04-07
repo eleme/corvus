@@ -319,7 +319,7 @@ int socket_parse_port(char *ptr, uint16_t *res)
 {
     char *end;
     int port = strtol(ptr, &end, 0);
-    if (*end != '\0' || port > 0xFFFF || port <= 0) return CORVUS_ERR;
+    if ((*end != '\0' && *end != '@') || port > 0xFFFF || port <= 0) return CORVUS_ERR;
     *res = port;
     return CORVUS_OK;
 }
