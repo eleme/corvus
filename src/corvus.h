@@ -15,7 +15,7 @@
 #include "slowlog.h"
 #include "config.h"
 
-#define VERSION "0.2.5"
+#define VERSION "0.2.6"
 
 #define CORVUS_OK 0
 #define CORVUS_ERR -1
