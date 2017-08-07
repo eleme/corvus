@@ -131,9 +131,14 @@ def test_dump(delete_keys):
     redis>
     """
     delete_keys.keys("mykey")
+    node = ClusterNode.from_uri(REDIS_URI_SRC)
+    slot = node.execute_command("CLUSTER KEYSLOT", "mykey")
+    cluster = Cluster.from_node(node)
+    node = next((n for n in cluster.nodes if slot in n.slots), None)
+    assert node
 
     assert r.set("mykey", 10) is True
-    assert r.dump("mykey") == "\x00\xc0\n\x06\x00\xf8r?\xc5\xfb\xfb_("
+    assert r.dump("mykey") == node.dump("mykey")
 
 
 def test_exists(delete_keys):
