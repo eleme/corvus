@@ -49,6 +49,7 @@ before_script:
   - ./src/corvus ./corvus.conf > corvus.log 2>&1 &
 
 script:
+  - redis-server -v
   - awk '/ERROR SUMMARY/ {if ($4 == 0) exit 0; else exit 1}' valgrind.log
   - make clean || true
   - make test
