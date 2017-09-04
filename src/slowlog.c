@@ -111,7 +111,7 @@ struct slowlog_entry *slowlog_create_entry(struct command *cmd, int64_t remote_l
     return entry;
 }
 
-// Return NULL when `cmd` is not a multiple keys command
+// Return NULL when `cmd` is not a multiple keys command or fail to connect to redis
 struct slowlog_entry *slowlog_create_sub_entry(struct command *cmd, int64_t total_latency)
 {
     switch (cmd->cmd_type) {
@@ -134,6 +134,12 @@ struct slowlog_entry *slowlog_create_sub_entry(struct command *cmd, int64_t tota
             max_remote_latency = remote_latency;
             slowest_sub_cmd = c;
         }
+    }
+    // When corvus fails to redirect commands to redis, the `remote_latency` above
+    // may become zero or nagative and produce a NULL `slowest_sub_cmd`.
+    // In this case we just ignore it.
+    if (NULL == slowest_sub_cmd) {
+        return NULL;
     }
     return slowlog_create_entry(slowest_sub_cmd, max_remote_latency / 1000, total_latency);
 }
@@ -201,6 +207,7 @@ bool slowlog_need_log(struct command *cmd, long long latency)
 {
     int slowlog_log_slower_than = ATOMIC_GET(config.slowlog_log_slower_than);
     return slowlog_log_slower_than >= 0
+        && !cmd->cmd_fail
         && slowlog_type_need_log(cmd)
         // for those couldn't be forwarded and their cmd->data have been deallocated
         && cmd->data.elements > 0

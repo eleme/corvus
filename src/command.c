@@ -1120,6 +1120,9 @@ void cmd_mark(struct command *cmd, int fail)
         if (cmd->parent->cmd_done_count == cmd->parent->cmd_count) {
             root = cmd->parent;
         }
+        if (fail) {
+            cmd->parent->cmd_fail = true;
+        }
     }
 
     if (root != NULL && conn_register(root->client) == CORVUS_ERR) {
