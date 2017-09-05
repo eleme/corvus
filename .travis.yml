@@ -27,8 +27,11 @@ install:
   - sudo redis-server /etc/redis/redis-cluster-8001.conf
   - sudo redis-server /etc/redis/redis-cluster-8002.conf
   - sudo redis-server /etc/redis/redis-cluster-8003.conf
+  - redis-server -v
 
+  - sudo pip install redis==2.10.5
   - sudo pip install ruskit
+  - pip freeze
   - ruskit create localhost:800{0,1,2}
 
   - sed -i 's/node localhost:8000,localhost:8001,localhost:8002/node 127.0.0.1:8000/' corvus.conf
@@ -49,7 +52,6 @@ before_script:
   - ./src/corvus ./corvus.conf > corvus.log 2>&1 &
 
 script:
-  - redis-server -v
   - awk '/ERROR SUMMARY/ {if ($4 == 0) exit 0; else exit 1}' valgrind.log
   - make clean || true
   - make test
