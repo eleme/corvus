@@ -207,7 +207,6 @@ bool slowlog_need_log(struct command *cmd, long long latency)
 {
     int slowlog_log_slower_than = ATOMIC_GET(config.slowlog_log_slower_than);
     return slowlog_log_slower_than >= 0
-        && !cmd->cmd_fail
         && slowlog_type_need_log(cmd)
         // for those couldn't be forwarded and their cmd->data have been deallocated
         && cmd->data.elements > 0
