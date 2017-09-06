@@ -223,10 +223,48 @@ TEST(test_slowlog_statsd) {
     PASS(NULL);
 }
 
+TEST(test_failed_command_slowlog) {
+    struct mbuf buf;
+    struct command cmd;
+    memset(&cmd, 0, sizeof(struct command));
+    STAILQ_INIT(&cmd.sub_cmds);
+
+    struct reader r = {0};
+    const char cmd_data[] = "*2\r\n$4\r\nMGET\r\n$4\r\nkey1\r\n";
+    buf.pos = (uint8_t*)cmd_data;
+    buf.last = (uint8_t*)cmd_data + strlen(cmd_data);
+    reader_init(&r);
+    reader_feed(&r, &buf);
+    ASSERT(parse(&r, MODE_REQ) != -1);
+    cmd.data = r.data;
+    cmd.prefix = NULL;
+
+    struct command sub_cmd;
+    sub_cmd.parent = &cmd;
+    STAILQ_INSERT_TAIL(&cmd.sub_cmds, &sub_cmd, sub_cmd_next);
+
+    // When corvus fails to redirect command, these two fields may be zero.
+    cmd.rep_time[0] = 0;
+    cmd.rep_time[1] = 0;
+    sub_cmd.rep_time[0] = 0;
+    sub_cmd.rep_time[1] = 0;
+
+    struct slowlog_entry *entry = slowlog_create_entry(&cmd, 0, 666233);
+    ASSERT(entry->remote_latency == 0);
+    ASSERT(entry->total_latency == 666233);
+    slowlog_dec_ref(entry);
+    entry = slowlog_create_sub_entry(&cmd, 666233);
+    ASSERT(NULL == entry);
+
+    redis_data_free(&cmd.data);
+    PASS(NULL);
+}
+
 TEST_CASE(test_slowlog) {
     RUN_TEST(test_slowlog_create_entry);
     RUN_TEST(test_slowlog_create_entry_with_prefix);
     RUN_TEST(test_slowlog_create_entry_with_long_arg);
     RUN_TEST(test_slowlog_statsd);
     RUN_TEST(test_entry_get_set);
+    RUN_TEST(test_failed_command_slowlog);
 }
