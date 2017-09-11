@@ -7,6 +7,13 @@ before_install:
   - sudo apt-get install -qq valgrind
 
 install:
+  - wget http://download.redis.io/releases/redis-3.0.7.tar.gz
+  - tar xzf redis-3.0.7.tar.gz
+  - cd redis-3.0.7
+  - make
+  - sudo cp src/redis-server `which redis-server`
+  - cd ../
+
   - sudo mkdir -p /etc/redis /var/lib/redis/cluster/{8000,8001,8002,8003}
 
   - sudo chmod -R 777 /etc/redis
@@ -27,8 +34,11 @@ install:
   - sudo redis-server /etc/redis/redis-cluster-8001.conf
   - sudo redis-server /etc/redis/redis-cluster-8002.conf
   - sudo redis-server /etc/redis/redis-cluster-8003.conf
+  - redis-server -v
 
+  - sudo pip install redis==2.10.5
   - sudo pip install ruskit
+  - pip freeze
   - ruskit create localhost:800{0,1,2}
 
   - sed -i 's/node localhost:8000,localhost:8001,localhost:8002/node 127.0.0.1:8000/' corvus.conf
@@ -49,7 +59,6 @@ before_script:
   - ./src/corvus ./corvus.conf > corvus.log 2>&1 &
 
 script:
-  - redis-server -v
   - awk '/ERROR SUMMARY/ {if ($4 == 0) exit 0; else exit 1}' valgrind.log
   - make clean || true
   - make test
