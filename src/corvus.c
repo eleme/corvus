@@ -7,6 +7,8 @@
 #include <execinfo.h>
 #include <getopt.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include "corvus.h"
 #include "mbuf.h"
 #include "slot.h"
@@ -17,6 +19,7 @@
 #include "dict.h"
 #include "timer.h"
 #include "alloc.h"
+#include "daemon.h"
 
 static pthread_spinlock_t signal_lock;
 static struct context *contexts;
@@ -324,6 +327,8 @@ static const struct option opts[] = {
     {"slowlog-time", required_argument, NULL, 'g'},
     {"slowlog-max", required_argument, NULL, 'G'},
     {"slowlog-statsd", required_argument, NULL, 'E'},
+    {"pidfile", optional_argument, NULL, 'p'},
+    {"daemon", no_argument, NULL, 'd'},
     { 0, 0, 0, 0 },
 };
 
@@ -344,6 +349,8 @@ static const char *opts_desc[] = {
     "slowlog time in microseconds",
     "slowlog max len",
     "slowlog whether writing to statsd",
+    "set pid file",
+    "run as a daemon",
 };
 
 static void usage(const char *cmd)
@@ -363,7 +370,7 @@ static int parameter_init(int argc, const char *argv[]) {
     int ch;
     opterr = optind = 0;
     do {
-        ch = getopt_long(argc, (char * const *)argv, ":n:t:c:b:l:s:B:C:S:A:m:L:P:g:G:E:", opts, NULL);
+        ch = getopt_long(argc, (char * const *)argv, ":n:t:c:b:l:s:B:C:S:A:m:L:P:g:G:E:p:d:", opts, NULL);
         if (ch < 0) {
             break;
         }
@@ -416,12 +423,50 @@ static int parameter_init(int argc, const char *argv[]) {
             case 'E':
                 config_add("slowlog-statsd-enabled", optarg);
                 break;
+            case 'p':
+                config_add("pidfile", optarg);
+                break;
+            case 'd':
+                config_add("daemon", optarg);
+                break;
             default:
                 fprintf(stderr, "unknow option: %c\n", ch);
                 return CORVUS_ERR;
         }
     } while(1);
     return CORVUS_OK;
+}
+
+
+int create_pidfile() {
+    char pid[PIDFILE_MAX_LEN];
+    int fd, pid_len;
+    fd = open(config.pidfile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        LOG(ERROR, "open pidfile failed: %s", strerror(errno));
+        return CORVUS_ERR;
+    }
+
+    pid_len = snprintf(pid, PIDFILE_MAX_LEN, "%d", getpid());
+
+    ssize_t n;
+    n = write(fd, pid, pid_len);
+    if (n < 0) {
+        LOG(ERROR, "write to pidfile failed: %s", strerror(errno));
+        return CORVUS_ERR;
+    }
+
+    close(fd);
+
+    return CORVUS_OK;
+}
+void remove_pidfile() {
+    int status;
+    status= unlink(config.pidfile);
+    if (status < 0) {
+        LOG(ERROR, "unlink pid file '%s' failed: %s",
+                config.pidfile, strerror(errno));
+    }
 }
 
 int main(int argc, const char *argv[])
@@ -463,6 +508,12 @@ int main(int argc, const char *argv[])
     if (config.syslog) {
         openlog(NULL, LOG_NDELAY | LOG_NOWAIT, LOG_USER);
     }
+
+    if (config.daemon)
+        daemonize();
+
+    if (config.pidfile)
+        create_pidfile(&config);
 
     // allocate memory for `contexts`
     build_contexts();
@@ -529,6 +580,10 @@ int main(int argc, const char *argv[])
     destroy_contexts();
     cmd_map_destroy();
     cv_free(config.requirepass);
+    if (config.pidfile) {
+        remove_pidfile(&config);
+        cv_free(config.pidfile);
+    }
     config_free();
     if (config.syslog) closelog();
     return EXIT_SUCCESS;

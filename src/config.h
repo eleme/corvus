@@ -5,6 +5,7 @@
 
 #define CLUSTER_NAME_SIZE 127
 #define CONFIG_FILE_PATH_SIZE 256
+#define PIDFILE_MAX_LEN 24
 
 struct node_conf {
     struct address *addr;
@@ -32,6 +33,8 @@ struct corvus_config {
     int slowlog_log_slower_than;
     int slowlog_max_len;
     bool slowlog_statsd_enabled;
+    char *pidfile;
+    bool daemon;
 } config;
 
 void config_init();

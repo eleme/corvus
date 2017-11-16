@@ -15,3 +15,5 @@ corvus_test
 .*.sw[pon]
 
 .cache
+tags
+src/tags
