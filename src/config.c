@@ -38,6 +38,8 @@ const char * CONFIG_OPTIONS[] = {
     "slowlog-log-slower-than",
     "slowlog-max-len",
     "slowlog-statsd-enabled",
+    "pidfile",
+    "daemon",
 };
 
 void config_init()
@@ -60,6 +62,8 @@ void config_init()
     config.slowlog_max_len = 1024;
     config.slowlog_log_slower_than = -1;
     config.slowlog_statsd_enabled = 0;
+    config.pidfile = 0;
+    config.daemon = 0;
 
     memset(config.statsd_addr, 0, sizeof(config.statsd_addr));
     config.metric_interval = 10;
@@ -282,6 +286,13 @@ int config_add(char *name, char *value)
         config.slowlog_max_len = val;
     } else if (strcmp(name, "slowlog-statsd-enabled") == 0) {
         config_boolean(&config.slowlog_statsd_enabled, value);
+    } else if (strcmp(name, "pidfile") == 0) {
+        if (strlen(value) > 0) {
+            config.pidfile = cv_calloc(strlen(value) + 1, sizeof(char));
+            memcpy(config.pidfile, value, strlen(value));
+        }
+    } else if (strcmp(name, "daemon") == 0) {
+        config_boolean(&config.daemon, value);
     }
     return CORVUS_OK;
 }
@@ -335,6 +346,14 @@ int config_get(const char *name, char *value, size_t max_len)
         snprintf(value, max_len, "%d", config.slowlog_max_len);
     } else if (strcmp(name, "slowlog-statsd-enabled") == 0) {
         strncpy(value, BOOL_STR(config.slowlog_statsd_enabled), max_len);
+    } else if (strcmp(name, "pidfile") == 0) {
+        if (config.pidfile) {
+            strncpy(value, config.pidfile, max_len);
+        } else {
+            strncpy(value, "", max_len);
+        }
+    } else if (strcmp(name, "daemon") == 0) {
+        strncpy(value, BOOL_STR(config.daemon), max_len);
     } else {
         return CORVUS_ERR;
     }
