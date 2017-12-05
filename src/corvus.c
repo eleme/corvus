@@ -19,7 +19,7 @@
 #include "alloc.h"
 
 static pthread_spinlock_t signal_lock;
-static struct context *contexts;
+static struct context *contexts;    // 全局对象, context列表
 
 void sigsegv_handler(int sig)
 {
@@ -156,25 +156,32 @@ struct context *get_contexts()
     return contexts;
 }
 
+// 初始化context
 void context_init(struct context *ctx)
 {
     memset(ctx, 0, sizeof(struct context));
 
     dict_init(&ctx->server_table);
+    // 设置context的state状态
     ctx->state = CTX_UNKNOWN;
+    // 初始化缓冲区
     mbuf_init(ctx);
-    ctx->seed = time(NULL);
+    ctx->seed = time(NULL);     // 把seed设置为当前时间戳
 
+    // STAILQ是内核对单向队列的一个抽象
     STAILQ_INIT(&ctx->free_cmdq);
     STAILQ_INIT(&ctx->free_conn_infoq);
+    // TAILQ是linux内核对双向队列的一个抽象
     TAILQ_INIT(&ctx->servers);
     TAILQ_INIT(&ctx->conns);
 
     ctx->slowlog.capacity = 0;  // for non worker threads
 }
 
+// 初始化context
 void build_contexts()
 {
+    // 申请(线程数+1)个context, 并初始化
     contexts = cv_malloc(sizeof(struct context) * (config.thread + 1));
     for (int i = 0; i <= config.thread; i++) {
         context_init(&contexts[i]);
@@ -424,6 +431,7 @@ static int parameter_init(int argc, const char *argv[]) {
     return CORVUS_OK;
 }
 
+// 主函数入口
 int main(int argc, const char *argv[])
 {
     int i, err;
@@ -446,25 +454,31 @@ int main(int argc, const char *argv[])
         return EXIT_FAILURE;
     }
 
+    // 初始化corvus配置
     config_init();
+    // 读取配置文件, 并把配置更新到上一步生成的配置对象中
     if (config_read(argv[argc - 1]) == CORVUS_ERR) {
         fprintf(stderr, "Error: invalid config.\n");
         return EXIT_FAILURE;
     }
+    // 通过命令行进行配置, 可以覆盖上一步的配置文件中对应的配置
     if (parameter_init(argc, argv) != CORVUS_OK) {
         usage(argv[0]);
         return EXIT_FAILURE;
     }
+    // 用户没有配置redis节点, 报错退出
     if (config.node->len <= 0) {
         fprintf(stderr, "Error: invalid upstream list, `node` should be set to a valid nodes list.\n");
         return EXIT_FAILURE;
     }
 
+    // 用户启用syslog(把corvus的log通过syslog打出来)
     if (config.syslog) {
         openlog(NULL, LOG_NDELAY | LOG_NOWAIT, LOG_USER);
     }
 
     // allocate memory for `contexts`
+    // 初始化context列表
     build_contexts();
 
     if (setup_signals() == CORVUS_ERR) {

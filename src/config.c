@@ -361,14 +361,18 @@ int read_line(struct cvstr *line, FILE *fp)
 }
 
 // Return whether this line contains option
+// 判断读取的行的内容, 是否有配置项被启用, 并且把配置的kv写入name和value中
 bool parse_option(const char *line, char *name, char *value)
 {
     int i = 0;
+    // 找到行开头
     for (i = 0; (line[i] == ' ' || line[i] == '\r'
             || line[i] == '\t' || line[i] == '\n'); i++);
+    // 本行没有内容或者是注释, 返回false, 不用设置name和value
     if (line[i] == '\0' || line[i] == '#') {
         return false;
     }
+    // 本行有有效的配置, 把本行内容按格式(xxxx aaaa)写入到name和value中
     if (2 != sscanf(line + i, "%s%s", name, value)) {
         LOG(WARN, "Ignored invalid line: %s", line);
         return false;
@@ -418,6 +422,7 @@ int config_set_file_path(const char *path)
     return CORVUS_OK;
 }
 
+// 读取配置文件并进行配置
 int config_read(const char *filename)
 {
     if (strlen(filename) > CONFIG_FILE_PATH_SIZE) {
@@ -439,20 +444,24 @@ int config_read(const char *filename)
     }
     int len = 0;
     struct cvstr line = cvstr_new(1024);
+    // 打开配置文件, 并循环读取, 直至文件读取完毕
     while ((len = read_line(&line, fp)) != -1) {
         char name[len + 1], value[len + 1];
         memset(name, 0, sizeof(name));
         memset(value, 0, sizeof(value));
+        // 读取本行配置文件, 把配置写入name和value中
         if (!parse_option(line.data, name, value)) {
             continue;
         }
 
+        // 更新配置项到config对象中
         if (config_add(name, value) == -1) {
             cvstr_free(&line);
             fclose(fp);
             return CORVUS_ERR;
         }
     }
+    // 关闭相关文件描述符
     cvstr_free(&line);
     fclose(fp);
     return CORVUS_OK;
