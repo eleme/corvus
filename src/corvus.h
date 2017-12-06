@@ -72,11 +72,11 @@ struct context {
 
     /* connection pool */
     struct dict server_table;
-    struct conn_tqh conns;
+    struct conn_tqh conns;      // 客户端到corvus的链接, 双向队列
 
     unsigned int seed;
 
-    struct conn_tqh servers;
+    struct conn_tqh servers;    // corvus到redis实例的链接, 双向队列
 
     /* event */
     struct event_loop loop;     // epoll事件循环对象

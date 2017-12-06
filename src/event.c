@@ -46,15 +46,26 @@ void event_free(struct event_loop *loop)
     cv_free(loop->events);
 }
 
+// 添加epoll的fd监听指定的fd, 以及监听的事件类型
 int event_register(struct event_loop *loop, struct connection *c, int mask)
 {
+    // 结构体epoll_event有个属性events, 它是一下几个宏的集合:
+    // 1. EPOLLIN:          触发该事件, 表示对应的fd上有可读数据
+    // 2. EPOLLOUT:         触发该事件, 表示对应的fd上可以写数据
+    // 3. EPOLLPRI：        表示对应的文件描述符有紧急的数据可读（这里应该表示有带外数据到来）；
+    // 4. EPOLLERR：        表示对应的文件描述符发生错误；
+    // 5. EPOLLHUP：        表示对应的文件描述符被挂断；
+    // 6. EPOLLET：         将EPOLL设为边缘触发(Edge Triggered)模式，这是相对于水平触发(Level Triggered)来说的。
+    // 7. EPOLLONESHOT：  只监听一次事件，当监听完这次事件之后，如果还需要继续监听这个socket的话，需要再次把这个socket加入到EPOLL队列里。
     struct epoll_event event;
 
     event.data.ptr = c;
     event.events = EPOLLET;
-    if (mask & E_WRITABLE) event.events |= EPOLLOUT;
-    if (mask & E_READABLE) event.events |= EPOLLIN;
+    if (mask & E_WRITABLE) event.events |= EPOLLOUT;    // 监听可写事件
+    if (mask & E_READABLE) event.events |= EPOLLIN;     // 监听可读事件
 
+    // epoll_ctl用于控制某个epoll文件描述符上的事件(注册, 修改, 删除事件)
+    // 它接受的参数分别为(epoll的文件描述符, 要进行的操作, 需要监听的文件描述符, 告诉内核需要监听什么事件)
     if (epoll_ctl(loop->epfd, EPOLL_CTL_ADD, c->fd, &event) == -1) {
         LOG(ERROR, "event_register: %d %s", c->fd, strerror(errno));
         return -1;
@@ -95,6 +106,7 @@ int event_deregister(struct event_loop *loop, struct connection *c)
     return 0;
 }
 
+// 监听epoll上面注册的fd的对应事件
 int event_wait(struct event_loop *loop, int timeout)
 {
     int i, j, nevents;
@@ -103,8 +115,8 @@ int event_wait(struct event_loop *loop, int timeout)
         nevents = epoll_wait(loop->epfd, loop->events, loop->nevent, timeout);
         if (nevents >= 0) {
             for (i = 0; i < nevents; i++) {
-                struct epoll_event *e = &loop->events[i];
-                struct connection *c = e->data.ptr;
+                struct epoll_event *e = &loop->events[i];   // 获取事件
+                struct connection *c = e->data.ptr;         // 获取对应的连接
                 uint32_t mask = 0;
 
                 bool duplicated = false;
@@ -121,11 +133,13 @@ int event_wait(struct event_loop *loop, int timeout)
                 }
                 if (duplicated) continue;
 
+                // 获取监听事件类别
                 if (e->events & EPOLLIN) mask |= E_READABLE;
                 if (e->events & EPOLLOUT) mask |= E_WRITABLE;
                 if (e->events & EPOLLHUP) mask |= E_READABLE;
                 if (e->events & EPOLLERR) mask |= E_ERROR;
 
+                // 执行触发函数
                 c->ready(c, mask);
             }
             return nevents;

@@ -315,24 +315,31 @@ void *main_loop(void *data)
         LOG(ERROR, "Fatal: fail to create proxy.");
         exit(EXIT_FAILURE);
     }
+    // 把proxy的文件描述符注册到epoll事件循环中, 监听事件类型为可读
+    // 实际上就是epoll监听corvus的tcp server接收的请求
     if (event_register(&ctx->loop, &ctx->proxy, E_READABLE) == -1) {
         LOG(ERROR, "Fatal: fail to register proxy.");
         exit(EXIT_FAILURE);
     }
 
+    // 初始化定时器
     if (timer_init(&ctx->timer, ctx) == -1) {
         LOG(ERROR, "Fatal: fail to init timer.");
         exit(EXIT_FAILURE);
     }
+    // 把定时器的fd注册到epoll事件循环中, 监听事件类型为可读
+    // 实际上就是epoll监听超时事件
     if (event_register(&ctx->loop, &ctx->timer, E_READABLE) == -1) {
         LOG(ERROR, "Fatal: fail to register timer.");
         exit(EXIT_FAILURE);
     }
+    // 启动定时器
     if (timer_start(&ctx->timer) == -1) {
         LOG(ERROR, "Fatal: fail to start timer.");
         exit(EXIT_FAILURE);
     }
 
+    // 循环等待, 监听epoll注册的相关事件
     while (ctx->state != CTX_QUIT) {
         event_wait(&ctx->loop, -1);
     }
