@@ -285,6 +285,7 @@ void context_free(struct context *ctx)
     event_free(&ctx->loop);
 }
 
+// 处理请求的逻辑函数
 void *main_loop(void *data)
 {
     struct context *ctx = data;
@@ -300,11 +301,16 @@ void *main_loop(void *data)
         }
     }
 
+    // 初始化当前context的事件循环
     if (event_init(&ctx->loop, 1024) == -1) {
         LOG(ERROR, "Fatal: fail to create event loop.");
         exit(EXIT_FAILURE);
     }
 
+    // 初始化当前context的proxy对象, 主要作用:
+    // 1. 创建proxy这个链接来监听corvus的TCP server接口
+    // 2. 把proxy和当前context绑定
+    // 3. 为proxy设置处理请求的函数
     if (proxy_init(&ctx->proxy, ctx, "0.0.0.0", config.bind) == -1) {
         LOG(ERROR, "Fatal: fail to create proxy.");
         exit(EXIT_FAILURE);
@@ -523,6 +529,7 @@ int main(int argc, const char *argv[])
     slot_create_job(SLOT_UPDATE);
 
     // start worker threads
+    // 创建真正的corvus处理请求的线程
     for (i = 0; i < config.thread; i++) {
         if (thread_spawn(&contexts[i], main_loop) == CORVUS_ERR) {
             LOG(ERROR, "fail to start worker thread: %d", i);
@@ -545,12 +552,14 @@ int main(int argc, const char *argv[])
 
     LOG(INFO, "serve at 0.0.0.0:%d", config.bind);
 
+    // join所有worker线程, block在这里
     for (i = 0; i < config.thread; i++) {
         if ((err = pthread_join(contexts[i].thread, NULL)) != 0) {
             LOG(WARN, "pthread_join: %s", strerror(err));
         }
     }
 
+    // corvus停止执行, 下面都是需要做的清理工作, 防止内存泄露
     // stop stats thread
     if (config.stats) {
         stats_kill();

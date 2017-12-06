@@ -61,16 +61,17 @@ void proxy_ready(struct connection *self, uint32_t mask)
     }
 }
 
+// 初始化proxy对象, 创建TCP server
 int proxy_init(struct connection *proxy, struct context *ctx, char *host, int port)
 {
-    int fd = socket_create_server(host, port);
+    int fd = socket_create_server(host, port);  // 以host和port创建TCP server服务器
     if (fd == -1) {
         LOG(ERROR, "proxy_init: fail to create server fd");
         return CORVUS_ERR;
     }
 
-    conn_init(proxy, ctx);
-    proxy->fd = fd;
-    proxy->ready = proxy_ready;
+    conn_init(proxy, ctx);          // 初始化proxy这个链接(为proxy申请内存空间, 绑定ctx到proxy上)
+    proxy->fd = fd;                 // 绑定server的文件描述符到proxy这个链接上
+    proxy->ready = proxy_ready;     // 设置处理函数
     return CORVUS_OK;
 }

@@ -66,6 +66,7 @@ struct context {
     struct conn_info_tqh free_conn_infoq;
     struct buf_time_tqh free_buf_timeq;
 
+    // 连接代理, 它会监听corvus接收到的请求, 并通过proxy_ready来处理
     struct connection proxy;
     struct connection timer;
 
@@ -78,7 +79,7 @@ struct context {
     struct conn_tqh servers;
 
     /* event */
-    struct event_loop loop;
+    struct event_loop loop;     // epoll事件循环对象
 
     /* thread control */
     int state;

@@ -9,6 +9,7 @@
 #include "logging.h"
 #include "alloc.h"
 
+// 初始化epoll事件循环, 包括创建epoll句柄, 申请事件空间, 更新event_loop对象
 int event_init(struct event_loop *loop, int nevent)
 {
     int epfd;
@@ -16,18 +17,20 @@ int event_init(struct event_loop *loop, int nevent)
 
     assert(nevent > 0);
 
+    // 创建epoll句柄(在内核申请空间), 告诉内核最多监听nevent个fd
     epfd = epoll_create(nevent);
     if (epfd < 0) {
         return -1;
     }
 
+    // 为nevent个epoll事件申请内存空间
     events = cv_calloc(nevent, sizeof(struct epoll_event));
     if (events == NULL) {
         close(epfd);
         return -1;
     }
 
-    memset(loop, 0, sizeof(struct event_loop));
+    memset(loop, 0, sizeof(struct event_loop));     // 把event_loop写入loop指针
     loop->epfd = epfd;
     loop->events = events;
     loop->nevent = nevent;

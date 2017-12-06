@@ -192,6 +192,7 @@ void stats_node_info_agg(struct bytes *bytes)
     }
 }
 
+// 发送一些基础的打点信息
 void stats_send_simple()
 {
     struct stats stats;
@@ -299,6 +300,7 @@ static void stats_send_slow_log()
     }
 }
 
+// statsd打点守护线程函数
 void *stats_daemon(void *data)
 {
     /* Make the thread killable at any time can work reliably. */
@@ -307,14 +309,15 @@ void *stats_daemon(void *data)
 
     while (1) {
         sleep(config.metric_interval);
-        stats_send_simple();
-        stats_send_node_info();
-        stats_send_slow_log();
+        stats_send_simple();        // 发送基本打点数据
+        stats_send_node_info();     // 发送每个corvus节点信息
+        stats_send_slow_log();      // 发送慢查询打点
         LOG(DEBUG, "sending metrics");
     }
     return NULL;
 }
 
+// 创建statsd打点线程
 int stats_init()
 {
     int len;

@@ -127,6 +127,7 @@ void conn_info_init(struct conn_info *info)
     info->status = DISCONNECTED;
 }
 
+// 初始化连接, 把context绑定在这个链接上
 void conn_init(struct connection *conn, struct context *ctx)
 {
     memset(conn, 0, sizeof(struct connection));

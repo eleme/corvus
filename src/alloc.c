@@ -16,7 +16,7 @@ void *cv_raw_malloc(size_t size, const char *file, int line)
 
 void *cv_raw_calloc(size_t number, size_t size, const char *file, int line)
 {
-    void *ptr = je_calloc(number, size);
+    void *ptr = je_calloc(number, size);    // 创建number个对象, 每个的长度为size bytes
     if (ptr == NULL) {
         LOG(ERROR, "Fatal: OOM trying to allocate %d bytes at %s:%d",
                 number * size, file, line);

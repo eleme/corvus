@@ -16,11 +16,11 @@ enum {
 };
 
 struct connection {
-    struct context *ctx;
+    struct context *ctx;    // context指针
 
     TAILQ_ENTRY(connection) next;
 
-    int fd;
+    int fd;     // socket文件描述符
 
     struct conn_info *info;
 
@@ -30,7 +30,7 @@ struct connection {
     bool eof;
     bool registered;
 
-    void (*ready)(struct connection *self, uint32_t mask);
+    void (*ready)(struct connection *self, uint32_t mask);      // 请求处理函数
 };
 
 struct conn_info {

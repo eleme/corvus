@@ -16,6 +16,7 @@
 #include "mbuf.h"
 #include "logging.h"
 
+// 设置文件描述符fd端口重用, SO_REUSEADDR用于TCP处于time_wait状态下的socket, 重复绑定使用
 static int set_reuseaddr(int fd)
 {
     int optval = 1;
@@ -26,6 +27,9 @@ static int set_reuseaddr(int fd)
     return CORVUS_OK;
 }
 
+// 设置文件描述符fd允许完全重复捆绑(允许多个进程或者线程绑定到同一端口), 为了提高性能
+// 这样做的好处是, 可以启动多个线程来监听并处理同一个端口上的请求, 而不是使用旧有的单
+// 线程监听, 多worker执行, 消除了处理海量请求的瓶颈
 static int set_reuseport(int fd)
 {
     int optval = 1;
@@ -36,13 +40,17 @@ static int set_reuseport(int fd)
     return CORVUS_OK;
 }
 
+// 通常编写socket server时的第二步, 绑定socket和地址, 以及设置socket为listen模式.
+// 在创建socket之后执行
 static int cv_listen(int fd, struct sockaddr *sa, socklen_t len, int backlog)
 {
+    // 把地址与socket文件描述符绑定
     if (bind(fd, sa, len) == -1) {
         LOG(ERROR, "bind: %s", strerror(errno));
         return CORVUS_ERR;
     }
 
+    // 设置这个socket文件描述符开始接收连接, backlog指定了同时能处理的最大连接数
     if (listen(fd, backlog) == -1) {
         LOG(ERROR, "listen: %s", strerror(errno));
         return CORVUS_ERR;
@@ -68,6 +76,8 @@ static int cv_accept(int fd, struct sockaddr *sa, socklen_t *len)
     return s;
 }
 
+// 编写socket server的第一步, 创建套接字
+// 建立新的socket用于通信, 返回该socket的文件描述符
 static inline int cv_socket(int domain, int type, int protocol)
 {
     int fd;
@@ -96,6 +106,7 @@ static int cv_connect(int fd, const struct sockaddr *addr, socklen_t addrlen)
     return CORVUS_OK;
 }
 
+// 获取目标地址的信息, 返回值存放在第三个参数中
 static int cv_getaddrinfo(const char *addr, int port, struct addrinfo **servinfo, int socktype)
 {
     int err = 0;
@@ -104,9 +115,14 @@ static int cv_getaddrinfo(const char *addr, int port, struct addrinfo **servinfo
 
     snprintf(port_str, 6, "%d", port);
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = socktype;
+    hints.ai_family = AF_INET;      // 期望返回的ai_family
+    hints.ai_socktype = socktype;   // 期望返回的sock类型
 
+    // getaddrinfo函数可以处理名字到地址以及服务到端口的转换, 返回一个addrinfo的指针. 该函数所需参数依次为
+    // 1. 主机名
+    // 2. 端口号
+    // 3. 指向某个addrinfo的指针(调用者在这个对象中填入关于期望返回的信息类型的暗示)
+    // 4. 本函数通过最后这个变量指针来返回一个指向addrinfo结构体链表的指针
     if ((err = getaddrinfo(addr, port_str, &hints, servinfo)) != 0) {
         LOG(ERROR, "getaddrinfo: %s", gai_strerror(err));
         return CORVUS_ERR;
@@ -114,13 +130,16 @@ static int cv_getaddrinfo(const char *addr, int port, struct addrinfo **servinfo
     return CORVUS_OK;
 }
 
+// 把文件描述符fd设置为非阻塞I/O
 int socket_set_nonblocking(int fd)
 {
+    // 获取fd的文件状态标志
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags == -1) {
         LOG(WARN, "fcntl: %s", strerror(errno));
         return CORVUS_ERR;
     }
+    // 更新fd的文件状态标志为非阻塞I/O
     if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
         LOG(WARN, "fail to set nonblock for fd %d: %s", fd, strerror(errno));
         return CORVUS_ERR;
@@ -154,16 +173,22 @@ int socket_set_timeout(int fd, int timeout)
     return CORVUS_OK;
 }
 
+// 创建一个socket server. 通常创建socket server 分三步:
+// 1. 创建socket
+// 2. bind: 绑定socket和地址, listen: 设置socket为listen状态
+// 3. accept: 开始接收并处理请求
 int socket_create_server(char *bindaddr, int port)
 {
     int s = -1;
     struct addrinfo *p, *servinfo;
 
+    // 获取目标地址的相关信息, 存储在servinfo中, 且返回值是个指针链表
     if (cv_getaddrinfo(bindaddr, port, &servinfo, SOCK_STREAM) == CORVUS_ERR) {
         LOG(ERROR, "socket_create_server: fail to get address info");
         return CORVUS_ERR;
     }
 
+    // 遍历servinfo这个链表, 创建socket, 获取文件描述符(上面的第一步)
     for (p = servinfo; p != NULL; p = p->ai_next) {
         if ((s = cv_socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
             continue;
@@ -176,24 +201,28 @@ int socket_create_server(char *bindaddr, int port)
         return CORVUS_ERR;
     }
 
+    // 设置非阻塞I/O
     if (socket_set_nonblocking(s) == -1) {
         close(s);
         freeaddrinfo(servinfo);
         return CORVUS_ERR;
     }
 
+    // 设置端口重用(重复利用time_wait状态的tcp socket)
     if (set_reuseaddr(s) == -1) {
         close(s);
         freeaddrinfo(servinfo);
         return CORVUS_ERR;
     }
 
+    // 设置允许多线程绑定监听同一端口
     if (set_reuseport(s) == -1) {
         close(s);
         freeaddrinfo(servinfo);
         return CORVUS_ERR;
     }
 
+    // bind和listen(把socket和地址绑定, 监听) (上面的第二步)
     if (cv_listen(s, p->ai_addr, p->ai_addrlen, 1024) == -1) {
         close(s);
         freeaddrinfo(servinfo);
