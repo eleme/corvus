@@ -49,6 +49,7 @@ This is ok and its reason is quite subtle:
     to determine the loop exit.
 */
 
+// 初始化node_list这个全局变量
 static inline void node_list_init()
 {
     struct node_conf *node = config_get_node();
@@ -59,6 +60,7 @@ static inline void node_list_init()
         node_list.len++;
     }
     pthread_rwlock_unlock(&node_list.lock);
+    // 释放node
     config_node_dec_ref(node);
 }
 
@@ -369,6 +371,9 @@ void do_job(struct context *ctx, int job)
     }
 }
 
+// slot manager线程真正执行的函数, 该函数通过slot_job变量来进行更新slot的操作
+// 在函数刚执行的时候, slot_job为SLOT_UPDATE_UNKNOWN, 它会释放互斥锁job_mutex, 同时会等待信号signal_cond, block在386行
+// 当slot_job被slot_create_job函数更新后, signal_cond被获取到, 线程会获取互斥锁job_mutex, 然后会执行到391行之后的东西, 对slot进行操作
 void *slot_manager(void *data)
 {
     int job;
@@ -377,25 +382,31 @@ void *slot_manager(void *data)
     pthread_mutex_lock(&job_mutex);
     in_progress = 0;
 
+    // context的state不是退出状态的时候执行
     while (ctx->state != CTX_QUIT) {
         if (slot_job == SLOT_UPDATE_UNKNOWN) {
+            // slot_job没有变化的时候, 该线程会block在这里
             pthread_cond_wait(&signal_cond, &job_mutex);
             continue;
         }
 
-        job = slot_job;
-        slot_job = SLOT_UPDATE_UNKNOWN;
+        // 该线程获取到signal_cond, 执行到这里之前会获取互斥锁job_mutex
+        job = slot_job;     // 获取当前更新后的slot_job
+        slot_job = SLOT_UPDATE_UNKNOWN;     // 把slot_job重置
 
-        pthread_mutex_unlock(&job_mutex);
+        pthread_mutex_unlock(&job_mutex);   // 解锁
 
+        // 真正的更新slot逻辑
         do_job(ctx, job);
+        // 睡眠100ms
         usleep(100000);
 
-        pthread_mutex_lock(&job_mutex);
-        in_progress = 0;
+        pthread_mutex_lock(&job_mutex);     // 加锁
+        in_progress = 0;                    // 重置in_progress变量(slot_create_job在更新slot_job变量的时候会更新这个变量)
     }
     pthread_mutex_unlock(&job_mutex);
 
+    // context的state是退出状态, 需要销毁相关资源
     for (int i = 0; i < REDIS_CLUSTER_SLOTS; i++) {
         struct node_info *n = ATOMIC_IGET(slot_map.data[i], NULL);
         if (n == NULL) {
@@ -501,35 +512,49 @@ void node_list_get(char *dest)
     pthread_rwlock_unlock(&node_list.lock);
 }
 
+// 更新slot_job变量
 void slot_create_job(int type)
 {
+    // 更新slot更新计数器到statsd打点
     incr_slot_update_counter();
+    // 获取互斥锁job_mutex
     pthread_mutex_lock(&job_mutex);
+    // 检查in_progress是否为0(该变量表示slot更新逻辑是否在进行中)
     if (!in_progress || type == SLOT_UPDATER_QUIT) {
         in_progress = 1;
         slot_job = type;
+        // 释放信号锁, 用来触发slot manager线程工作
         pthread_cond_signal(&signal_cond);
     }
+    // 释放互斥锁
     pthread_mutex_unlock(&job_mutex);
 }
 
+// 创建slot manager线程, 并启动该线程
 int slot_start_manager(struct context *ctx)
 {
     int err;
+    // 初始化slot_map.data
     memset(slot_map.data, 0, sizeof(struct node_info*) * REDIS_CLUSTER_SLOTS);
+    // 初始化slot_map.free_nodes
     dict_init(&slot_map.free_nodes);
+    // 初始化slot_map.node_map
     dict_init(&slot_map.node_map);
+    // 初始化node_list
     node_list_init();
 
+    // 初始化互斥锁job_mutex
     if ((err = pthread_mutex_init(&job_mutex, NULL)) != 0) {
         LOG(ERROR, "pthread_mutex_init: %s", strerror(err));
         return CORVUS_ERR;
     }
+    // 初始化信号锁signal_cond
     if ((err = pthread_cond_init(&signal_cond, NULL)) != 0) {
         LOG(ERROR, "pthread_cond_init: %s", strerror(err));
         return CORVUS_ERR;
     }
 
     LOG(INFO, "starting slot manager thread");
+    // 创建线程并执行
     return thread_spawn(ctx, slot_manager);
 }

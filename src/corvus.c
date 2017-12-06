@@ -132,12 +132,13 @@ int64_t get_time()
 
 int thread_spawn(struct context *ctx, void *(*start_routine) (void *))
 {
-    pthread_attr_t attr;
+    pthread_attr_t attr;    // 线程属性
     pthread_t thread;
     size_t stacksize = 0;
     int err;
 
     /* Set the stack size as by default it may be small in some system */
+    // 初始化线程属性, 线程属性中有stacksize(线程栈的大小), 下面需要更改stacksize这个attr
     if ((err = pthread_attr_init(&attr)) != 0) {
         LOG(ERROR, "pthread_attr_init: %s", strerror(err));
         return CORVUS_ERR;
@@ -150,22 +151,25 @@ int thread_spawn(struct context *ctx, void *(*start_routine) (void *))
     if (stacksize <= 0) {
         stacksize = 1;
     }
+    // 调整stacksize, 最少需要4M
     while (stacksize < THREAD_STACK_SIZE) {
         stacksize <<= 1;
     }
+    // 设置线程属性的stacksize
     if ((err = pthread_attr_setstacksize(&attr, stacksize)) != 0) {
         LOG(ERROR, "pthread_attr_setstacksize: %s", strerror(err));
         pthread_attr_destroy(&attr);
         return CORVUS_ERR;
     }
 
+    // 创建线程, pthread_create函数参数依次为(指向线程的指针, 线程属性, 线程执行的函数的指针, 执行函数需要的参数)
     if ((err = pthread_create(&thread, &attr, start_routine, (void*)ctx)) != 0) {
         LOG(ERROR, "pthread_create: %s", strerror(err));
         pthread_attr_destroy(&attr);
         return CORVUS_ERR;
     }
     ctx->thread = thread;
-    pthread_attr_destroy(&attr);
+    pthread_attr_destroy(&attr);    // 去除线程属性初始化
     return CORVUS_OK;
 }
 
