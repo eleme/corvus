@@ -21,6 +21,7 @@
 static pthread_spinlock_t signal_lock;
 static struct context *contexts;    // 全局对象, context列表
 
+// 发生段错误时释放的信号执行的函数
 void sigsegv_handler(int sig)
 {
     if (pthread_spin_trylock(&signal_lock) == EBUSY) {
@@ -42,12 +43,14 @@ void sigsegv_handler(int sig)
     kill(getpid(), sig);
 }
 
+// 信号处理函数
 void sig_handler(int sig)
 {
     int i;
     switch (sig) {
         case SIGINT:
         case SIGTERM:
+            // 对于上面两种信号, 修改context的state
             for (i = 0; i < config.thread; i++) {
                 contexts[i].state = CTX_BEFORE_QUIT;
             }
@@ -58,6 +61,7 @@ void sig_handler(int sig)
     }
 }
 
+// 忽略部分信号
 int ignore_signal(int sig)
 {
     if (signal(sig, SIG_IGN) == SIG_ERR) {
@@ -68,9 +72,11 @@ int ignore_signal(int sig)
     return CORVUS_OK;
 }
 
+// 对于不同类型的信号, 注册到信号集
 int register_signal(int sig, struct sigaction *act)
 {
     LOG(DEBUG, "Registering signal[%s]", strsignal(sig));
+    // 指定对不同信号进行不同的处理动作
     if (sigaction(sig, act, NULL) != 0) {
         LOG(CRIT, "Failed to register signal[%s]: %s",
             strsignal(sig), strerror(errno));
@@ -79,24 +85,36 @@ int register_signal(int sig, struct sigaction *act)
     return CORVUS_OK;
 }
 
+/** 初始化信号, 结构体sigaction结构如下
+ * struct sigaction
+ * {
+ *      void (*sa_handler) (int);       表示信号处理函数, 与signal函数中的信号处理函数相似
+ *      void (*sa_sigaction)(int, siginfo_t *, void *); 信号处理函数, 可以获取信号的详细信息
+ *      sigset_t sa_mask;               用来设置在处理该信号时暂时将sa_mask指定的信号搁置
+ *      int sa_flags;                   用来设置信号处理的其他相关操作
+ *      void (*sa_restorer) (void);     已废弃
+ * }
+ */
 int create_signal_action(struct sigaction *act)
 {
+    // 初始化信号集为空, 失败返回-1
     if (sigemptyset(&(act->sa_mask)) != 0) {
         LOG(CRIT, "Failed to initialize signal set: %s", strerror(errno));
         return CORVUS_ERR;
     }
     act->sa_flags = 0;
-    act->sa_handler = sig_handler;
+    act->sa_handler = sig_handler;  // 指定信号处理函数
     return CORVUS_OK;
 }
 
+// 初始化信号, 并把部分信号注册上去, 同时忽略部分信号
 int setup_signals()
 {
     struct sigaction act;
     RET_NOT_OK(create_signal_action(&act));
-    RET_NOT_OK(register_signal(SIGINT, &act));
-    RET_NOT_OK(register_signal(SIGTERM, &act));
-    RET_NOT_OK(register_signal(SIGSEGV, &act));
+    RET_NOT_OK(register_signal(SIGINT, &act));      // interrupt的信号
+    RET_NOT_OK(register_signal(SIGTERM, &act));     // 通过kill指令来获取终止执行本程序的信号
+    RET_NOT_OK(register_signal(SIGSEGV, &act));     // 当一个进程执行了一个无效的内存引用，或发生段错误时发送给它的信号
     RET_NOT_OK(ignore_signal(SIGHUP));
     RET_NOT_OK(ignore_signal(SIGPIPE));
     return CORVUS_OK;
@@ -481,19 +499,23 @@ int main(int argc, const char *argv[])
     // 初始化context列表
     build_contexts();
 
+    // 初始化信号, 并注册部分信号, 制定触发的函数
     if (setup_signals() == CORVUS_ERR) {
         fprintf(stderr, "Error: failed to setup signals.\n");
         return EXIT_FAILURE;
     }
 
+    // 初始化redis操作dict
     cmd_map_init();
 
     // start slot management thread
+    // 创建slot manager线程, 用来管理slot相关逻辑
     if (slot_start_manager(&contexts[config.thread]) == CORVUS_ERR) {
         LOG(ERROR, "fail to start slot manager thread");
         return EXIT_FAILURE;
     }
     // create first slot updating job
+    // 更新slot_job变量, 进而可以触发slot manager线程操作
     slot_create_job(SLOT_UPDATE);
 
     // start worker threads

@@ -24,6 +24,8 @@
 
 #define CMD_RECYCLE_SIZE 1024
 
+// C的宏中, #的功能是将它后面的宏参数进行字符化操作, 在对它所引用的宏变量通过替换后, 在左右各加一个引号
+// ##是连接符, 用来将两个token链接为一个token
 #define CMD_BUILD_MAP(cmd, type, access) {#cmd, CMD_##cmd, CMD_##type, CMD_ACCESS_##access},
 
 #define CMD_INCREF(cmd)                                   \
@@ -1135,6 +1137,7 @@ void cmd_mark(struct command *cmd, int fail)
     }
 }
 
+// 初始化一个dict, key是redis的命令名称, value是cmd_item
 void cmd_map_init()
 {
     dict_init(&command_map);

@@ -251,10 +251,10 @@ struct redirect_info {
 };
 
 struct cmd_item {
-    char *cmd;
-    int value;
-    int type;
-    int access;
+    char *cmd;      // redis操作名
+    int value;      // CMD_DEL ... (155行)
+    int type;       // CMD_BASIC, CMD_UNIMPL, CMD_BASIC, CMD_COMPLEX, CMD_EXTRA (158行)
+    int access;     // CMD_ACCESS_READ, CMD_ACCESS_WRITE, CMD_ACCESS_UNKNOWN (173行)
 };
 
 /* error responses */
