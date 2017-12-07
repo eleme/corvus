@@ -11,6 +11,16 @@
 #include "server.h"
 #include "timer.h"
 
+/************************************
+ * 定时器逻辑:
+ * corvus妙地运用了定时器把时间转换成文件描述符, 可以使用epoll来进行监听这个特性, 定时触发超时事件. 在corvus中, 每隔0.5s会触发一次超时
+ * 在超时事件发生后,
+ *      1. 如果用户设置了client_timeout, corvus会检查客户端到corvus是否有超时连接;
+ *      2. 如果用户设置了server_timeout, corvus会检查corvus到redis实例是否有超时连接
+ *      3. corvus会检查context的status属性是否发生改变
+ ************************************
+ */
+
 bool conn_active(struct context *ctx)
 {
     struct connection *c;

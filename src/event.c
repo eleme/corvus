@@ -107,6 +107,7 @@ int event_deregister(struct event_loop *loop, struct connection *c)
 }
 
 // 监听epoll上面注册的fd的对应事件
+// 当获取到事件后, 需要获取监听事件类型, 然后通过调用对应事件的连接的ready函数来执行对应的事件
 int event_wait(struct event_loop *loop, int timeout)
 {
     int i, j, nevents;

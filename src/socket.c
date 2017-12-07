@@ -58,15 +58,17 @@ static int cv_listen(int fd, struct sockaddr *sa, socklen_t len, int backlog)
     return CORVUS_OK;
 }
 
+// corvus接受来自客户端的请求, 返回新的套接字描述符, 表示一个新连接
 static int cv_accept(int fd, struct sockaddr *sa, socklen_t *len)
 {
     int s = -1;
     while (1) {
+        // socket模块的accpet函数, 用于接受客户端的请求, 返回值是一个新的套接字描述符, 代表和客户端建立的新连接
         s = accept(fd, sa, len);
-        if (s == -1) {
+        if (s == -1) {      // 创建连接失败
             switch (errno) {
                 case EINTR: continue;
-                case EAGAIN: return CORVUS_AGAIN;
+                case EAGAIN: return CORVUS_AGAIN;   // 非阻塞I/O操作出现的错误
             }
             LOG(ERROR, "accept: %s", strerror(errno));
             return CORVUS_ERR;
@@ -147,6 +149,8 @@ int socket_set_nonblocking(int fd)
     return CORVUS_OK;
 }
 
+// 设置socket禁用Nagle算法, 该算法会对数据进行合并, 试图构建一个完整的TCP报文, 所以会产生一定的延迟
+// 但是该算法可以最小化在线路上发送的报文的数量, 从而可以最小化网络拥塞的问题
 int socket_set_tcpnodelay(int fd)
 {
     int optval = 1;
@@ -243,16 +247,23 @@ int socket_create_udp_client()
     return cv_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 }
 
+// 创建socket server的第三步, accept, 接受客户端请求, 创建从客户端到corvus的连接
 int socket_accept(int fd, char *ip, size_t ip_len, int *port)
 {
     int s;
     struct sockaddr_storage sa;
     socklen_t salen = sizeof(sa);
 
+    // 接受请求, 返回值为新连接的套接字fd
     s = cv_accept(fd, (struct sockaddr*)&sa, &salen);
     if (s == CORVUS_AGAIN || s == CORVUS_ERR) return s;
 
     struct sockaddr_in *addr = (struct sockaddr_in*)&sa;
+    // inet_ntop函数用于把二进制地址转换成text格式, 参数如下:
+    // 1. AF_INET或AF_INET6
+    // 2. 指向socket地址结构中的二进制值
+    // 3. 指向转换后的字符串存储地址
+    // 4. 指定存储单元大小
     if (ip) inet_ntop(AF_INET, (void*)&(addr->sin_addr), ip, ip_len);
     if (port) *port = ntohs(addr->sin_port);
     return s;
@@ -401,6 +412,7 @@ int socket_parse_addr(char *addr, struct address *address)
     return port;
 }
 
+// 创建监听事件
 int socket_create_eventfd()
 {
     int fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);

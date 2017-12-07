@@ -136,24 +136,33 @@ void conn_init(struct connection *conn, struct context *ctx)
     conn->fd = -1;
 }
 
+// 创建一个新的连接
 struct connection *conn_create(struct context *ctx)
 {
     struct connection *conn;
+    // 检查连接队列里队首连接是否可用,
+    // 1. 如果不可用, 就从队列中取出这个连接conn
+    // 2. 如果可用, 就向内存申请空间, 用于初始化conn
+    // 3. 最后初始化conn
     if ((conn = TAILQ_FIRST(&ctx->conns)) != NULL && conn->fd == -1) {
         LOG(DEBUG, "connection get cache");
         TAILQ_REMOVE(&ctx->conns, conn, next);
         ctx->mstats.free_conns--;
     } else {
-        conn = cv_malloc(sizeof(struct connection));
+        conn = cv_malloc(sizeof(struct connection));    // 申请内存空间
     }
-    conn_init(conn, ctx);
-    ctx->mstats.conns++;
+    conn_init(conn, ctx);   // 初始化连接
+    ctx->mstats.conns++;    // 打点更新连接数
     return conn;
 }
 
 struct conn_info *conn_info_create(struct context *ctx)
 {
     struct conn_info *info;
+    // 检查空闲conn_info队列是否为空,
+    // 1. 如果不为空, 则取出队首conn_info
+    // 2. 如果为空, 则向内存申请空间, 用于初始化conn_info
+    // 3. 最后初始化conn_info
     if (!STAILQ_EMPTY(&ctx->free_conn_infoq)) {
         info = STAILQ_FIRST(&ctx->free_conn_infoq);
         STAILQ_REMOVE_HEAD(&ctx->free_conn_infoq, next);
@@ -369,6 +378,7 @@ struct mbuf *conn_get_buf(struct connection *conn, bool unprocessed, bool local)
     return buf;
 }
 
+// 注册连接的对应事件类型到epoll事件循环上
 int conn_register(struct connection *conn)
 {
     struct context *ctx = conn->ctx;

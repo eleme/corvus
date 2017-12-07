@@ -20,11 +20,11 @@ struct connection {
 
     TAILQ_ENTRY(connection) next;
 
-    int fd;     // socket文件描述符
+    int fd;     // 监听事件文件描述符
 
     struct conn_info *info;
 
-    struct connection *ev;
+    struct connection *ev;      // 监听事件
     struct connection *parent;
     bool event_triggered;
     bool eof;
@@ -43,7 +43,7 @@ struct conn_info {
 
     struct reader reader;
 
-    int64_t last_active;
+    int64_t last_active;                // 本连接最后活跃时间
 
     struct buf_time_tqh buf_times;
 

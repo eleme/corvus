@@ -273,6 +273,7 @@ void client_ready(struct connection *self, uint32_t mask)
     }
 }
 
+// 连接上注册的事件被触发后的处理函数
 void client_event_ready(struct connection *self, uint32_t mask)
 {
     struct connection *client = self->parent;
@@ -296,22 +297,32 @@ void client_event_ready(struct connection *self, uint32_t mask)
     }
 }
 
+// 创建一个新的从客户端到corvus的连接, 分几步进行:
+// 1. 创建一个连接, 绑定之前accept创建的套接字到这个连接上
+// 2. 设置socket相关参数
+// 3. 创建conn_info绑定到这个连接上
+// 4. 注册这个连接触发后的处理函数
+// 5. 创建epoll事件, 并把该事件注册在这个连接上
+// 6. 注册这个连接上的事件触发后的处理函数
 struct connection *client_create(struct context *ctx, int fd)
 {
-    struct connection *client = conn_create(ctx);
-    client->fd = fd;
+    struct connection *client = conn_create(ctx);  // 初始化连接
+    client->fd = fd;    // 绑定之前创建的套接字fd到这个连接上
 
+    // 设置非阻塞I/O
     if (socket_set_nonblocking(client->fd) == -1) {
         conn_free(client);
         conn_recycle(ctx, client);
         return NULL;
     }
+    // 设置禁用Nagle算法, 减小延迟
     if (socket_set_tcpnodelay(client->fd) == -1) {
         conn_free(client);
         conn_recycle(ctx, client);
         return NULL;
     }
 
+    // 初始化conn_info
     client->info = conn_info_create(ctx);
     if (client->info == NULL) {
         conn_free(client);
@@ -319,7 +330,9 @@ struct connection *client_create(struct context *ctx, int fd)
         return NULL;
     }
 
+    // 创建epoll监听事件, 返回事件描述符
     int evfd = socket_create_eventfd();
+    // 初始化连接监听事件
     client->ev = conn_create(ctx);
     if (evfd == -1 || client->ev == NULL) {
         LOG(ERROR, "%s: fail to create event connection", __func__);
@@ -329,12 +342,12 @@ struct connection *client_create(struct context *ctx, int fd)
         return NULL;
     }
 
-    client->ev->fd = evfd;
-    client->ev->ready = client_event_ready;
-    client->ev->parent = client;
+    client->ev->fd = evfd;                      // 绑定监听事件与事件fd
+    client->ev->ready = client_event_ready;     // 设置事件触发后的处理函数
+    client->ev->parent = client;                // 设定上级
 
-    client->ready = client_ready;
-    client->info->last_active = time(NULL);
+    client->ready = client_ready;               // 设定本连接触发后的处理函数
+    client->info->last_active = time(NULL);     // 创建本链接最后活跃时间
     return client;
 }
 

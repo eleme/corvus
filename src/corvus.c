@@ -388,6 +388,7 @@ static const char *opts_desc[] = {
     "slowlog whether writing to statsd",
 };
 
+// corvus用例提示
 static void usage(const char *cmd)
 {
     int i = 0;
@@ -401,6 +402,7 @@ static void usage(const char *cmd)
     fprintf(stderr, "\n");
 }
 
+// 通过命令行来配置corvus参数
 static int parameter_init(int argc, const char *argv[]) {
     int ch;
     opterr = optind = 0;
