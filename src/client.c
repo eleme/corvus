@@ -12,6 +12,25 @@
 #define CMD_MIN_LIMIT 64
 #define CMD_MAX_LIMIT 512
 
+/**********************************
+ *
+ * Corvus Client工作逻辑:
+ * 1. 当客户端通过corvus proxy建立与corvus client的连接之后, 客户端发送redis请求.
+ * 2. 这时, 因为该链接已经被注册到了epoll事件循环中监听读写事件, 所以, 当收到请求后, 会触发调用client_ready函数
+ * 3. 该函数会判断事件类型, 因为是收到请求, 所以是可读事件, 所以会调用client_read函数
+ * 4. client_read函数的工作流程如下:
+ *          1. 先把套接字里面的请求数据循环读取到缓冲区中
+ *          2. 循环读取缓冲区中的数据, 直至数据全部读取完毕. 在每次读取时, corvus client会根据redis协议进行解析
+ *             用户请求, 构造出对应的command对象. 计算CRC16%16384得到slot, 并从连接池中获取corvus到对应redis实例
+ *             的tcp连接. 并把这个连接注册在epoll事件循环上, 监听读写事件
+ *          3. 把构造出来的command对象放到队列ready_queue的队尾(该队列被corvus server监听)
+ *
+ * 在从连接池中获取corvus到redis实例的连接的过程中, 如果没有连接, 就会创建corvus server连接(connection实例), 并
+ * 与redis实例建立tcp连接.
+ *
+ **********************************
+ */
+
 // 手动触发client链接上的事件
 int client_trigger_event(struct connection *client)
 {

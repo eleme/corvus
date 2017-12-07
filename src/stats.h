@@ -9,13 +9,13 @@ struct memory_stats {
     long long buffers;          // 表示正在使用的缓冲区的数量
     long long cmds;             // 表示正在使用的command对象的数量
     long long conns;
-    long long conn_info;
+    long long conn_info;        // 表示正在使用的conn_info的数量
     long long buf_times;        // 表示正在使用的buf_time的数量
 
     long long free_buffers;     // 表示空闲的缓冲区数量, 大小与context的free_mbufq队列长度保持一致
     long long free_cmds;        // 表示空闲的command对象的数量, 大小与context的free_cmdq队列长度保持一致
     long long free_conns;
-    long long free_conn_info;
+    long long free_conn_info;   // 表示空闲的conn_info对象的数量, 大小与context的free_conn_infoq队列长度保持一致
     long long free_buf_times;   // 表示空闲的buf_time对象的数量, 大小与context的free_buf_timeq队列长度保持一致
 };
 

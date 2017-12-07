@@ -8,6 +8,24 @@
 #include "client.h"
 #include "logging.h"
 
+/*********************************
+ *
+ * Corvus Proxy逻辑:
+ * 1. corvus的main_loop通过调用proxy_init函数来创建socket server, 并把fd注册到epoll事件循环中监听,
+ *    corvus为了提升性能, 使用了多线程绑定监听同一个port的方式, 去除了单线程监听, 分发给多worker处理的性能瓶颈
+ * 2. 当客户端请求建立连接时, corvus的事件循环捕获到请求, 触发执行proxy_ready函数, 该函数会调用proxy_accept函数.
+ * 3. proxy_accept会接受来自客户端的请求, 创建一个新的socket描述符和一个新的链接, 该链接表示从客户端到corvus client
+ *    的链接, 并把链接和socket描述符绑定, 最后把这个连接注册到epoll事件循环上
+ * 4. 后面的流程就比较清楚了, 当客户端利用这个链接发送redis请求到corvus时, corvus会通过client来执行请求, 而不会再通过proxy
+ *
+ *
+ * 可以发现, Corvus Proxy的主要功能就是:
+ *      接受来自客户端创建链接的请求, 在没有使用corvus时, 客户端会直接与redis实例创建链接,
+ *      在使用corvus后, 客户端创建的链接实际上是客户端到corvus client的链接
+ *
+ *********************************
+ */
+
 // proxy接受来自客户端的请求. 该函数主要包含以下几个部分:
 // 1. corvus接受来自客户端的请求, 并创建新的socket描述符
 // 2. 创建一个新的连接, 并把这个fd绑定在这个连接上

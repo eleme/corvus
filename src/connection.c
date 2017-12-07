@@ -64,20 +64,24 @@ static int verify_server(struct connection *server, bool readonly)
     return CORVUS_OK;
 }
 
+// 创建连接
 static struct connection *conn_create_server(struct context *ctx,
         struct address *addr, char *key, bool readonly)
 {
-    int fd = conn_create_fd();
+    int fd = conn_create_fd();  // 创建socket fd
     if (fd == -1) {
         LOG(ERROR, "conn_create_server: fail to create fd");
         return NULL;
     }
+    // 创建server连接, 绑定fd
     struct connection *server = server_create(ctx, fd);
     struct conn_info *info = server->info;
+    // 更新server连接中的地址为对应的redis实例地址
     memcpy(&info->addr, addr, sizeof(info->addr));
     extern const size_t CMD_NUM;
     info->slow_cmd_counts = cv_calloc(CMD_NUM, sizeof(uint32_t));
 
+    // 对redis实例建立连接(这里建立了corvus与对应redis实例的真正的链接)
     if (conn_connect(server) == CORVUS_ERR) {
         LOG(ERROR, "conn_create_server: fail to connect %s:%d",
                 info->addr.ip, info->addr.port);
@@ -92,10 +96,11 @@ static struct connection *conn_create_server(struct context *ctx,
     }
 
     strncpy(info->dsn, key, ADDRESS_LEN);
+    // 把该连接加入连接池
     dict_set(&ctx->server_table, info->dsn, (void*)server);
     TAILQ_INSERT_TAIL(&ctx->servers, server, next);
     return server;
-}
+的}
 
 void conn_info_init(struct conn_info *info)
 {
@@ -177,6 +182,7 @@ struct conn_info *conn_info_create(struct context *ctx)
     return info;
 }
 
+// 通过给予的connection实例, 对实例里面提供的ip地址和端口建立连接
 int conn_connect(struct connection *conn)
 {
     int status;
@@ -274,17 +280,20 @@ void conn_recycle(struct context *ctx, struct connection *conn)
     ctx->mstats.free_conns++;
 }
 
+// 创建套接字描述符, 并进行配置
 int conn_create_fd()
 {
-    int fd = socket_create_stream();
+    int fd = socket_create_stream();    // 创建socket描述符
     if (fd == -1) {
         LOG(ERROR, "conn_create_fd: fail to create socket");
         return CORVUS_ERR;
     }
+    // 设置非阻塞
     if (socket_set_nonblocking(fd) == -1) {
         LOG(ERROR, "fail to set nonblocking on fd %d", fd);
         return CORVUS_ERR;
     }
+    // 设置禁用Nagle算法
     if (socket_set_tcpnodelay(fd) == -1) {
         LOG(WARN, "fail to set tcpnodelay on fd %d", fd);
     }
@@ -306,6 +315,7 @@ struct connection *conn_get_server_from_pool(struct context *ctx,
         return server;
     }
 
+    // 如果没有获取到链接, 则手动创建一个链接
     server = conn_create_server(ctx, addr, key, readonly);
     return server;
 }

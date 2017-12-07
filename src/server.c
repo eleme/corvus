@@ -311,12 +311,15 @@ void server_ready(struct connection *self, uint32_t mask)
     }
 }
 
+// 创建server连接, 把该连接与fd绑定.
+// 注意, 这里还没有建立corvus与redis实例真正的连接, 这里只是初始化
+// 了一个新的connection实例, 并设定了本连接触发后的处理函数
 struct connection *server_create(struct context *ctx, int fd)
 {
     struct connection *server = conn_create(ctx);
-    server->info = conn_info_create(ctx);
-    server->fd = fd;
-    server->ready = server_ready;
+    server->info = conn_info_create(ctx);   // 给该连接初始化conn_info
+    server->fd = fd;                // 绑定fd
+    server->ready = server_ready;   // 设置本连接触发后的处理函数
     return server;
 }
 
