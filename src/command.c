@@ -1393,7 +1393,9 @@ void cmd_iov_add(struct iov_data *iov, void *buf, size_t len, struct mbuf *b)
         iov->buf_ptr = cv_realloc(iov->buf_ptr, sizeof(struct mbuf*) * iov->max_size);
     }
 
+    // iov_base存储的是指向缓冲区buf的指针, 这个buf用来存放将要发送出去的数据
     iov->data[iov->len].iov_base = buf;
+    // iov_len存放的是需要发送的数据对应的长度
     iov->data[iov->len].iov_len = len;
     iov->buf_ptr[iov->len] = b;
     iov->len++;

@@ -36,6 +36,7 @@ do {                                                                      \
 static const char *req_ask = "*1\r\n$6\r\nASKING\r\n";
 static const char *req_readonly = "*1\r\n$8\r\nREADONLY\r\n";
 
+// corvus server构造发送出去的信息
 void server_make_iov(struct conn_info *info)
 {
     struct command *cmd;
@@ -45,6 +46,7 @@ void server_make_iov(struct conn_info *info)
         if (info->iov.len - info->iov.cursor > CORVUS_IOV_MAX) {
             break;
         }
+        // 从ready_queue队列中读取队首command对象
         cmd = STAILQ_FIRST(&info->ready_queue);
         STAILQ_REMOVE_HEAD(&info->ready_queue, ready_next);
         STAILQ_NEXT(cmd, ready_next) = NULL;
@@ -270,6 +272,7 @@ int server_read(struct connection *server)
     return status;
 }
 
+// corvus server连接触发后执行的函数
 void server_ready(struct connection *self, uint32_t mask)
 {
     struct conn_info *info = self->info;
@@ -279,7 +282,7 @@ void server_ready(struct connection *self, uint32_t mask)
         server_eof(self, rep_err);
         return;
     }
-    if (mask & E_WRITABLE) {
+    if (mask & E_WRITABLE) {    // 当发生可写事件时
         LOG(DEBUG, "server writable");
         if (info->status == CONNECTING) info->status = CONNECTED;
         if (info->status == CONNECTED) {
@@ -293,7 +296,7 @@ void server_ready(struct connection *self, uint32_t mask)
             return;
         }
     }
-    if (mask & E_READABLE) {
+    if (mask & E_READABLE) {    // 当发生可读事件时
         LOG(DEBUG, "server readable");
 
         if (!STAILQ_EMPTY(&info->waiting_queue)) {

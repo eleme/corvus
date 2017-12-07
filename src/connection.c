@@ -191,6 +191,7 @@ int conn_connect(struct connection *conn)
         LOG(ERROR, "connection info of %d is null", conn->fd);
         return CORVUS_ERR;
     }
+    // 建立TCP连接并绑定fd
     status = socket_connect(conn->fd, info->addr.ip, info->addr.port);
     switch (status) {
         case CORVUS_ERR: info->status = DISCONNECTED; return CORVUS_ERR;

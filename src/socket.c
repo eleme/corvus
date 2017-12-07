@@ -90,6 +90,7 @@ static inline int cv_socket(int domain, int type, int protocol)
     return fd;
 }
 
+// 建立到addr的tcp连接, 绑定fd
 static int cv_connect(int fd, const struct sockaddr *addr, socklen_t addrlen)
 {
     while (1) {
@@ -269,6 +270,7 @@ int socket_accept(int fd, char *ip, size_t ip_len, int *port)
     return s;
 }
 
+// 建立到(addr, port)的tcp连接, 绑定fd
 int socket_connect(int fd, char *addr, int port)
 {
     int status = CORVUS_ERR;
@@ -280,6 +282,7 @@ int socket_connect(int fd, char *addr, int port)
     }
 
     for (p = addrs; p != NULL; p = p->ai_next) {
+        // 建立连接
         status = cv_connect(fd, p->ai_addr, p->ai_addrlen);
         if (status == CORVUS_ERR) continue;
         break;
