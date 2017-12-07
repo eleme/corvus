@@ -291,6 +291,7 @@ int conn_create_fd()
     return fd;
 }
 
+// 从连接池中获取从corvus到对应redis实例的连接
 struct connection *conn_get_server_from_pool(struct context *ctx,
         struct address *addr, bool readonly)
 {
@@ -300,6 +301,7 @@ struct connection *conn_get_server_from_pool(struct context *ctx,
 
     server = dict_get(&ctx->server_table, key);
     if (server != NULL) {
+        // 如果有连接, 则验证一下链接是否可用, 可用就返回
         if (verify_server(server, readonly) == CORVUS_ERR) return NULL;
         return server;
     }
@@ -327,6 +329,7 @@ struct connection *conn_get_raw_server(struct context *ctx)
     return server;
 }
 
+// 获取从corvus到redis实例的连接
 struct connection *conn_get_server(struct context *ctx, uint16_t slot,
         int access)
 {
@@ -334,8 +337,10 @@ struct connection *conn_get_server(struct context *ctx, uint16_t slot,
     struct node_info info;
     bool readonly = false;
 
-    if (slot_get_node_addr(slot, &info)) {
+    if (slot_get_node_addr(slot, &info)) {      // 根据slot获取所在的redis节点, 读取到node_info里
         addr = &info.nodes[0];
+        // 如果是读请求, 并且启用了读写分离配置, 则判断redis指令的access方式(access详情可以看command.h的第13行)
+        // 然后挑选一台slave机器作为目标机
         if (access != CMD_ACCESS_WRITE && config.readslave && info.index > 1) {
             int r = rand_r(&ctx->seed);
             if (!config.readmasterslave || r % info.index != 0) {
@@ -344,10 +349,12 @@ struct connection *conn_get_server(struct context *ctx, uint16_t slot,
                 readonly = true;
             }
         }
+        // 从连接池中获取从corvus到目标redis机器的连接
         if (addr->port > 0) {
             return conn_get_server_from_pool(ctx, addr, readonly);
         }
     }
+    // 如果没有捕获到该slot对应的redis节点, 则直接建立连接
     return conn_get_raw_server(ctx);
 }
 
@@ -378,7 +385,7 @@ struct mbuf *conn_get_buf(struct connection *conn, bool unprocessed, bool local)
     return buf;
 }
 
-// 注册连接的对应事件类型到epoll事件循环上
+// 注册连接的对应事件类型到epoll事件循环上, 事件类型为可读或可写
 int conn_register(struct connection *conn)
 {
     struct context *ctx = conn->ctx;
@@ -459,22 +466,30 @@ int conn_write(struct connection *conn, int clear)
     return status;
 }
 
+// 把连接的socket收到的请求读取到缓冲区
 int conn_read(struct connection *conn, struct mbuf *buf)
 {
     int n = socket_read(conn->fd, buf);
     if (n == 0) return CORVUS_EOF;
     if (n == CORVUS_ERR) return CORVUS_ERR;
     if (n == CORVUS_AGAIN) return CORVUS_AGAIN;
+    // 打点相关逻辑
     ATOMIC_INC(conn->ctx->stats.recv_bytes, n);
     ATOMIC_INC(conn->info->recv_bytes, n);
     return CORVUS_OK;
 }
 
+// 给对应连接构建cmd对象
 struct command *conn_get_cmd(struct connection *client)
 {
     struct command *cmd;
     int reuse = 0;
 
+    // 判断cmd_queue队列是否为空
+    // 1. 如果不为空, 则取出队尾的command对象, 判断这个对象是否解析完毕.
+    //      1. 如果该对象没有解析完毕, 则返回.
+    //      2. 如果已经解析完毕, 则根据当前连接创建一个新的command对象, 插入cmd_queue队尾并返回
+    // 2. 如果为空, 则根据当前连接创建新command对象, 插入cmd_queue队尾并返回
     if (!STAILQ_EMPTY(&client->info->cmd_queue)) {
         cmd = STAILQ_LAST(&client->info->cmd_queue, command, cmd_next);
         if (!cmd->parse_done) {
@@ -483,7 +498,7 @@ struct command *conn_get_cmd(struct connection *client)
     }
 
     if (!reuse) {
-        cmd = cmd_create(client->ctx);
+        cmd = cmd_create(client->ctx);      // 创建command对象
         STAILQ_INSERT_TAIL(&client->info->cmd_queue, cmd, cmd_next);
     }
     return cmd;

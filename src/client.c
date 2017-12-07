@@ -12,6 +12,7 @@
 #define CMD_MIN_LIMIT 64
 #define CMD_MAX_LIMIT 512
 
+// 手动触发client链接上的事件
 int client_trigger_event(struct connection *client)
 {
     struct mbuf *buf = client->info->current_buf;
@@ -20,6 +21,7 @@ int client_trigger_event(struct connection *client)
     }
 
     if (buf->pos < buf->last && !client->event_triggered) {
+        // 如果读取的缓冲区小于缓冲区开辟空间大小, 并且没有触发过, 则手动触发事件
         if (socket_trigger_event(client->ev->fd) == CORVUS_ERR) {
             LOG(ERROR, "%s: fail to trigger readable event", __func__);
             return CORVUS_ERR;
@@ -43,6 +45,7 @@ void client_range_clear(struct connection *client, struct command *cmd)
     mbuf_range_clear(client->ctx, cmd->req_buf);
 }
 
+// 获取缓冲区, 并把该缓冲区和当前连接做绑定
 struct mbuf *client_get_buf(struct connection *client)
 {
     // not get unprocessed buf
@@ -53,20 +56,24 @@ struct mbuf *client_get_buf(struct connection *client)
     return buf;
 }
 
+// 从socket中读取从客户端发送到corvus client的请求信息, 把信息读取到缓冲区中
 int client_read_socket(struct connection *client)
 {
     while (true) {
-        struct mbuf *buf = client_get_buf(client);
-        int status = conn_read(client, buf);
+        struct mbuf *buf = client_get_buf(client);  // 获取缓冲区
+        int status = conn_read(client, buf);        // 从socket中把数据读取到缓冲区
         if (status != CORVUS_OK) {
             return status;
         }
 
         // Append time to queue after read, this is the start time of cmd.
         // Every read has a corresponding buf_time.
+        // 在把数据读取到缓冲区之后, 把这个缓冲区以及它的相关信息读取到conn_info->buf_times这个队列中
+        // 这一步主要是用来追踪请求从开始处理到返回的耗时
         buf_time_append(client->ctx, &client->info->buf_times, buf, get_time());
 
         if (buf->last < buf->end) {
+            // 全部数据都读取到缓冲区, 重新注册corvus client到epoll事件循环
             if (conn_register(client) == CORVUS_ERR) {
                 LOG(ERROR, "%s: fail to reregister client %d", __func__, client->fd);
                 return CORVUS_ERR;
@@ -77,6 +84,7 @@ int client_read_socket(struct connection *client)
     return CORVUS_OK;
 }
 
+// 读取客户端发送过来的请求信息
 int client_read(struct connection *client, bool read_socket)
 {
     struct command *cmd;
@@ -84,7 +92,7 @@ int client_read(struct connection *client, bool read_socket)
     int status = CORVUS_OK;
 
     if (read_socket) {
-        status = client_read_socket(client);
+        status = client_read_socket(client);    // 读取从客户端发来的请求
         if (status == CORVUS_EOF || status == CORVUS_ERR) {
             return status;
         }
@@ -97,15 +105,17 @@ int client_read(struct connection *client, bool read_socket)
     // }
 
     // calculate limit
-    long long free_cmds = client->ctx->mstats.free_cmds;
-    long long clients = ATOMIC_GET(client->ctx->stats.connected_clients);
+    long long free_cmds = client->ctx->mstats.free_cmds;    // 空闲command对象的数量
+    long long clients = ATOMIC_GET(client->ctx->stats.connected_clients);   // 连接的client数量
     free_cmds /= clients;
     int limit = free_cmds > CMD_MIN_LIMIT ? free_cmds : CMD_MIN_LIMIT;
     if (limit > CMD_MAX_LIMIT) {
         limit = CMD_MAX_LIMIT;
     }
 
+    // 循环读取缓冲区并做响应处理, 确保所有缓冲区都读取完毕
     while (true) {
+        // 获取当前请求对应的缓冲区(请求数据已经被读取到这个缓冲区中)
         buf = client->info->current_buf;
         if (buf == NULL || mbuf_read_size(buf) <= 0) {
             break;
@@ -117,17 +127,19 @@ int client_read(struct connection *client, bool read_socket)
             LOG(ERROR, "client_read: fail to get buffer read time %d", client->fd);
             return CORVUS_ERR;
         }
-        cmd = conn_get_cmd(client);
-        cmd->client = client;
+        cmd = conn_get_cmd(client);     // 构造command对象
+        cmd->client = client;           // 给command对象绑定client连接
         if (cmd->parse_time <= 0) {
-            cmd->parse_time = t->read_time;
+            cmd->parse_time = t->read_time; // 设置command准备执行parse的时刻
         }
+        // 解析客户端发送过来的redis请求, 并转发
         status = cmd_parse_req(cmd, buf);
         if (status == CORVUS_ERR) {
             LOG(ERROR, "client_read: command parse error");
             return CORVUS_ERR;
         }
         // pop buf times after parse
+        // 解析完成后, 把和缓冲区对应的buf_time从buf_times队列中取出来, 放到free_buf_times中
         while (true) {
             struct buf_time *t = STAILQ_FIRST(&client->info->buf_times);
             if (t == NULL || buf != t->buf || buf->pos < t->pos) {
@@ -138,12 +150,14 @@ int client_read(struct connection *client, bool read_socket)
         }
 
         // if buf is full point current_buf to the next buf
+        // 请求还未解析完毕, 但是超过了缓冲区, 那么接着读取队列中的下一个缓冲区
         if (buf->pos >= buf->end) {
             client->info->current_buf = TAILQ_NEXT(buf, next);
             if (client->info->current_buf == NULL) {
                 break;
             }
         }
+        // 解析redis请求处理完毕, 并且limit<=1, 手动触发该连接上的事件
         if (cmd->parse_done && (--limit) <= 0) {
             return client_trigger_event(client);
         }
@@ -238,6 +252,7 @@ int client_write(struct connection *client)
     return CORVUS_OK;
 }
 
+// corvus client链接可读和可写事件触发的处理函数
 void client_ready(struct connection *self, uint32_t mask)
 {
     if (self->eof) {
@@ -248,13 +263,14 @@ void client_ready(struct connection *self, uint32_t mask)
         return;
     }
 
-    self->info->last_active = time(NULL);
+    self->info->last_active = time(NULL);   // 更新链接最后活跃时间
 
     if (mask & E_ERROR) {
         LOG(DEBUG, "client error");
         client_eof(self);
         return;
     }
+    // 可读事件, 即从客户端发送请求到corvus client的时候会触发
     if (mask & E_READABLE) {
         LOG(DEBUG, "client readable");
 
@@ -264,6 +280,7 @@ void client_ready(struct connection *self, uint32_t mask)
             return;
         }
     }
+    // 可写事件
     if (mask & E_WRITABLE) {
         LOG(DEBUG, "client writable");
         if (client_write(self) == CORVUS_ERR) {
@@ -342,8 +359,8 @@ struct connection *client_create(struct context *ctx, int fd)
         return NULL;
     }
 
-    client->ev->fd = evfd;                      // 绑定监听事件与事件fd
-    client->ev->ready = client_event_ready;     // 设置事件触发后的处理函数
+    client->ev->fd = evfd;                      // 在连接上绑定监听事件与事件fd
+    client->ev->ready = client_event_ready;     // 设置该连接上的事件触发后的处理函数
     client->ev->parent = client;                // 设定上级
 
     client->ready = client_ready;               // 设定本连接触发后的处理函数

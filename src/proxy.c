@@ -11,8 +11,8 @@
 // proxy接受来自客户端的请求. 该函数主要包含以下几个部分:
 // 1. corvus接受来自客户端的请求, 并创建新的socket描述符
 // 2. 创建一个新的连接, 并把这个fd绑定在这个连接上
-// 3. 让epoll事件循环监听这个连接
-// 4. 让epoll事件循环监听这个连接上注册的事件
+// 3. 让epoll事件循环监听这个连接的可读和可写事件
+// 4. 让epoll事件循环监听这个连接上注册的事件, 事件类型为可读
 int proxy_accept(struct connection *proxy)
 {
     char ip[16];
@@ -24,7 +24,7 @@ int proxy_accept(struct connection *proxy)
     }
 
     struct connection *client;
-    // 创建客户端到corvus的连接
+    // 创建客户端到corvus client的连接
     if ((client = client_create(ctx, fd)) == NULL) {
         LOG(ERROR, "proxy_accept: fail to create client");
         return CORVUS_ERR;
@@ -41,7 +41,7 @@ int proxy_accept(struct connection *proxy)
         return CORVUS_ERR;
     }
 
-    // 注册这个连接上的事件到epoll事件循环上
+    // 注册这个连接上的事件到epoll事件循环上, 事件类型为可读
     if (event_register(&client->ctx->loop, client->ev, E_READABLE) == CORVUS_ERR) {
         LOG(ERROR, "proxy_accept: fail to register client event");
         conn_free(client);

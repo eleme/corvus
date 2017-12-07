@@ -415,6 +415,9 @@ int socket_parse_addr(char *addr, struct address *address)
 // 创建监听事件
 int socket_create_eventfd()
 {
+    // eventfd函数会创建一个事件对象, 内核会为这个对象维护一个计数器,并返回事件的文件描述符
+    // 第一个参数用来初始化这个计数器
+    // 第二个对象, EFD_NONBLOCK设置对象为非阻塞状态, EFD_CLOEXEC如果被设置, 调用后悔自动关闭这个文件描述符
     int fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
     if (fd == -1) {
         LOG(WARN, "%s: %s", __func__, strerror(errno));
@@ -422,6 +425,7 @@ int socket_create_eventfd()
     return fd;
 }
 
+// 手动触发事件
 int socket_trigger_event(int evfd)
 {
     uint64_t u = 1;

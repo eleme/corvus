@@ -18,10 +18,10 @@ struct context;
 
 struct mbuf {
     TAILQ_ENTRY(mbuf) next;
-    uint8_t *pos;
-    uint8_t *last;
-    uint8_t *start;
-    uint8_t *end;
+    uint8_t *pos;       // 当前读取缓冲区的位置
+    uint8_t *last;      // 缓冲区实际结束的地址
+    uint8_t *start;     // 缓冲区的起始地址
+    uint8_t *end;       // 缓冲区的结束地址
     struct mhdr *queue; // the queue contain the buf
     int refcount;
 };

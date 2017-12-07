@@ -61,10 +61,10 @@ struct context {
     /* buffer related */
     size_t mbuf_offset;
 
-    struct mhdr free_mbufq;
-    struct cmd_tqh free_cmdq;
+    struct mhdr free_mbufq;     // 空闲的缓冲区队列
+    struct cmd_tqh free_cmdq;   // 空闲的command对象队列
     struct conn_info_tqh free_conn_infoq;
-    struct buf_time_tqh free_buf_timeq;
+    struct buf_time_tqh free_buf_timeq;     // 空闲的buf_timeq队列
 
     // 连接代理, 它会监听corvus接收到的请求, 并通过proxy_ready来处理
     struct connection proxy;
