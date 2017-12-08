@@ -8,6 +8,28 @@
 #include "socket.h"
 #include "slot.h"
 
+/**********************************
+ *
+ * Corvus Server向redis发送请求的逻辑:
+ * 1. 当corvus client解析完command之后, 会与目标redis建立tcp连接, 并把这个连接注册
+ *    到epoll事件循环上, 同时会把请求放入ready_queue队列中
+ * 2. 这个时候, 该连接会变成可写状态, 就会触发corvus server的server_ready函数的可
+ *    写逻辑, 该函数会调用server_write函数进行写入操作
+ * 3. server_write函数会从ready_queue队列中获取command对象, 并构造redis请求, 最后
+ *    实现把该请求发送到redis实例上, 最后再把这个command对象放入waiting_queue队列
+ *    中, 当发生可读事件的时候, corvus server会监听这个队列.
+ *
+ * Corvus Server获取redis响应的逻辑:
+ * 1. 发送请求后, 如果redis实例响应了这个请求, 那么就触发了可读事件的发生, 这时候
+ *    就会调用server_read函数进行读取响应
+ * 2. server_read函数会从waiting_queue队列中获取发送到redis的请求对象, 然后读取并
+ *    解析redis返回的响应, 并把响应存放到command对象中
+ * 3. 如果redis响应返回了重定向或者错误, 那么将启动请求重试, 逻辑和上面的发送请求
+ *    基本一致
+ *
+ **********************************
+ */
+
 #define SERVER_RETRY_TIMES 3
 #define SERVER_NULL -1
 #define SERVER_REGISTER_ERROR -2
@@ -196,7 +218,8 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
     }
 }
 
-// 读取redis实例返回的response
+// 读取redis实例返回的response, 并把结果存入command对象中
+// 如果返回结果是重定向或者错误, 那么重新发送请求
 int server_read_reply(struct connection *server, struct command *cmd)
 {
     // 读取并解析redis返回的response, 并把解析结果存入command对象中
