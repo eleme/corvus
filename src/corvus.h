@@ -35,9 +35,12 @@
 #define THREAD_STACK_SIZE (1024*1024*4)
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
 
+// 原子操作相关宏
 #define ATOMIC_GET(data) \
     __atomic_load_n(&(data), __ATOMIC_SEQ_CST)
 
+// 替换操作.  GNU的函数__atomic_exchange_n作用是
+// 使用参数二替换掉参数一的值, 并返回参数一原有的值
 #define ATOMIC_IGET(data, value) \
     __atomic_exchange_n(&(data), value, __ATOMIC_SEQ_CST)
 

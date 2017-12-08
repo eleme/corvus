@@ -292,6 +292,7 @@ int socket_connect(int fd, char *addr, int port)
     return status;
 }
 
+// 把数据从套接字中读取到缓冲区
 int socket_read(int fd, struct mbuf *buf)
 {
     ssize_t n;
