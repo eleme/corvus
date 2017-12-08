@@ -35,9 +35,12 @@
 #define THREAD_STACK_SIZE (1024*1024*4)
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
 
+// 原子操作相关宏
 #define ATOMIC_GET(data) \
     __atomic_load_n(&(data), __ATOMIC_SEQ_CST)
 
+// 替换操作.  GNU的函数__atomic_exchange_n作用是
+// 使用参数二替换掉参数一的值, 并返回参数一原有的值
 #define ATOMIC_IGET(data, value) \
     __atomic_exchange_n(&(data), value, __ATOMIC_SEQ_CST)
 
@@ -61,24 +64,25 @@ struct context {
     /* buffer related */
     size_t mbuf_offset;
 
-    struct mhdr free_mbufq;
-    struct cmd_tqh free_cmdq;
+    struct mhdr free_mbufq;     // 空闲的缓冲区队列
+    struct cmd_tqh free_cmdq;   // 空闲的command对象队列
     struct conn_info_tqh free_conn_infoq;
-    struct buf_time_tqh free_buf_timeq;
+    struct buf_time_tqh free_buf_timeq;     // 空闲的buf_timeq队列
 
+    // 连接代理, 它会监听corvus接收到的请求, 并通过proxy_ready来处理
     struct connection proxy;
     struct connection timer;
 
     /* connection pool */
     struct dict server_table;
-    struct conn_tqh conns;
+    struct conn_tqh conns;      // 客户端到corvus的链接, 双向队列
 
     unsigned int seed;
 
-    struct conn_tqh servers;
+    struct conn_tqh servers;    // corvus到redis实例的链接, 双向队列
 
     /* event */
-    struct event_loop loop;
+    struct event_loop loop;     // epoll事件循环对象
 
     /* thread control */
     int state;

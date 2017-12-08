@@ -117,10 +117,11 @@ struct redis_data *redis_data_get(struct reader_task *task, int type)
     return NULL;
 }
 
+// redis协议, 根据不同类型做不同操作
 int process_type(struct reader *r)
 {
     switch (*r->buf->pos) {
-        case '*':
+        case '*':   // redis请求, 表示参数数量
             r->item_size = 0;
             r->item_type = PARSE_ARRAY_BEGIN;
             r->type = PARSE_ARRAY;
@@ -129,24 +130,24 @@ int process_type(struct reader *r)
                 return CORVUS_ERR;
             }
             break;
-        case '$':
+        case '$':   // 表示第n个参数的字节数量
             r->item_size = 0;
             r->item_type = PARSE_STRING_BEGIN;
             r->type = PARSE_STRING;
             r->redis_data_type = REP_STRING;
             break;
-        case ':':
+        case ':':   // redis回复, 表示整形数字
             r->item_type = PARSE_INTEGER_BEGIN;
             r->item_size = 0;
             r->type = PARSE_INTEGER;
             r->redis_data_type = REP_INTEGER;
             break;
-        case '+':
+        case '+':   // redis回复, 表示单行回复
             r->item_type = PARSE_SIMPLE_STRING_BEGIN;
             r->type = PARSE_SIMPLE_STRING;
             r->redis_data_type = REP_SIMPLE_STRING;
             break;
-        case '-':
+        case '-':   // redis回复, 表示错误消息
             r->item_type = PARSE_SIMPLE_STRING_BEGIN;
             r->type = PARSE_ERROR;
             r->redis_data_type = REP_ERROR;
@@ -404,6 +405,7 @@ int process_simple_string(struct reader *r, int type)
     return CORVUS_OK;
 }
 
+// 解析从客户端发送到corvus的redis请求(这里corvus实现了redis协议)
 int parse(struct reader *r, int mode)
 {
     struct mbuf *buf;

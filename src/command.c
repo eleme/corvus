@@ -24,6 +24,8 @@
 
 #define CMD_RECYCLE_SIZE 1024
 
+// C的宏中, #的功能是将它后面的宏参数进行字符化操作, 在对它所引用的宏变量通过替换后, 在左右各加一个引号
+// ##是连接符, 用来将两个token链接为一个token
 #define CMD_BUILD_MAP(cmd, type, access) {#cmd, CMD_##cmd, CMD_##type, CMD_ACCESS_##access},
 
 #define CMD_INCREF(cmd)                                   \
@@ -229,6 +231,10 @@ void cmd_add_fragment(struct command *cmd, struct pos_array *data,
     conn_add_data(cmd->client, (uint8_t*)"\r\n", 2, NULL, end);
 }
 
+// 对type=basic的redis指令的处理函数, 直接转给corvus server, 主要有一下几步:
+// 1. 获取corvus到对应redis实例的连接, 并把该连接与command对象绑定
+// 2. 把command对象插入ready_queue队列的队尾
+// 3. 把这个连接注册到epoll事件循环上, 监听事件类型是可读和可写
 int cmd_forward_basic(struct command *cmd)
 {
     int slot;
@@ -241,18 +247,21 @@ int cmd_forward_basic(struct command *cmd)
         return CORVUS_ERR;
     }
 
+    // 获取从corvus到目标redis实例(存储所需要的redis key的机器)的连接
     server = conn_get_server(ctx, slot, cmd->cmd_access);
     if (server == NULL) {
         LOG(ERROR, "cmd_forward_basic: fail to get server with slot %d", slot);
         return CORVUS_ERR;
     }
-    cmd->server = server;
+    cmd->server = server;       // 把command对象和到对应redis连接绑定
 
-    server->info->last_active = time(NULL);
+    server->info->last_active = time(NULL);     // 更新corvus到redis实例的最后活跃时间
 
     LOG(DEBUG, "command with slot %d ready", slot);
 
+    // 把command对象插入corvus server监听的ready_queue队列的队尾
     STAILQ_INSERT_TAIL(&server->info->ready_queue, cmd, ready_next);
+    // 把从corvus到redis实例的连接注册到epoll事件循环中, 监听事件类型为可读和可写
     if (conn_register(server) == -1) {
         LOG(ERROR, "cmd_forward_basic: fail to register server %d", server->fd);
         /* cmd already marked failed in server_eof */
@@ -305,6 +314,7 @@ int cmd_forward_multikey(struct command *cmd, struct redis_data *data, const cha
     return CORVUS_OK;
 }
 
+// 对于mset指令的操作, 依次拆分成多个set指令, 放入sub_cmds队列中
 int cmd_forward_mset(struct command *cmd, struct redis_data *data)
 {
     ASSERT_ELEMENTS(data->elements >= 3 && (data->elements & 1) == 1, data);
@@ -318,7 +328,7 @@ int cmd_forward_mset(struct command *cmd, struct redis_data *data)
         key = &data->element[i];
         value = &data->element[i + 1];
 
-        ncmd = cmd_create(cmd->ctx);
+        ncmd = cmd_create(cmd->ctx);    // 创建子command对象
         ncmd->parent = cmd;
         ncmd->client = cmd->client;
         STAILQ_INSERT_TAIL(&cmd->sub_cmds, ncmd, sub_cmd_next);
@@ -341,7 +351,7 @@ int cmd_forward_mset(struct command *cmd, struct redis_data *data)
         ncmd->data.elements = 2;
         ncmd->data.element = &data->element[i];
 
-        if (cmd_forward_basic(ncmd) == CORVUS_ERR) {
+        if (cmd_forward_basic(ncmd) == CORVUS_ERR) {    // 依次对每个set命令当做type=basic的命令进行转发操作
             cmd_mark_fail(ncmd, rep_forward_err);
         }
     }
@@ -358,6 +368,7 @@ int cmd_forward_eval(struct command *cmd, struct redis_data *data)
     return cmd_forward_basic(cmd);
 }
 
+// 对于type=complex的redis指令, 根据不同的执行, 进行不同的操作
 int cmd_forward_complex(struct command *cmd, struct redis_data *data)
 {
     switch (cmd->cmd_type) {
@@ -900,6 +911,7 @@ int cmd_extra(struct command *cmd, struct redis_data *data)
     return CORVUS_OK;
 }
 
+// redis命令转发逻辑, 根据不同redis操作的type, 做不同的处理方式, 核心是在cmd_forward_basic函数
 int cmd_forward(struct command *cmd, struct redis_data *data)
 {
     LOG(DEBUG, "forward command %p(%d)", cmd, cmd->cmd_type);
@@ -912,14 +924,19 @@ int cmd_forward(struct command *cmd, struct redis_data *data)
     }
 
     switch (cmd->request_type) {
+        // 根据redis指令不同的type, 做不同的处理方式, type可参见command.h第13行
         case CMD_BASIC:
-            cmd->slot = cmd_get_slot(data);
+            // 处理basic类型的redis指令, 直接传给server
+            cmd->slot = cmd_get_slot(data);     // 计算key所在的slot
             return cmd_forward_basic(cmd);
         case CMD_COMPLEX:
+            // 处理complex类型的redis指令, 根据不同的redis命令做不同的操作
             return cmd_forward_complex(cmd, data);
         case CMD_EXTRA:
+            // 处理extra类型的redis指令
             return cmd_extra(cmd, data);
         case CMD_UNIMPL:
+            // 处理unimpl类型的redis指令
             return CORVUS_ERR;
     }
     return CORVUS_OK;
@@ -944,16 +961,19 @@ int cmd_parse_token(struct command *cmd, struct redis_data *data)
     return CORVUS_OK;
 }
 
+// 解析客户端发送到corvus的redis请求, 转发请求
 int cmd_parse_req(struct command *cmd, struct mbuf *buf)
 {
+    // 构造reader
     struct reader *r = &cmd->client->info->reader;
     reader_feed(r, buf);
 
+    // 从reader中对请求内容进行分析
     if (parse(r, MODE_REQ) == CORVUS_ERR) {
         return CORVUS_ERR;
     }
 
-    if (reader_ready(r)) {
+    if (reader_ready(r)) {      // 解析完毕, 把解析内容填充到command对象中
         ASSERT_TYPE(&r->data, REP_ARRAY);
         ASSERT_ELEMENTS(r->data.elements >= 1, &r->data);
 
@@ -973,6 +993,7 @@ int cmd_parse_req(struct command *cmd, struct mbuf *buf)
             cmd_mark_fail(cmd, rep_parse_err);
             return CORVUS_OK;
         }
+        // 转发从客户端发到corvus的redis操作
         if (cmd_forward(cmd, &r->data) == CORVUS_ERR) {
             redis_data_free(&r->data);
             cmd_mark_fail(cmd, rep_forward_err);
@@ -1106,6 +1127,7 @@ void cmd_gen_multikey_iovec(struct command *cmd, struct iov_data *iov)
     cmd_iov_add(iov, iov->buf, n, NULL);
 }
 
+// 标记command对象的执行结果, fail=0表示成功执行, 1表示执行失败
 void cmd_mark(struct command *cmd, int fail)
 {
     LOG(DEBUG, "mark cmd %p", cmd);
@@ -1135,6 +1157,7 @@ void cmd_mark(struct command *cmd, int fail)
     }
 }
 
+// 初始化一个dict, key是redis的命令名称, value是cmd_item
 void cmd_map_init()
 {
     dict_init(&command_map);
@@ -1151,9 +1174,14 @@ void cmd_map_destroy()
     dict_free(&command_map);
 }
 
+// 构建一个command对象
 struct command *cmd_create(struct context *ctx)
 {
     struct command *cmd;
+    // 检查free_cmdq队列是否为空
+    // 1. 如果不为空, 则获取对首元素cmd
+    // 2. 如果为空, 则向内存申请空间用于创建command对象
+    // 3. 初始化command对象
     if (!STAILQ_EMPTY(&ctx->free_cmdq)) {
         LOG(DEBUG, "cmd get cache");
         cmd = STAILQ_FIRST(&ctx->free_cmdq);
@@ -1168,27 +1196,32 @@ struct command *cmd_create(struct context *ctx)
     return cmd;
 }
 
+// 读取redis实例返回的数据, 并根据redis协议进行解析, 把结果存到command对象中
 int cmd_read_rep(struct command *cmd, struct connection *server)
 {
     int rsize, status;
     struct mbuf *buf;
 
     while (1) {
-        buf = conn_get_buf(server, true, false);
-        rsize = mbuf_read_size(buf);
+        buf = conn_get_buf(server, true, false);    // 获取缓冲区
+        rsize = mbuf_read_size(buf);        // 获取现在缓冲区的数据大小
 
         if (rsize <= 0) {
+            // 缓冲区中没有数据, 把返回的数据从socket套接字中读取到缓冲区
             status = conn_read(server, buf);
             if (status != CORVUS_OK) return status;
         }
 
+        // 根据redis协议, 从缓冲区解析redis返回的数据到command对象中
         if (cmd_parse_rep(cmd, buf) == CORVUS_ERR) return CORVUS_ERR;
+        // 判断是否已经读取完毕
         if (reader_ready(&server->info->reader)) break;
     }
 
     return CORVUS_OK;
 }
 
+// 构造corvus发送到redis实例的数据
 void cmd_create_iovec(struct buf_ptr ptr[], struct iov_data *iov)
 {
     uint8_t *data;
@@ -1229,6 +1262,9 @@ void cmd_make_iovec(struct command *cmd, struct iov_data *iov)
     }
 }
 
+// 从command对象中获取redis返回值的类型, 主要是为了选出两种重定向请求以及错误:
+// MOVED, ASK, CLUSTERDOWN
+// 并把返回类型存储到info中
 int cmd_parse_redirect(struct command *cmd, struct redirect_info *info)
 {
     int n = 63;
@@ -1278,6 +1314,7 @@ int cmd_parse_redirect(struct command *cmd, struct redirect_info *info)
     return CORVUS_OK;
 }
 
+// 标记该command对象已经成功执行
 void cmd_mark_done(struct command *cmd)
 {
     cmd_mark(cmd, 0);
@@ -1366,7 +1403,9 @@ void cmd_iov_add(struct iov_data *iov, void *buf, size_t len, struct mbuf *b)
         iov->buf_ptr = cv_realloc(iov->buf_ptr, sizeof(struct mbuf*) * iov->max_size);
     }
 
+    // iov_base存储的是指向缓冲区buf的指针, 这个buf用来存放将要发送出去的数据
     iov->data[iov->len].iov_base = buf;
+    // iov_len存放的是需要发送的数据对应的长度
     iov->data[iov->len].iov_len = len;
     iov->buf_ptr[iov->len] = b;
     iov->len++;

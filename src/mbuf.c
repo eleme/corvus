@@ -185,10 +185,16 @@ void mbuf_decref(struct context *ctx, struct mbuf **bufs, int n)
     }
 }
 
+// 在把数据读取到缓冲区之后, 把这个缓冲区的相关信息放到queue这个队列中
+// buf_time这个结构体用来追踪记录每个从客户端发送过来的请求的耗时
 void buf_time_append(struct context *ctx, struct buf_time_tqh *queue,
         struct mbuf *buf, int64_t read_time)
 {
     struct buf_time *t;
+    // 判断context的free_buf_timeq队列是否为空
+    // 1. 为空, 则为buf_time申请内存空间
+    // 2. 不为空, 则读取队列第一项
+    // 3. 初始化这个buf_time, 加入queue这个队列中
     if (!STAILQ_EMPTY(&ctx->free_buf_timeq)) {
         t = STAILQ_FIRST(&ctx->free_buf_timeq);
         STAILQ_REMOVE_HEAD(&ctx->free_buf_timeq, next);
@@ -199,7 +205,7 @@ void buf_time_append(struct context *ctx, struct buf_time_tqh *queue,
     t->ctx = ctx;
     t->buf = buf;
     t->pos = buf->last;
-    t->read_time = read_time;
+    t->read_time = read_time;   // 命令读取的时刻
     STAILQ_INSERT_TAIL(queue, t, next);
     ctx->mstats.buf_times++;
 }

@@ -177,6 +177,7 @@ enum {
 
 STAILQ_HEAD(cmd_tqh, command);
 
+// corvus发送到redis实例的请求数据
 struct iov_data {
     struct iovec *data;
     struct mbuf **buf_ptr;
@@ -187,8 +188,8 @@ struct iov_data {
 };
 
 struct command {
-    struct buf_ptr req_buf[2];
-    struct buf_ptr rep_buf[2];
+    struct buf_ptr req_buf[2];  // redis请求体
+    struct buf_ptr rep_buf[2];  // redis实例返回的数据
 
     STAILQ_ENTRY(command) cmd_next;
     STAILQ_ENTRY(command) ready_next;
@@ -213,9 +214,9 @@ struct command {
 
     int refcount;
 
-    int32_t slot;
-    int32_t cmd_type;
-    int32_t cmd_access;
+    int32_t slot;           // key对应的slot
+    int32_t cmd_type;       // redis命令的类型(见13行)
+    int32_t cmd_access;     // redis命令的access种类(见13行)
     int16_t request_type;
     int16_t reply_type;
     int keys;
@@ -229,9 +230,9 @@ struct command {
     int16_t redirected;
     bool asking;
 
-    bool parse_done;
+    bool parse_done;    // redis命令解析是否完毕
     bool stale;
-    bool cmd_fail;
+    bool cmd_fail;      // redis请求是否执行失败
 
     /* For slowlog
        When used in parent cmd or non-multiple-key command,
@@ -244,6 +245,7 @@ struct command {
     struct redis_data data;
 };
 
+// 重定向请求相关信息
 struct redirect_info {
     uint16_t slot;
     char addr[ADDRESS_LEN + 1];
@@ -251,10 +253,10 @@ struct redirect_info {
 };
 
 struct cmd_item {
-    char *cmd;
-    int value;
-    int type;
-    int access;
+    char *cmd;      // redis操作名
+    int value;      // CMD_DEL ... (155行)
+    int type;       // CMD_BASIC, CMD_UNIMPL, CMD_BASIC, CMD_COMPLEX, CMD_EXTRA (158行)
+    int access;     // CMD_ACCESS_READ, CMD_ACCESS_WRITE, CMD_ACCESS_UNKNOWN (173行)
 };
 
 /* error responses */

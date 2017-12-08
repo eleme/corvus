@@ -30,15 +30,18 @@ struct node_desc {
     uint16_t index, len;
 };
 
+// redis主节点信息
 struct node_info {
-    char name[64];
+    char name[64];  // 节点id
     // contains master and slaves of one shard
+    // 一个shard中所有节点的地址, 主节点地址在列表中的第一个, 后面都是从节点地址
     struct address nodes[MAX_SLAVE_NODES + 1];
     size_t index;  // length of `nodes` above
-    int refcount;
+    int refcount;   // 记录有多少个slot存储在本节点上
     // for parsing slots of a master node
-    struct desc_part *slot_spec;
-    int spec_length;
+    // 以下两个属性只有主节点才有
+    struct desc_part *slot_spec;    // 本节点的信息
+    int spec_length;    // 上述slot_spec中, 描述slot的参数的个数
 };
 
 uint16_t slot_get(struct pos_array *pos);

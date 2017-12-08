@@ -10,9 +10,9 @@
 #define E_ERROR 4
 
 struct event_loop {
-    int epfd;
-    struct epoll_event *events;
-    int nevent;
+    int epfd;                       // epoll文件描述符
+    struct epoll_event *events;     // epoll事件列表
+    int nevent;                     // 最大监听事件个数
 };
 
 int event_init(struct event_loop *loop, int nevent);

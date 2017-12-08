@@ -64,20 +64,24 @@ static int verify_server(struct connection *server, bool readonly)
     return CORVUS_OK;
 }
 
+// 创建连接
 static struct connection *conn_create_server(struct context *ctx,
         struct address *addr, char *key, bool readonly)
 {
-    int fd = conn_create_fd();
+    int fd = conn_create_fd();  // 创建socket fd
     if (fd == -1) {
         LOG(ERROR, "conn_create_server: fail to create fd");
         return NULL;
     }
+    // 创建server连接, 绑定fd
     struct connection *server = server_create(ctx, fd);
     struct conn_info *info = server->info;
+    // 更新server连接中的地址为对应的redis实例地址
     memcpy(&info->addr, addr, sizeof(info->addr));
     extern const size_t CMD_NUM;
     info->slow_cmd_counts = cv_calloc(CMD_NUM, sizeof(uint32_t));
 
+    // 对redis实例建立连接(这里建立了corvus与对应redis实例的真正的链接)
     if (conn_connect(server) == CORVUS_ERR) {
         LOG(ERROR, "conn_create_server: fail to connect %s:%d",
                 info->addr.ip, info->addr.port);
@@ -92,10 +96,11 @@ static struct connection *conn_create_server(struct context *ctx,
     }
 
     strncpy(info->dsn, key, ADDRESS_LEN);
+    // 把该连接加入连接池
     dict_set(&ctx->server_table, info->dsn, (void*)server);
     TAILQ_INSERT_TAIL(&ctx->servers, server, next);
     return server;
-}
+的}
 
 void conn_info_init(struct conn_info *info)
 {
@@ -127,6 +132,7 @@ void conn_info_init(struct conn_info *info)
     info->status = DISCONNECTED;
 }
 
+// 初始化连接, 把context绑定在这个链接上
 void conn_init(struct connection *conn, struct context *ctx)
 {
     memset(conn, 0, sizeof(struct connection));
@@ -135,24 +141,33 @@ void conn_init(struct connection *conn, struct context *ctx)
     conn->fd = -1;
 }
 
+// 创建一个新的连接
 struct connection *conn_create(struct context *ctx)
 {
     struct connection *conn;
+    // 检查连接队列里队首连接是否可用,
+    // 1. 如果不可用, 就从队列中取出这个连接conn
+    // 2. 如果可用, 就向内存申请空间, 用于初始化conn
+    // 3. 最后初始化conn
     if ((conn = TAILQ_FIRST(&ctx->conns)) != NULL && conn->fd == -1) {
         LOG(DEBUG, "connection get cache");
         TAILQ_REMOVE(&ctx->conns, conn, next);
         ctx->mstats.free_conns--;
     } else {
-        conn = cv_malloc(sizeof(struct connection));
+        conn = cv_malloc(sizeof(struct connection));    // 申请内存空间
     }
-    conn_init(conn, ctx);
-    ctx->mstats.conns++;
+    conn_init(conn, ctx);   // 初始化连接
+    ctx->mstats.conns++;    // 打点更新连接数
     return conn;
 }
 
 struct conn_info *conn_info_create(struct context *ctx)
 {
     struct conn_info *info;
+    // 检查空闲conn_info队列是否为空,
+    // 1. 如果不为空, 则取出队首conn_info
+    // 2. 如果为空, 则向内存申请空间, 用于初始化conn_info
+    // 3. 最后初始化conn_info
     if (!STAILQ_EMPTY(&ctx->free_conn_infoq)) {
         info = STAILQ_FIRST(&ctx->free_conn_infoq);
         STAILQ_REMOVE_HEAD(&ctx->free_conn_infoq, next);
@@ -167,6 +182,7 @@ struct conn_info *conn_info_create(struct context *ctx)
     return info;
 }
 
+// 通过给予的connection实例, 对实例里面提供的ip地址和端口建立连接
 int conn_connect(struct connection *conn)
 {
     int status;
@@ -175,6 +191,7 @@ int conn_connect(struct connection *conn)
         LOG(ERROR, "connection info of %d is null", conn->fd);
         return CORVUS_ERR;
     }
+    // 建立TCP连接并绑定fd
     status = socket_connect(conn->fd, info->addr.ip, info->addr.port);
     switch (status) {
         case CORVUS_ERR: info->status = DISCONNECTED; return CORVUS_ERR;
@@ -264,23 +281,27 @@ void conn_recycle(struct context *ctx, struct connection *conn)
     ctx->mstats.free_conns++;
 }
 
+// 创建套接字描述符, 并进行配置
 int conn_create_fd()
 {
-    int fd = socket_create_stream();
+    int fd = socket_create_stream();    // 创建socket描述符
     if (fd == -1) {
         LOG(ERROR, "conn_create_fd: fail to create socket");
         return CORVUS_ERR;
     }
+    // 设置非阻塞
     if (socket_set_nonblocking(fd) == -1) {
         LOG(ERROR, "fail to set nonblocking on fd %d", fd);
         return CORVUS_ERR;
     }
+    // 设置禁用Nagle算法
     if (socket_set_tcpnodelay(fd) == -1) {
         LOG(WARN, "fail to set tcpnodelay on fd %d", fd);
     }
     return fd;
 }
 
+// 从连接池中获取从corvus到对应redis实例的连接
 struct connection *conn_get_server_from_pool(struct context *ctx,
         struct address *addr, bool readonly)
 {
@@ -290,10 +311,12 @@ struct connection *conn_get_server_from_pool(struct context *ctx,
 
     server = dict_get(&ctx->server_table, key);
     if (server != NULL) {
+        // 如果有连接, 则验证一下链接是否可用, 可用就返回
         if (verify_server(server, readonly) == CORVUS_ERR) return NULL;
         return server;
     }
 
+    // 如果没有获取到链接, 则手动创建一个链接
     server = conn_create_server(ctx, addr, key, readonly);
     return server;
 }
@@ -317,6 +340,7 @@ struct connection *conn_get_raw_server(struct context *ctx)
     return server;
 }
 
+// 获取从corvus到redis实例的连接
 struct connection *conn_get_server(struct context *ctx, uint16_t slot,
         int access)
 {
@@ -324,8 +348,10 @@ struct connection *conn_get_server(struct context *ctx, uint16_t slot,
     struct node_info info;
     bool readonly = false;
 
-    if (slot_get_node_addr(slot, &info)) {
+    if (slot_get_node_addr(slot, &info)) {      // 根据slot获取所在的redis节点, 读取到node_info里
         addr = &info.nodes[0];
+        // 如果是读请求, 并且启用了读写分离配置, 则判断redis指令的access方式(access详情可以看command.h的第13行)
+        // 然后挑选一台slave机器作为目标机
         if (access != CMD_ACCESS_WRITE && config.readslave && info.index > 1) {
             int r = rand_r(&ctx->seed);
             if (!config.readmasterslave || r % info.index != 0) {
@@ -334,10 +360,12 @@ struct connection *conn_get_server(struct context *ctx, uint16_t slot,
                 readonly = true;
             }
         }
+        // 从连接池中获取从corvus到目标redis机器的连接
         if (addr->port > 0) {
             return conn_get_server_from_pool(ctx, addr, readonly);
         }
     }
+    // 如果没有捕获到该slot对应的redis节点, 则直接建立连接
     return conn_get_raw_server(ctx);
 }
 
@@ -368,6 +396,7 @@ struct mbuf *conn_get_buf(struct connection *conn, bool unprocessed, bool local)
     return buf;
 }
 
+// 注册连接的对应事件类型到epoll事件循环上, 事件类型为可读或可写
 int conn_register(struct connection *conn)
 {
     struct context *ctx = conn->ctx;
@@ -407,6 +436,7 @@ void conn_add_data(struct connection *conn, uint8_t *data, int n,
     }
 }
 
+// 发送请求到conn连接
 int conn_write(struct connection *conn, int clear)
 {
     ssize_t remain = 0, status, bytes = 0, count = 0;
@@ -448,22 +478,30 @@ int conn_write(struct connection *conn, int clear)
     return status;
 }
 
+// 把连接的socket收到的请求读取到缓冲区
 int conn_read(struct connection *conn, struct mbuf *buf)
 {
     int n = socket_read(conn->fd, buf);
     if (n == 0) return CORVUS_EOF;
     if (n == CORVUS_ERR) return CORVUS_ERR;
     if (n == CORVUS_AGAIN) return CORVUS_AGAIN;
+    // 打点相关逻辑
     ATOMIC_INC(conn->ctx->stats.recv_bytes, n);
     ATOMIC_INC(conn->info->recv_bytes, n);
     return CORVUS_OK;
 }
 
+// 给对应连接构建cmd对象
 struct command *conn_get_cmd(struct connection *client)
 {
     struct command *cmd;
     int reuse = 0;
 
+    // 判断cmd_queue队列是否为空
+    // 1. 如果不为空, 则取出队尾的command对象, 判断这个对象是否解析完毕.
+    //      1. 如果该对象没有解析完毕, 则返回.
+    //      2. 如果已经解析完毕, 则根据当前连接创建一个新的command对象, 插入cmd_queue队尾并返回
+    // 2. 如果为空, 则根据当前连接创建新command对象, 插入cmd_queue队尾并返回
     if (!STAILQ_EMPTY(&client->info->cmd_queue)) {
         cmd = STAILQ_LAST(&client->info->cmd_queue, command, cmd_next);
         if (!cmd->parse_done) {
@@ -472,7 +510,7 @@ struct command *conn_get_cmd(struct connection *client)
     }
 
     if (!reuse) {
-        cmd = cmd_create(client->ctx);
+        cmd = cmd_create(client->ctx);      // 创建command对象
         STAILQ_INSERT_TAIL(&client->info->cmd_queue, cmd, cmd_next);
     }
     return cmd;
