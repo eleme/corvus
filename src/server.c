@@ -46,7 +46,7 @@ void server_make_iov(struct conn_info *info)
         if (info->iov.len - info->iov.cursor > CORVUS_IOV_MAX) {
             break;
         }
-        // 从ready_queue队列中读取队首command对象
+        // 从ready_queue队列中获取队首command对象
         cmd = STAILQ_FIRST(&info->ready_queue);
         STAILQ_REMOVE_HEAD(&info->ready_queue, ready_next);
         STAILQ_NEXT(cmd, ready_next) = NULL;
@@ -62,7 +62,7 @@ void server_make_iov(struct conn_info *info)
             info->readonly_sent = true;
         }
 
-        if (cmd->asking) {
+        if (cmd->asking) {  // 重定向ASKING
             cmd_iov_add(&info->iov, (void*)req_ask, strlen(req_ask), NULL);
         }
         cmd->rep_time[0] = t;
@@ -75,14 +75,21 @@ void server_make_iov(struct conn_info *info)
         if (cmd->prefix != NULL) {
             cmd_iov_add(&info->iov, (void*)cmd->prefix, strlen(cmd->prefix), NULL);
         }
-        cmd_create_iovec(cmd->req_buf, &info->iov);
+        cmd_create_iovec(cmd->req_buf, &info->iov);     // 构造准备发送到redis实例的请求数据
+        // 把command对象放到corvus server监听的waiting_queue队列的队尾
+        // 当corvus server发生可读事件的时候, 会调用这个队列
         STAILQ_INSERT_TAIL(&info->waiting_queue, cmd, waiting_next);
     }
 }
 
+// corvus server捕获到可写事件触发执行的函数
+// 该函数主要作用是:
+// 1. 通过command对象, 构造发送到对应redis实例的请求数据
+// 2. 把构造好的数据发送到对应redis实例上
 int server_write(struct connection *server)
 {
     struct conn_info *info = server->info;
+    // 构造发送到redis实例的请求数据
     if (!STAILQ_EMPTY(&info->ready_queue)) {
         server_make_iov(info);
     }
@@ -91,6 +98,7 @@ int server_write(struct connection *server)
         return CORVUS_OK;
     }
 
+    // 发送请求到对应的redis实例中
     int status = conn_write(server, 0);
 
     if (status == CORVUS_ERR) {
@@ -117,29 +125,39 @@ int server_write(struct connection *server)
     return CORVUS_OK;
 }
 
+// 请求错误之后, 重试的逻辑
+// 1. 针对产生错误的command请求, 重新获取对应的redis实例的连接
+// 2. 重新发送请求
 int server_enqueue(struct connection *server, struct command *cmd)
 {
+    // 如果没有获取到对应的连接, 报错返回
     if (server == NULL) {
         mbuf_range_clear(cmd->ctx, cmd->rep_buf);
         cmd_mark_fail(cmd, rep_server_err);
         return SERVER_NULL;
     }
+    // 获取到连接, 把连接注册到事件循环上
     if (conn_register(server) == CORVUS_ERR) {
         return SERVER_REGISTER_ERROR;
     }
-    server->info->last_active = time(NULL);
+    server->info->last_active = time(NULL);     // 更新该连接最后活跃时间
     mbuf_range_clear(cmd->ctx, cmd->rep_buf);
     cmd->server = server;
+    // 把重新获取了到redis连接的command对象重新放入ready_queue队列中,
+    // 等待corvus server触发可写事件时, 执行server_write函数发送请求
     STAILQ_INSERT_TAIL(&server->info->ready_queue, cmd, ready_next);
     return CORVUS_OK;
 }
 
+// corvus server重新发送command到redis实例
 int server_retry(struct command *cmd)
 {
+    // 重新获取command对象对应的redis连接
     struct connection *server = conn_get_server(cmd->ctx, cmd->slot, cmd->cmd_access);
 
+    // 重发请求
     switch (server_enqueue(server, cmd)) {
-        case SERVER_NULL:
+        case SERVER_NULL:   // 没有获取到对应的redis连接
             LOG(WARN, "server_retry: slot %d fail to get server", cmd->slot);
             return CORVUS_OK;
         case SERVER_REGISTER_ERROR:
@@ -178,12 +196,14 @@ int server_redirect(struct command *cmd, struct redirect_info *info)
     }
 }
 
+// 读取redis实例返回的response
 int server_read_reply(struct connection *server, struct command *cmd)
 {
+    // 读取并解析redis返回的response, 并把解析结果存入command对象中
     int status = cmd_read_rep(cmd, server);
     if (status != CORVUS_OK) return status;
 
-    ATOMIC_INC(server->info->completed_commands, 1);
+    ATOMIC_INC(server->info->completed_commands, 1);    // statsd打点相关
 
     if (server->info->readonly_sent) {
         return CORVUS_READONLY;
@@ -201,29 +221,43 @@ int server_read_reply(struct connection *server, struct command *cmd)
         return CORVUS_OK;
     }
 
+    // 初始化redirect_info对象
     struct redirect_info info = {.type = CMD_ERR, .slot = -1};
     memset(info.addr, 0, sizeof(info.addr));
 
+    // 分析redis返回的值, 判断是否需要重定向请求
     if (cmd_parse_redirect(cmd, &info) == CORVUS_ERR) {
         mbuf_range_clear(cmd->ctx, cmd->rep_buf);
         cmd_mark_fail(cmd, rep_redirect_err);
         return CORVUS_OK;
     }
     switch (info.type) {
+        // 如果返回值为MOVED, 说明这个slot已经迁移到了另一台redis实例上.
+        // 1. corvus就对正确的redis目标机再发送一次请求,
+        // 2. 更新slot_job变量, 触发后台线程更新slot-node映射
         case CMD_ERR_MOVED:
             ATOMIC_INC(cmd->ctx->stats.moved_recv, 1);
             slot_create_job(SLOT_UPDATE);
+            // 检查发送重定向请求的次数
             CHECK_REDIRECTED(cmd, info.addr, rep_redirect_err);
             return server_redirect(cmd, &info);
+        // 如果返回值为ASK, 说明redis集群正在进行slot的迁移.
+        // 那么corvus就对正确的redis目标机再发送一次请求,
         case CMD_ERR_ASK:
             ATOMIC_INC(cmd->ctx->stats.ask_recv, 1);
+            // 检查发送重定向请求的次数
             CHECK_REDIRECTED(cmd, info.addr, rep_redirect_err);
             cmd->asking = 1;
             return server_redirect(cmd, &info);
+        // 如果返回值为CLUSTERDOWN, 说明redis集群发生故障.
+        // 1. 更新slot_job变量, 触发后台线程更新slot-node映射
+        // 2. 重试命令
         case CMD_ERR_CLUSTERDOWN:
             slot_create_job(SLOT_UPDATE);
+            // 检查发送重定向请求的次数
             CHECK_REDIRECTED(cmd, NULL, NULL);
             return server_retry(cmd);
+        // 如果没有发生以上三种情况, 说明请求已经正确执行并返回
         default:
             cmd_mark_done(cmd);
             break;
@@ -231,6 +265,7 @@ int server_read_reply(struct connection *server, struct command *cmd)
     return CORVUS_OK;
 }
 
+// corvus server发生可读事件触发执行的函数
 int server_read(struct connection *server)
 {
     int status = CORVUS_OK;
@@ -238,9 +273,10 @@ int server_read(struct connection *server)
     struct conn_info *info = server->info;
     int64_t now = get_time();
 
+    // 循环读取waiting_queue队列, 以获取发送出去的请求
     while (!STAILQ_EMPTY(&info->waiting_queue)) {
-        cmd = STAILQ_FIRST(&info->waiting_queue);
-        status = server_read_reply(server, cmd);
+        cmd = STAILQ_FIRST(&info->waiting_queue);   // 获取发送的redis请求
+        status = server_read_reply(server, cmd);    // 读取redis返回的响应
 
         cmd->rep_time[1] = now;
         if (cmd->parent) {
@@ -299,6 +335,9 @@ void server_ready(struct connection *self, uint32_t mask)
     if (mask & E_READABLE) {    // 当发生可读事件时
         LOG(DEBUG, "server readable");
 
+        // 查找waiting_queue队列是否为空
+        // 如果不是空, 则说明corvus向redis实例发送了请求, 因为发生了可读事件, 所以已经获得了redis的响应
+        // 如果是空, 则忽略这个事件
         if (!STAILQ_EMPTY(&info->waiting_queue)) {
             switch (server_read(self)) {
                 case CORVUS_ERR:

@@ -1127,6 +1127,7 @@ void cmd_gen_multikey_iovec(struct command *cmd, struct iov_data *iov)
     cmd_iov_add(iov, iov->buf, n, NULL);
 }
 
+// 标记command对象的执行结果, fail=0表示成功执行, 1表示执行失败
 void cmd_mark(struct command *cmd, int fail)
 {
     LOG(DEBUG, "mark cmd %p", cmd);
@@ -1195,27 +1196,32 @@ struct command *cmd_create(struct context *ctx)
     return cmd;
 }
 
+// 读取redis实例返回的数据, 并根据redis协议进行解析, 把结果存到command对象中
 int cmd_read_rep(struct command *cmd, struct connection *server)
 {
     int rsize, status;
     struct mbuf *buf;
 
     while (1) {
-        buf = conn_get_buf(server, true, false);
-        rsize = mbuf_read_size(buf);
+        buf = conn_get_buf(server, true, false);    // 获取缓冲区
+        rsize = mbuf_read_size(buf);        // 获取现在缓冲区的数据大小
 
         if (rsize <= 0) {
+            // 缓冲区中没有数据, 把返回的数据从socket套接字中读取到缓冲区
             status = conn_read(server, buf);
             if (status != CORVUS_OK) return status;
         }
 
+        // 根据redis协议, 从缓冲区解析redis返回的数据到command对象中
         if (cmd_parse_rep(cmd, buf) == CORVUS_ERR) return CORVUS_ERR;
+        // 判断是否已经读取完毕
         if (reader_ready(&server->info->reader)) break;
     }
 
     return CORVUS_OK;
 }
 
+// 构造corvus发送到redis实例的数据
 void cmd_create_iovec(struct buf_ptr ptr[], struct iov_data *iov)
 {
     uint8_t *data;
@@ -1256,6 +1262,9 @@ void cmd_make_iovec(struct command *cmd, struct iov_data *iov)
     }
 }
 
+// 从command对象中获取redis返回值的类型, 主要是为了选出两种重定向请求以及错误:
+// MOVED, ASK, CLUSTERDOWN
+// 并把返回类型存储到info中
 int cmd_parse_redirect(struct command *cmd, struct redirect_info *info)
 {
     int n = 63;
@@ -1305,6 +1314,7 @@ int cmd_parse_redirect(struct command *cmd, struct redirect_info *info)
     return CORVUS_OK;
 }
 
+// 标记该command对象已经成功执行
 void cmd_mark_done(struct command *cmd)
 {
     cmd_mark(cmd, 0);

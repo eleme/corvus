@@ -436,6 +436,7 @@ void conn_add_data(struct connection *conn, uint8_t *data, int n,
     }
 }
 
+// 发送请求到conn连接
 int conn_write(struct connection *conn, int clear)
 {
     ssize_t remain = 0, status, bytes = 0, count = 0;
