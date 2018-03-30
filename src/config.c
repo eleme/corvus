@@ -31,6 +31,8 @@ const char * CONFIG_OPTIONS[] = {
     "metric_interval",
     "stats",
     "read-strategy",
+    "preferred_nodes",
+    "polling_interval",
     "requirepass",
     "client_timeout",
     "server_timeout",
@@ -48,6 +50,9 @@ void config_init()
     config.bind = 12345;
     config.node = cv_calloc(1, sizeof(struct node_conf));
     config.node->refcount = 1;
+    config.preferred_node = cv_calloc(1, sizeof(struct node_conf));
+    config.preferred_node->refcount = 1;
+    config.polling_interval = 10;
     config.thread = DEFAULT_THREAD;
     config.loglevel = INFO;
     config.syslog = 0;
@@ -56,7 +61,7 @@ void config_init()
     config.server_timeout = 0;
     config.bufsize = DEFAULT_BUFSIZE;
     config.requirepass = NULL;
-    config.readslave = config.readmasterslave = false;
+    config.readslave = config.readmasterslave = config.readpreferred = false;
     config.slowlog_max_len = 1024;
     config.slowlog_log_slower_than = -1;
     config.slowlog_statsd_enabled = 0;
@@ -68,6 +73,7 @@ void config_init()
 void config_free()
 {
     config_node_dec_ref(config.node);
+    config_node_dec_ref(config.preferred_node);
     pthread_mutex_destroy(&lock_conf_node);
     pthread_mutex_destroy(&lock_config_rewrite);
 }
@@ -106,6 +112,25 @@ void config_set_node(struct node_conf *node)
     config_node_dec_ref(oldnode);
 }
 
+struct node_conf *config_get_preferred_node()
+{
+    pthread_mutex_lock(&lock_conf_node);
+    struct node_conf *node = config.preferred_node;
+    int refcount = ATOMIC_INC(node->refcount, 1);
+    pthread_mutex_unlock(&lock_conf_node);
+    assert(refcount >= 1);
+    return node;
+}
+
+void config_set_preferred_node(struct node_conf *node)
+{
+    pthread_mutex_lock(&lock_conf_node);
+    struct node_conf *oldnode = config.preferred_node;
+    config.preferred_node = node;
+    pthread_mutex_unlock(&lock_conf_node);
+    config_node_dec_ref(oldnode);
+}
+
 void config_node_dec_ref(struct node_conf *node)
 {
     int refcount = ATOMIC_DEC(node->refcount, 1);
@@ -119,6 +144,24 @@ void config_node_dec_ref(struct node_conf *node)
 void config_node_to_str(char *str, size_t max_len)
 {
     struct node_conf *nodes = config_get_node();
+    char buf[ADDRESS_LEN + 1];
+    for (size_t i = 0; i != nodes->len; i++) {
+        struct address *addr = &nodes->addr[i];
+        size_t len = snprintf(buf, max_len, "%s:%u",
+            addr->ip, addr->port);
+        size_t comma_len = i > 0 ? 1 : 0;
+        if (len + comma_len > max_len) break;
+        if (comma_len) *str++ = ',';
+        strcpy(str, buf);
+        str += len;
+        max_len -= len + comma_len;
+    }
+    config_node_dec_ref(nodes);
+}
+
+void config_preferred_node_to_str(char *str, size_t max_len)
+{
+    struct node_conf *nodes = config_get_preferred_node();
     char buf[ADDRESS_LEN + 1];
     for (size_t i = 0; i != nodes->len; i++) {
         struct address *addr = &nodes->addr[i];
@@ -188,11 +231,15 @@ int config_add(char *name, char *value)
             config.readslave = true;
         }
     } else if (strcmp(name, "read-strategy") == 0) {
+        config.readpreferred = false;
         if (strcmp(value, "read-slave-only") == 0) {
             config.readmasterslave = false;
             config.readslave = true;
         } else if (strcmp(value, "both") == 0) {
             config.readmasterslave = config.readslave = true;
+        } else if (strcmp(value, "read-preferred") == 0) {
+            config.readmasterslave = config.readslave = false;
+            config.readpreferred = true;
         } else {
             config.readmasterslave = config.readslave = false;
         }
@@ -224,6 +271,9 @@ int config_add(char *name, char *value)
     } else if (strcmp(name, "metric_interval") == 0) {
         TRY_PARSE_INT();
         config.metric_interval = val > 0 ? val : 10;
+    } else if (strcmp(name, "polling_interval") == 0) {
+        TRY_PARSE_INT();
+        config.polling_interval = val > 0 ? val : 10;
     } else if (strcmp(name, "loglevel") == 0) {
         if (strcasecmp(value, "debug") == 0) {
             ATOMIC_SET(config.loglevel, DEBUG);
@@ -247,7 +297,7 @@ int config_add(char *name, char *value)
             config.requirepass = cv_calloc(strlen(value) + 1, sizeof(char));
             memcpy(config.requirepass, value, strlen(value));
         }
-    } else if (strcmp(name, "node") == 0) {
+    } else if (strcmp(name, "node") == 0 || strcmp(name, "preferred_nodes") == 0) {
         // strtok will modify `value` to tokenize it.
         // Copy it first in case value is a string literal
         char buf[strlen(value) + 1];
@@ -266,14 +316,18 @@ int config_add(char *name, char *value)
             p = strtok(NULL, ",");
         }
         if (addr_cnt == 0) {
-            LOG(WARN, "received empty node value in config set");
+            LOG(WARN, "received empty %s value in config set", name);
             return CORVUS_ERR;
         }
         struct node_conf *newnode = cv_malloc(sizeof(struct node_conf));
         newnode->addr = addr;
         newnode->len = addr_cnt;
         newnode->refcount = 1;
-        config_set_node(newnode);
+        if (strcmp(name, "node") == 0) {
+            config_set_node(newnode);
+        } else {
+            config_set_preferred_node(newnode);
+        }
     } else if (strcmp(name, "slowlog-log-slower-than") == 0) {
         TRY_PARSE_INT();
         ATOMIC_SET(config.slowlog_log_slower_than, val);
@@ -297,6 +351,8 @@ int config_get(const char *name, char *value, size_t max_len)
         snprintf(value, max_len, "%u", config.bind);
     } else if (strcmp(name, "node") == 0) {
         config_node_to_str(value, max_len);
+    } else if (strcmp(name, "preferred_nodes") == 0) {
+        config_preferred_node_to_str(value, max_len);
     } else if (strcmp(name, "thread") == 0) {
         snprintf(value, max_len, "%d", config.thread);
     } else if (strcmp(name, "loglevel") == 0) {
@@ -335,6 +391,8 @@ int config_get(const char *name, char *value, size_t max_len)
         snprintf(value, max_len, "%d", config.slowlog_max_len);
     } else if (strcmp(name, "slowlog-statsd-enabled") == 0) {
         strncpy(value, BOOL_STR(config.slowlog_statsd_enabled), max_len);
+    } else if (strcmp(name, "polling_interval") == 0) {
+        snprintf(value, max_len, "%d", config.polling_interval);
     } else {
         return CORVUS_ERR;
     }
@@ -611,4 +669,15 @@ bool config_option_changable(const char *option)
         }
     }
     return false;
+}
+
+bool config_is_preferred_node(struct address *node)
+{
+	struct node_conf *preferred_node = config_get_preferred_node();
+	for (size_t i = 0; i < preferred_node->len; i++) {
+		if (socket_cmp(node, &preferred_node->addr[i]) == 0) {
+			return true;
+		}
+	}
+	return false;
 }

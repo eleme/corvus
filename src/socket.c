@@ -391,3 +391,8 @@ int socket_trigger_event(int evfd)
     }
     return CORVUS_OK;
 }
+
+int socket_cmp(struct address *a, struct address *b)
+{
+    return strcmp(a->ip, b->ip) || a->port != b->port;
+}

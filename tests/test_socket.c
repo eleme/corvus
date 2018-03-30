@@ -65,9 +65,24 @@ TEST(test_socket_parse_addr_wrong) {
     PASS(NULL);
 }
 
+TEST(test_socket_compare) {
+    struct address addr1;
+    struct address addr2;
+    socket_parse_addr("127.0.0.1:12345", &addr1);
+    socket_parse_addr("127.0.0.1:12345", &addr2);
+    ASSERT(socket_cmp(&addr1, &addr2) == 0);
+
+    socket_parse_addr("127.0.0.1:1234", &addr2);
+    ASSERT(socket_cmp(&addr1, &addr2) == 1);
+
+    socket_parse_addr("127.0.0.2:12345", &addr2);
+    ASSERT(socket_cmp(&addr1, &addr2) == 1);
+}
+
 TEST_CASE(test_socket) {
     RUN_TEST(test_socket_address_init);
     RUN_TEST(test_parse_port);
     RUN_TEST(test_socket_parse_addr);
     RUN_TEST(test_socket_parse_addr_wrong);
+    RUN_TEST(test_socket_compare);
 }

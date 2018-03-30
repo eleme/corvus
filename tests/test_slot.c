@@ -12,6 +12,10 @@
 
 extern int split_node_description(struct node_desc *desc, struct pos_array *pos_array);
 extern int parse_cluster_nodes(struct redis_data *data);
+extern void config_init();
+extern void config_free();
+extern int config_add(char *name, char *value);
+extern void config_set_preferred_node(struct node_conf *node);
 
 TEST(test_slot_get1) {
     struct pos p[] = {
@@ -122,8 +126,29 @@ TEST(test_parse_cluster_nodes) {
 
     struct node_info info;
     ASSERT(slot_get_node_addr(5499, &info));
-    ASSERT(strcmp(info.nodes[0].ip, "127.0.0.1") == 0 && info.nodes[0].port == 8001);
+    ASSERT(strcmp(info.nodes[0].addr.ip, "127.0.0.1") == 0 && info.nodes[0].addr.port == 8001);
     ASSERT(!slot_get_node_addr(9, &info));
+
+    PASS(NULL);
+}
+
+TEST(test_parse_cluster_nodes_disconnected_master) {
+    char data[] = "4f6d838441c4f652f970cd7570c0cf16bbd0f3a9 127.0.0.1:8001 "
+                  "master - 0 1464764873814 9 disconnected 0-5460\n"
+                  "67ed2db8d677e59ec4a4cefb06858cf2a1a89fa1 127.0.0.1:8002 "
+                  "master - 0 1426238316232 2 connected 5461-10922\n";
+    struct pos p[] = {{(uint8_t*)data, strlen(data)}};
+    struct pos_array pos = {p, strlen(data), 1, 0};
+    struct redis_data redis_data;
+    redis_data.type = REP_STRING;
+    memcpy(&redis_data.pos, &pos, sizeof(pos));
+    int count = parse_cluster_nodes(&redis_data);
+
+    struct node_info info;
+    ASSERT(slot_get_node_addr(0, &info));
+    ASSERT(!info.nodes[0].available);
+    ASSERT(slot_get_node_addr(10000, &info));
+    ASSERT(info.nodes[0].available);
 
     PASS(NULL);
 }
@@ -144,9 +169,9 @@ TEST(test_parse_cluster_nodes_slave) {
 
     struct node_info info;
     ASSERT(slot_get_node_addr(0, &info));
-    ASSERT(strcmp(info.nodes[0].ip, "127.0.0.1") == 0 && info.nodes[0].port == 8001);
+    ASSERT(strcmp(info.nodes[0].addr.ip, "127.0.0.1") == 0 && info.nodes[0].addr.port == 8001);
     ASSERT(info.index == 2);
-    ASSERT(strcmp(info.nodes[1].ip, "127.0.0.1") == 0 && info.nodes[1].port == 8003);
+    ASSERT(strcmp(info.nodes[1].addr.ip, "127.0.0.1") == 0 && info.nodes[1].addr.port == 8003);
 
     PASS(NULL);
 }
@@ -167,8 +192,43 @@ TEST(test_parse_cluster_nodes_fail_slave) {
 
     struct node_info info;
     ASSERT(slot_get_node_addr(0, &info));
-    ASSERT(strcmp(info.nodes[0].ip, "127.0.0.1") == 0 && info.nodes[0].port == 8001);
+    ASSERT(strcmp(info.nodes[0].addr.ip, "127.0.0.1") == 0 && info.nodes[0].addr.port == 8001);
     ASSERT(info.index == 1);
+
+    PASS(NULL);
+}
+
+TEST(test_parse_cluster_nodes_preferred_nodes) {
+    char data[] = "07c37dfeb235213a872192d90877d0cd55635b91 127.0.0.1:30004 "
+                  "slave e7d1eecce10fd6bb5eb35b9f99a514335d9ba9ca 0 1426238317239 4 connected\n"
+                  "67ed2db8d677e59ec4a4cefb06858cf2a1a89fa1 127.0.0.1:30002 "
+                  "master - 0 1426238316232 2 connected 5461-10922\n"
+                  "292f8b365bb7edb5e285caf0b7e6ddc7265d2f4f 127.0.0.1:30003 "
+                  "master - 0 1426238318243 3 connected 10923-16383\n"
+                  "6ec23923021cf3ffec47632106199cb7f496ce01 127.0.0.1:30005 "
+                  "slave 67ed2db8d677e59ec4a4cefb06858cf2a1a89fa1 0 1426238316232 5 connected\n"
+                  "824fe116063bc5fcf9f4ffd895bc17aee7731ac3 127.0.0.1:30006 "
+                  "slave 292f8b365bb7edb5e285caf0b7e6ddc7265d2f4f 0 1426238317741 6 connected\n"
+                  "e7d1eecce10fd6bb5eb35b9f99a514335d9ba9ca 127.0.0.1:30001 "
+                  "myself,master - 0 0 1 disconnected 0-5460\n";
+    struct pos p[] = {{(uint8_t*)data, strlen(data)}};
+    struct pos_array pos = {p, strlen(data), 1, 0};
+    struct redis_data redis_data;
+    redis_data.type = REP_STRING;
+    memcpy(&redis_data.pos, &pos, sizeof(pos));
+
+    config.preferred_node = cv_calloc(1, sizeof(struct node_conf));
+    config.preferred_node->refcount = 1;
+    config.readpreferred = true;
+    config_add("preferred_nodes", "127.0.0.1:30004");
+
+    parse_cluster_nodes(&redis_data);
+
+    struct node_info info;
+    ASSERT(slot_get_node_addr(0, &info));
+    ASSERT(strcmp(info.preferred_nodes[0].addr.ip, "127.0.0.1") == 0 && info.preferred_nodes[0].addr.port == 30004);
+
+    config_node_dec_ref(config.preferred_node);
 
     PASS(NULL);
 }
@@ -179,6 +239,8 @@ TEST_CASE(test_slot) {
     RUN_TEST(test_slot_get3);
     RUN_TEST(test_split_node_description);
     RUN_TEST(test_parse_cluster_nodes);
+    RUN_TEST(test_parse_cluster_nodes_disconnected_master);
     RUN_TEST(test_parse_cluster_nodes_slave);
     RUN_TEST(test_parse_cluster_nodes_fail_slave);
+    RUN_TEST(test_parse_cluster_nodes_preferred_nodes);
 }
