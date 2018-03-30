@@ -254,9 +254,15 @@ int server_read(struct connection *server)
                 cmd->asking = 0;
                 continue;
             case CORVUS_READONLY:
-                LOG(DEBUG, "recv readonly");
+                if (cmd->reply_type == REP_ERROR) {
+                    LOG(ERROR, "recv invalid readonly reponse");
+                    info->readonly = true;
+                } else {
+                    LOG(DEBUG, "recv readonly");
+                }
+               
                 mbuf_range_clear(cmd->ctx, cmd->rep_buf);
-                server->info->readonly_sent = false;
+                info->readonly_sent = false;
                 continue;
             case CORVUS_OK:
                 STAILQ_REMOVE_HEAD(&info->waiting_queue, waiting_next);
