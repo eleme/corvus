@@ -23,6 +23,7 @@ static pthread_mutex_t lock_config_rewrite = PTHREAD_MUTEX_INITIALIZER;
 const char * CONFIG_OPTIONS[] = {
     "cluster",
     "bind",
+    "port",
     "node",
     "thread",
     "loglevel",
@@ -45,7 +46,8 @@ void config_init()
     memset(config.cluster, 0, CLUSTER_NAME_SIZE + 1);
     strncpy(config.cluster, "default", CLUSTER_NAME_SIZE);
 
-    config.bind = 12345;
+    strncpy(config.bind, "0.0.0.0", CONFIG_BINDADDR_MAX);
+    config.port = 12345;
     config.node = cv_calloc(1, sizeof(struct node_conf));
     config.node->refcount = 1;
     config.thread = DEFAULT_THREAD;
@@ -173,7 +175,14 @@ int config_add(char *name, char *value)
         if (strlen(value) <= 0) return CORVUS_OK;
         strncpy(config.cluster, value, CLUSTER_NAME_SIZE);
     } else if (strcmp(name, "bind") == 0) {
-        if (socket_parse_port(value, &config.bind) == CORVUS_ERR) {
+        size_t len = strlen(value);
+        if (len == 0 || len > CONFIG_BINDADDR_MAX) {
+            return CORVUS_ERR;
+        }
+
+        strncpy(config.bind, value, CONFIG_BINDADDR_MAX);
+    } else if (strcmp(name, "port") == 0) {
+        if (socket_parse_port(value, &config.port) == CORVUS_ERR) {
             return CORVUS_ERR;
         }
     } else if (strcmp(name, "syslog") == 0) {
@@ -294,7 +303,9 @@ int config_get(const char *name, char *value, size_t max_len)
     if (strcmp(name, "cluster") == 0) {
         strncpy(value, config.cluster, max_len);
     } else if (strcmp(name, "bind") == 0) {
-        snprintf(value, max_len, "%u", config.bind);
+        snprintf(value, max_len, "%s", config.bind);
+    } else if (strcmp(name, "port") == 0) {
+        snprintf(value, max_len, "%u", config.port);
     } else if (strcmp(name, "node") == 0) {
         config_node_to_str(value, max_len);
     } else if (strcmp(name, "thread") == 0) {

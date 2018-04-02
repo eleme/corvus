@@ -276,7 +276,7 @@ void *main_loop(void *data)
         exit(EXIT_FAILURE);
     }
 
-    if (proxy_init(&ctx->proxy, ctx, "0.0.0.0", config.bind) == -1) {
+    if (proxy_init(&ctx->proxy, ctx, config.bind, config.port) == -1) {
         LOG(ERROR, "Fatal: fail to create proxy.");
         exit(EXIT_FAILURE);
     }
@@ -312,6 +312,7 @@ static const struct option opts[] = {
     {"threads", required_argument, NULL, 't'},
     {"cluster", required_argument, NULL, 'c'},
     {"bind", required_argument, NULL, 'b'},
+    {"port", required_argument, NULL, 'p'},
     {"syslog", required_argument, NULL, 'l'},
     {"read-strategy", required_argument, NULL, 's'},
     {"bufsize", required_argument, NULL, 'B'},
@@ -331,6 +332,7 @@ static const char *opts_desc[] = {
     "nodes of targeting cluster. eg: 192.168.123.2:6391,192.168.123.2:6392",
     "thread num",
     "cluster name",
+    "IP to listen on",
     "port to listen",
     "whether writing log to syslog. 0 or 1",
     "whether sending all cmd to both masters and slaves. read-slave-only|both or \"\" by default to masters",
@@ -363,7 +365,7 @@ static int parameter_init(int argc, const char *argv[]) {
     int ch;
     opterr = optind = 0;
     do {
-        ch = getopt_long(argc, (char * const *)argv, ":n:t:c:b:l:s:B:C:S:A:m:L:P:g:G:E:", opts, NULL);
+        ch = getopt_long(argc, (char * const *)argv, ":n:t:c:b:p:l:s:B:C:S:A:m:L:P:g:G:E:", opts, NULL);
         if (ch < 0) {
             break;
         }
@@ -379,6 +381,9 @@ static int parameter_init(int argc, const char *argv[]) {
                 break;
             case 'b':
                 config_add("bind", optarg);
+                break;
+            case 'p':
+                config_add("port", optarg);
                 break;
             case 'l':
                 config_add("syslog", optarg);
@@ -503,7 +508,7 @@ int main(int argc, const char *argv[])
         stats_init();
     }
 
-    LOG(INFO, "serve at 0.0.0.0:%d", config.bind);
+    LOG(INFO, "serve at %s:%d", config.bind, config.port);
 
     for (i = 0; i < config.thread; i++) {
         if ((err = pthread_join(contexts[i].thread, NULL)) != 0) {

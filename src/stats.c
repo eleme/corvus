@@ -78,9 +78,9 @@ static void stats_send(char *metric, double value)
 
     int n;
     const char *fmt = "corvus.%s.%s-%d.%s:%f|g";
-    n = snprintf(NULL, 0, fmt, config.cluster, hostname, config.bind, metric, value);
+    n = snprintf(NULL, 0, fmt, config.cluster, hostname, config.port, metric, value);
     char buf[n + 1];
-    snprintf(buf, sizeof(buf), fmt, config.cluster, hostname, config.bind, metric, value);
+    snprintf(buf, sizeof(buf), fmt, config.cluster, hostname, config.port, metric, value);
     if (sendto(statsd_fd, buf, n, 0, (struct sockaddr*)&dest, sizeof(dest)) == -1) {
         LOG(WARN, "fail to send metrics data: %s", strerror(errno));
     }

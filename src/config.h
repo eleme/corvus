@@ -5,6 +5,7 @@
 
 #define CLUSTER_NAME_SIZE 127
 #define CONFIG_FILE_PATH_SIZE 256
+#define CONFIG_BINDADDR_MAX 46
 
 struct node_conf {
     struct address *addr;
@@ -15,7 +16,8 @@ struct node_conf {
 struct corvus_config {
     char config_file_path[CONFIG_FILE_PATH_SIZE + 1];
     char cluster[CLUSTER_NAME_SIZE + 1];
-    uint16_t bind;
+    char bind[CONFIG_BINDADDR_MAX];
+    uint16_t port;
     struct node_conf *node;
     int thread;
     int loglevel;
