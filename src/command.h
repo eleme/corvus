@@ -15,7 +15,7 @@
     HANDLER(DEL,               COMPLEX,  WRITE)   \
     HANDLER(DUMP,              BASIC,    READ)    \
     HANDLER(EXISTS,            COMPLEX,  READ)    \
-    HANDLER(EXPIRE,            BASIC,    READ)    \
+    HANDLER(EXPIRE,            BASIC,    WRITE)   \
     HANDLER(EXPIREAT,          BASIC,    WRITE)   \
     HANDLER(KEYS,              UNIMPL,   UNKNOWN) \
     HANDLER(MIGRATE,           UNIMPL,   UNKNOWN) \
