@@ -30,11 +30,18 @@ struct node_desc {
     uint16_t index, len;
 };
 
+struct node {
+    struct address addr;
+    bool available;
+};
+
 struct node_info {
     char name[64];
-    // contains master and slaves of one shard
-    struct address nodes[MAX_SLAVE_NODES + 1];
+    // contains preferred node (if exists), master and slaves of one shard
+    struct node nodes[MAX_SLAVE_NODES + 1];
     size_t index;  // length of `nodes` above
+    struct node preferred_nodes[MAX_SLAVE_NODES + 1];
+    size_t preferred_index;  // length of `preferred_nodes` above
     int refcount;
     // for parsing slots of a master node
     struct desc_part *slot_spec;

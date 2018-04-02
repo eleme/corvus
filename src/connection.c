@@ -325,14 +325,21 @@ struct connection *conn_get_server(struct context *ctx, uint16_t slot,
     bool readonly = false;
 
     if (slot_get_node_addr(slot, &info)) {
-        addr = &info.nodes[0];
+        addr = &info.nodes[0].addr;
         if (access != CMD_ACCESS_WRITE && config.readslave && info.index > 1) {
             int r = rand_r(&ctx->seed);
             if (!config.readmasterslave || r % info.index != 0) {
                 int i = r % (info.index - 1);
-                addr = &info.nodes[++i];
+                addr = &info.nodes[++i].addr;
                 readonly = true;
             }
+        } else if (access != CMD_ACCESS_WRITE && config.readpreferred) {
+            /*
+             * If readpreferred is set and we're not running a 'write' command
+             * use the first node available that's in the preferred list.
+             */
+            addr = &info.preferred_nodes[0].addr;
+            readonly = true;
         }
         if (addr->port > 0) {
             return conn_get_server_from_pool(ctx, addr, readonly);

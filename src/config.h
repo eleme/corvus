@@ -17,6 +17,7 @@ struct corvus_config {
     char cluster[CLUSTER_NAME_SIZE + 1];
     uint16_t bind;
     struct node_conf *node;
+	struct node_conf *preferred_node; /* List of nodes that should be set a higher priority */
     int thread;
     int loglevel;
     bool syslog;
@@ -25,6 +26,8 @@ struct corvus_config {
     bool stats;
     bool readslave;
     bool readmasterslave;
+    bool readpreferred;
+    uint16_t polling_interval; /* Intervall to use when polling for cluster configuration */
     char *requirepass;
     int64_t client_timeout;
     int64_t server_timeout;
@@ -46,5 +49,7 @@ void config_set_node(struct node_conf *node);
 void config_node_dec_ref(struct node_conf *node);
 int config_add(char *name, char *value);
 bool config_option_changable(const char *option);
+struct node_conf *config_get_preferred_node();
+bool config_is_preferred_node(struct address *node);
 
 #endif /* end of include guard: CONFIG_H */

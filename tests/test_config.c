@@ -45,11 +45,13 @@ TEST(test_config_read_strategy) {
     char n[] = "read-strategy";
 
     ASSERT(config_add(n, "read-slave-only") == 0);
-    ASSERT(config.readslave && !config.readmasterslave);
+    ASSERT(config.readslave && !config.readmasterslave && !config.readpreferred);
     ASSERT(config_add(n, "both") == 0);
-    ASSERT(config.readslave && config.readmasterslave);
+    ASSERT(config.readslave && config.readmasterslave && !config.readpreferred);
     ASSERT(config_add(n, "master") == 0);
-    ASSERT(!config.readslave && !config.readmasterslave);
+    ASSERT(!config.readslave && !config.readmasterslave && !config.readpreferred);
+    ASSERT(config_add(n, "read-preferred") == 0);
+    ASSERT(!config.readslave && !config.readmasterslave && config.readpreferred);
 
     PASS(NULL);
 }

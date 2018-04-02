@@ -16,6 +16,11 @@
 static const char SLOTS_CMD[] = "*2\r\n$7\r\nCLUSTER\r\n$5\r\nNODES\r\n";
 
 static int8_t in_progress = 0;
+/*
+ * Polling is required when a preferred node is not available.
+ * We need to poll cluster config to find out when node can be used.
+ */
+static int8_t polling_required = 0;
 static pthread_mutex_t job_mutex;
 static pthread_cond_t signal_cond;
 
@@ -79,6 +84,79 @@ static inline void node_map_free(struct dict *map)
         if (n->refcount <= 0) {
             cv_free(iter.value);
         }
+    }
+}
+
+/*
+ * For every slot, set the preferred_nodes list
+ * The nodes available for that slot are sorted such that the preferred nodes
+ * come first in the list.
+ */
+static void sort_nodes()
+{
+    bool invalid_found = false;
+    bool polling_changed =  false;
+    struct node_conf *preferred_nodes = config_get_preferred_node();
+    struct dict_iter iter = DICT_ITER_INITIALIZER;
+    DICT_FOREACH(&slot_map.node_map, &iter) {
+        struct node_info *n = iter.value;
+        struct node sorted_nodes[MAX_SLAVE_NODES + 1];
+        struct node remaining_nodes[MAX_SLAVE_NODES + 1];
+        int sorted_size = 0;
+        int remaining_size = 0;
+        for (int i = 0; i < preferred_nodes->len; i++) {
+            for (int j = 0; j < n->index; j++) {
+                // Build list of nodes that are in the preferred list
+                if (socket_cmp(&n->nodes[j].addr, &preferred_nodes->addr[i]) == 0) {
+                    if (n->nodes[j].available) {
+                        memcpy(&sorted_nodes[sorted_size], &n->nodes[j], sizeof(struct address));
+                        sorted_size++;
+                    } else {
+                        // A preferred node is not valid, set polling_required flag so that the cluster config
+                        // gets retrieved regulary in case preferred node becomes available again.
+                        invalid_found = true;
+                    }
+                }
+            }
+        }
+
+        // Add remaining nodes to list
+        for (int i = 0; i < n->index; i++) {
+            bool found = false;
+            if (!n->nodes[i].available) continue;
+
+            for (int j = 0; j < sorted_size; j++) {
+                if (socket_cmp(&n->nodes[i].addr, &sorted_nodes[j].addr) == 0) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                memcpy(&remaining_nodes[remaining_size], &n->nodes[i], sizeof(struct address));
+                remaining_size++;
+            }
+        }
+
+        // Copy sorted_nodes back to node_info structure
+        memcpy(&n->preferred_nodes[0], &sorted_nodes[0], sizeof(struct address) * sorted_size);
+        // Add remaining nodes to the end of list
+        memcpy(&n->preferred_nodes[sorted_size], &remaining_nodes[0], sizeof(struct address) * remaining_size);
+    }
+
+    if (invalid_found) {
+        LOG(INFO, "Unreachable preferred node found, polling required.");
+        // A preferred node has been found to be invalid, start polling for cluster config
+        // Only lock mutex if required
+        if (!polling_required) polling_changed = true;
+    } else if (polling_required) {
+        LOG(INFO, "Preferred nodes ok, polling stopped.");
+        polling_changed = true;
+    }
+
+    if (polling_changed) {
+       pthread_mutex_lock(&job_mutex);
+       polling_required = !polling_required;
+       pthread_mutex_unlock(&job_mutex);
     }
 }
 
@@ -203,6 +281,11 @@ int parse_cluster_nodes(struct redis_data *data)
             goto end;
         }
         bool is_master = d->parts[3].data[0] == '-';
+        /*
+         * A node is considered available (can be sent commands) if it is connected to the cluster
+         * and it's replying to PINGs
+         */
+        bool is_available = strcmp(d->parts[7].data, "connected") == 0 && d->parts[4].data[0] == '0';
         char *name = is_master ? d->parts[0].data : d->parts[3].data;
         struct node_info *node = dict_get(&slot_map.node_map, name);
         if (node == NULL) {
@@ -212,15 +295,23 @@ int parse_cluster_nodes(struct redis_data *data)
             dict_set(&slot_map.node_map, node->name, node);
         }
         if (is_master) {
-            socket_parse_addr(d->parts[1].data, &node->nodes[0]);
+            socket_parse_addr(d->parts[1].data, &node->nodes[0].addr);
+            node->nodes[0].available = is_available;
             node->slot_spec = d->parts;
             node->spec_length = d->index - 8;
         } else if (node->index <= MAX_SLAVE_NODES && (
                     strcasecmp(d->parts[2].data, "slave") == 0 ||
                     strcasecmp(d->parts[2].data, "myself,slave") == 0)) {
-            socket_parse_addr(d->parts[1].data, &node->nodes[node->index++]);
+            socket_parse_addr(d->parts[1].data, &node->nodes[node->index].addr);
+            node->nodes[node->index].available = is_available;
+            node->index++;
         }
     }
+
+    /*
+     * If readpreferred is set, nodes need to be sorted by preferrence.
+     */
+    if (config.readpreferred) sort_nodes();
 
     slot_count = parse_slots();
 
@@ -371,15 +462,25 @@ void do_job(struct context *ctx, int job)
 
 void *slot_manager(void *data)
 {
-    int job;
+    int job, ret;
     struct context *ctx = data;
+    struct timespec timeToWait;
 
     pthread_mutex_lock(&job_mutex);
     in_progress = 0;
 
     while (ctx->state != CTX_QUIT) {
         if (slot_job == SLOT_UPDATE_UNKNOWN) {
-            pthread_cond_wait(&signal_cond, &job_mutex);
+            if (polling_required) {
+                timeToWait.tv_sec = time(NULL) + config.polling_interval;
+                ret = pthread_cond_timedwait(&signal_cond, &job_mutex, &timeToWait);
+                /* If polling interval is over, retrieve cluster config */
+                if (ret == ETIMEDOUT) {
+                    slot_job = SLOT_UPDATE;
+                }
+            } else {
+                pthread_cond_wait(&signal_cond, &job_mutex);
+            }
             continue;
         }
 
