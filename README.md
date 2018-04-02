@@ -40,7 +40,7 @@ Requirements
 ------------
 
 * Linux >= 3.9
-* Redis <= 3.0.7 (For version up to/including 0.2.3)
+* Redis <= 4.0.2 (Since Corvus 0.2.7: Redis 4)
 
 Build
 -----
