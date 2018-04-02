@@ -17,3 +17,4 @@ corvus_test
 .cache
 tags
 src/tags
+*.patch
