@@ -30,7 +30,7 @@ Redis(3.0.3): 3 dedicated server with 60 nodes, in which 30 are masters.
 ## Tests
 
 Note: The following tests are carried out in extreme load, focused
-on how much load it can operate on, in disregard of service quanlity(return time).
+on how much load it can operate on, in disregard of service quality(return time).
 
 
 1. [set](redis_benchmarks/set.md)
